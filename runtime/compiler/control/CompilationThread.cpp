@@ -845,15 +845,14 @@ TR::CompilationInfoPerThread::getRemoteROMClassIfCached(J9Class *clazz)
    }
 
 J9ROMClass *
-TR::CompilationInfoPerThread::getAndCacheRemoteROMClass(J9Class *clazz, TR_Memory *trMemory)
+TR::CompilationInfoPerThread::getAndCacheRemoteROMClass(J9Class *clazz)
    {
    auto romClass = getRemoteROMClassIfCached(clazz);
    if (romClass == NULL)
       {
       JITServerHelpers::ClassInfoTuple classInfoTuple;
-      TR_Memory *currentMemory = trMemory ? trMemory : TR::comp()->trMemory();
-      romClass = JITServerHelpers::getRemoteROMClass(clazz, getStream(), currentMemory, &classInfoTuple);
-      romClass = JITServerHelpers::cacheRemoteROMClassOrFreeIt(getClientData(), clazz, romClass, &classInfoTuple, currentMemory->trPersistentMemory());
+      romClass = JITServerHelpers::getRemoteROMClass(clazz, getStream(), getClientData()->persistentMemory(), classInfoTuple);
+      romClass = JITServerHelpers::cacheRemoteROMClassOrFreeIt(getClientData(), clazz, romClass, classInfoTuple);
       TR_ASSERT_FATAL(romClass, "ROM class of J9Class=%p must be cached at this point", clazz);
       }
    return romClass;
@@ -1168,6 +1167,7 @@ TR::CompilationInfo::CompilationInfo(J9JITConfig *jitConfig) :
    _activationPolicy = JITServer::CompThreadActivationPolicy::AGGRESSIVE;
    _sharedROMClassCache = NULL;
    _JITServerAOTCacheMap = NULL;
+   _JITServerAOTDeserializer = NULL;
 #endif /* defined(J9VM_OPT_JITSERVER) */
    }
 
@@ -8568,6 +8568,9 @@ TR::CompilationInfoPerThreadBase::wrappedCompile(J9PortLibrary *portLib, void * 
             // Create the KOT by default at the server as long as it is not disabled at the client.
             compiler->getOrCreateKnownObjectTable();
             compiler->setClientData(that->getClientData());
+            compiler->setStream(that->_methodBeingCompiled->_stream);
+            auto compInfoPTRemote = static_cast<TR::CompilationInfoPerThreadRemote *>(that);
+            compiler->setAOTCacheStore(compInfoPTRemote->isAOTCacheStore());
             }
 #endif /* defined(J9VM_OPT_JITSERVER) */
 

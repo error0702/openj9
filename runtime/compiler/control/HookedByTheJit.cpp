@@ -402,18 +402,26 @@ static void jitHookInitializeSendTarget(J9HookInterface * * hook, UDATA eventNum
 
    method->methodRunAddress = jitGetCountingSendTarget(vmThread, method);
 
+   bool countInOptionSet = false;
+
    if (TR::Options::getJITCmdLineOptions()->anOptionSetContainsACountValue())
       {
       TR::OptionSet * optionSet = findOptionSet(method, false);
       if (optionSet)
+         {
          optionsJIT = optionSet->getOptions();
+         countInOptionSet = true;
+         }
       }
 
    if (TR::Options::getAOTCmdLineOptions()->anOptionSetContainsACountValue())
       {
       TR::OptionSet * optionSet = findOptionSet(method, true);
       if (optionSet)
+         {
          optionsAOT = optionSet->getOptions();
+         countInOptionSet = true;
+         }
       }
 
    int32_t count = -1; // means we didn't set the value yet
@@ -442,9 +450,10 @@ static void jitHookInitializeSendTarget(J9HookInterface * * hook, UDATA eventNum
          {
          // The default FE may not have TR_J9SharedCache object because the FE may have
          // been created before options were processed.
-         TR_J9SharedCache *sc = TR_J9VMBase::get(jitConfig, vmThread, TR_J9VMBase::AOT_VM)->sharedCache();
+         TR_J9VMBase *fej9 = TR_J9VMBase::get(jitConfig, vmThread, TR_J9VMBase::AOT_VM);
+         TR_J9SharedCache *sc = fej9 ? fej9->sharedCache() : NULL;
 #if defined(J9VM_INTERP_AOT_COMPILE_SUPPORT) && defined(J9VM_OPT_SHARED_CLASSES) && (defined(TR_HOST_X86) || defined(TR_HOST_POWER) || defined(TR_HOST_S390) || defined(TR_HOST_ARM) || defined(TR_HOST_ARM64))
-         if (TR_J9VMBase::get(jitConfig, vmThread, TR_J9VMBase::AOT_VM)->sharedCache()->isROMClassInSharedCache(J9_CLASS_FROM_METHOD(method)->romClass))
+         if (sc && sc->isROMClassInSharedCache(J9_CLASS_FROM_METHOD(method)->romClass))
             {
             PORT_ACCESS_FROM_JAVAVM(jitConfig->javaVM);
             I_64 sharedQueryTime = 0;
@@ -470,7 +479,7 @@ static void jitHookInitializeSendTarget(J9HookInterface * * hook, UDATA eventNum
                compInfo->incrementNumMethodsFoundInSharedCache();
                }
             // AOT Body not in SCC, so scount was not set
-            else if (!TR::Options::getCountsAreProvidedByUser())
+            else if (!TR::Options::getCountsAreProvidedByUser() && !countInOptionSet)
                {
                bool useLowerCountsForAOTCold = false;
                if (TR::Options::getCmdLineOptions()->getOption(TR_LowerCountsForAotCold) && compInfo->isWarmSCC() == TR_no)
@@ -1816,7 +1825,7 @@ static void jitHookPrepareRestore(J9HookInterface * * hookInterface, UDATA event
       jitConfig->targetProcessor = TR::Compiler->target.cpu.getProcessorDescription();
       }
    }
-#endif
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
 
 #if defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING)
 static void jitHookClassesUnload(J9HookInterface * * hookInterface, UDATA eventNum, void * eventData, void * userData)
@@ -2119,7 +2128,7 @@ static void jitHookClassUnload(J9HookInterface * * hookInterface, UDATA eventNum
       compInfo->getUnloadedClassesTempList()->push_back(clazz);
       // Loop through the set to find the class that needs to be purged.
       // Once found erase from the set.
-      compInfo->getclassesCachedAtServer().erase(unloadedEvent->clazz);      
+      compInfo->getclassesCachedAtServer().erase(unloadedEvent->clazz);
       if (auto deserializer = compInfo->getJITServerAOTDeserializer())
          deserializer->invalidateClass(vmThread, j9clazz);
       }
@@ -5152,7 +5161,7 @@ static void DoCalculateOverallCompCPUUtilization(TR::CompilationInfo *compInfo, 
          const CpuSelfThreadUtilization& cpuUtil = arrayOfCompInfoPT[i]->getCompThreadCPU();
          TR_VerboseLog::write(" compThr%d:%3d%% (%2d%%, %2d%%) ", i, cpuUtilizationValues[i], cpuUtil.getThreadLastCpuUtil(), cpuUtil.getThreadPrevCpuUtil());
          if (TR::Options::getCmdLineOptions()->getVerboseOption(TR_VerboseCompilationThreadsDetails))
-            TR_VerboseLog::write("(%dms, %dms, lastCheckpoint=%u) ", 
+            TR_VerboseLog::write("(%dms, %dms, lastCheckpoint=%u) ",
                static_cast<int32_t>(cpuUtil.getLastMeasurementInterval()) / 1000000,
                static_cast<int32_t>(cpuUtil.getSecondLastMeasurementInterval()) / 1000000,
                cpuUtil.getLowResolutionClockAtLastUpdate());
@@ -5396,7 +5405,7 @@ static void iProfilerActivationLogic(J9JITConfig * jitConfig, TR::CompilationInf
          TR_J9VMBase *fej9 = (TR_J9VMBase *)(TR_J9VMBase::get(jitConfig, 0));
          TR_IProfiler *iProfiler = fej9->getIProfiler();
          TR::PersistentInfo *persistentInfo = compInfo->getPersistentInfo();
-         if (iProfiler 
+         if (iProfiler
             && iProfiler->getProfilerMemoryFootprint() < TR::Options::_iProfilerMemoryConsumptionLimit
 #if defined(J9VM_OPT_JITSERVER)
             && compInfo->getPersistentInfo()->getRemoteCompilationMode() != JITServer::SERVER
@@ -6556,7 +6565,7 @@ int32_t setUpHooks(J9JavaVM * javaVM, J9JITConfig * jitConfig, TR_FrontEnd * vm)
 
    jitConfig->samplerMonitor = NULL; // initialize this field just in case
    compInfo->setSamplingThreadLifetimeState(TR::CompilationInfo::SAMPLE_THR_NOT_CREATED); // just in case
-   if (jitConfig->samplingFrequency 
+   if (jitConfig->samplingFrequency
       && !vmj9->isAOT_DEPRECATED_DO_NOT_USE()
 #if defined(J9VM_OPT_JITSERVER)
       && compInfo->getPersistentInfo()->getRemoteCompilationMode() != JITServer::SERVER
@@ -6570,7 +6579,6 @@ int32_t setUpHooks(J9JavaVM * javaVM, J9JITConfig * jitConfig, TR_FrontEnd * vm)
          }
 
       j9thread_monitor_init_with_name(&(jitConfig->samplerMonitor), 0, "JIT sampling thread");
-
 
       if (jitConfig->samplerMonitor)
          {
@@ -6799,7 +6807,7 @@ int32_t setUpHooks(J9JavaVM * javaVM, J9JITConfig * jitConfig, TR_FrontEnd * vm)
       j9tty_printf(PORTLIB, "Error: Unable to register CRIU hook\n");
       return -1;
       }
-#endif
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
 
    if (!vmj9->isAOT_DEPRECATED_DO_NOT_USE()
 #if defined(J9VM_OPT_JITSERVER)

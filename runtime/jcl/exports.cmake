@@ -140,8 +140,6 @@ omr_add_exports(jclse
 	Java_com_ibm_jit_JITHelpers_j9ThreadJ9JavaVMOffset
 	Java_com_ibm_jit_JITHelpers_javaLangClassJ9ClassOffset
 	Java_com_ibm_jit_JITHelpers_javaLangThreadJ9ThreadOffset
-	Java_com_ibm_jit_JITHelpers_objectHeaderHasBeenHashedInClass
-	Java_com_ibm_jit_JITHelpers_objectHeaderHasBeenMovedInClass
 	Java_com_ibm_jvm_Dump_HeapDumpImpl
 	Java_com_ibm_jvm_Dump_JavaDumpImpl
 	Java_com_ibm_jvm_Dump_SnapDumpImpl
@@ -334,6 +332,7 @@ omr_add_exports(jclse
 	Java_java_lang_Class_getVirtualMethodCountImpl
 	Java_java_lang_Class_getVirtualMethodsImpl
 	Java_java_lang_Class_isClassADeclaredClass
+	Java_java_lang_Class_isClassAnEnclosedClass
 	Java_java_lang_Class_isCircularDeclaringClass
 	Java_java_lang_Class_getRecordComponentsImpl
 	Java_java_lang_Class_permittedSubclassesImpl
@@ -345,7 +344,7 @@ omr_add_exports(jclse
 	Java_java_lang_J9VMInternals_dumpString
 	Java_java_lang_J9VMInternals_getStackTrace
 	Java_java_lang_J9VMInternals_newInstance
-	Java_java_lang_System_getEncoding
+	Java_java_lang_System_getSysPropBeforePropertiesInitialized
 	Java_java_lang_System_getPropertyList
 	Java_java_lang_System_mapLibraryName
 	Java_java_lang_System_rasInitializeVersion
@@ -588,6 +587,7 @@ if(NOT JAVA_SPEC_VERSION LESS 11)
 		Java_java_lang_Class_getNestHostImpl
 		Java_java_lang_Class_getNestMembersImpl
 		Java_java_lang_invoke_MethodHandleResolver_getCPConstantDynamicAt
+		Java_java_lang_System_initJCLPlatformEncoding
 	)
 endif()
 
@@ -612,13 +612,6 @@ if(NOT JAVA_SPEC_VERSION LESS 16)
 		Java_jdk_internal_misc_ScopedMemoryAccess_closeScope0
 		Java_jdk_internal_vm_vector_VectorSupport_registerNatives
 		Java_jdk_internal_vm_vector_VectorSupport_getMaxLaneCount
-	)
-endif()
-
-# java 18+
-if(NOT JAVA_SPEC_VERSION LESS 18)
-	omr_add_exports(jclse
-		Java_java_lang_System_getSysPropBeforePropertiesInitialized
 	)
 endif()
 

@@ -5363,16 +5363,6 @@ TR_J9ByteCodeIlGenerator::loadStatic(int32_t cpIndex)
             loadConstant(TR::iconst, (int32_t)fej9->getOffsetOfJ9ObjectJ9Class());
             return;
             }
-         case TR::Symbol::Com_ibm_jit_JITHelpers_OBJECT_HEADER_HAS_BEEN_MOVED_IN_CLASS:
-            {
-            loadConstant(TR::iconst, (int32_t)fej9->getObjectHeaderHasBeenMovedInClass());
-            return;
-            }
-         case TR::Symbol::Com_ibm_jit_JITHelpers_OBJECT_HEADER_HAS_BEEN_HASHED_IN_CLASS:
-            {
-            loadConstant(TR::iconst, (int32_t)fej9->getObjectHeaderHasBeenHashedInClass());
-            return;
-            }
          case TR::Symbol::Com_ibm_jit_JITHelpers_J9OBJECT_FLAGS_MASK32:
             {
             loadConstant(TR::iconst, (int32_t)fej9->getJ9ObjectFlagsMask32());
@@ -6006,10 +5996,7 @@ TR_J9ByteCodeIlGenerator::loadFromCP(TR::DataType type, int32_t cpIndex)
             }
          else if (method()->isClassConstant(cpIndex))
             {
-            if (TR::Compiler->cls.classesOnHeap())
-               loadClassObjectAndIndirect(cpIndex);
-            else
-               loadClassObject(cpIndex);
+            loadClassObjectAndIndirect(cpIndex);
             }
          else if (method()->isStringConstant(cpIndex))
             {
@@ -6191,7 +6178,7 @@ TR_J9ByteCodeIlGenerator::genMonitorEnter()
 
    bool isStatic = (node->getOpCodeValue() == TR::loadaddr && node->getSymbol()->isClassObject());
 
-   if (isStatic && TR::Compiler->cls.classesOnHeap())
+   if (isStatic)
       node = TR::Node::createWithSymRef(TR::aloadi, 1, 1, node, symRefTab()->findOrCreateJavaLangClassFromClassSymbolRef());
 
    TR::Node *loadNode = node;
@@ -6240,7 +6227,7 @@ TR_J9ByteCodeIlGenerator::genMonitorExit(bool isReturn)
    bool isStatic = (node->getOpCodeValue() == TR::loadaddr && node->getSymbol()->isClassObject());
    ///bool isStatic = _methodSymbol->isStatic();
 
-   if (isStatic && TR::Compiler->cls.classesOnHeap())
+   if (isStatic)
       node = TR::Node::createWithSymRef(TR::aloadi, 1, 1, node, symRefTab()->findOrCreateJavaLangClassFromClassSymbolRef());
 
    if (!comp()->getOption(TR_DisableLiveMonitorMetadata))
@@ -7340,12 +7327,9 @@ TR_J9ByteCodeIlGenerator::storeStatic(int32_t cpIndex)
       void * staticClass = method()->classOfStatic(cpIndex);
       loadSymbol(TR::loadaddr, symRefTab()->findOrCreateClassSymbol(_methodSymbol, cpIndex, staticClass, true /* cpIndexOfStatic */));
 
-      if (TR::Compiler->cls.classesOnHeap())
-         {
-         node = pop();
-         node = TR::Node::createWithSymRef(TR::aloadi, 1, 1, node, symRefTab()->findOrCreateJavaLangClassFromClassSymbolRef());
-         push(node);
-         }
+      node = pop();
+      node = TR::Node::createWithSymRef(TR::aloadi, 1, 1, node, symRefTab()->findOrCreateJavaLangClassFromClassSymbolRef());
+      push(node);
 
       node = TR::Node::createWithSymRef(comp()->il.opCodeForDirectWriteBarrier(type), 2, 2, value, pop(), symRef);
       }

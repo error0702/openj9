@@ -1034,8 +1034,6 @@ UDATA TR_J9VMBase::getOffsetOfArrayClassRomPtrField()               {return offs
 UDATA TR_J9VMBase::getOffsetOfClassRomPtrField()                    {return offsetof(J9Class, romClass);}
 UDATA TR_J9VMBase::getOffsetOfClassInitializeStatus()               {return offsetof(J9Class, initializeStatus);}
 UDATA TR_J9VMBase::getOffsetOfJ9ObjectJ9Class()                     {return offsetof(J9Object, clazz);}
-UDATA TR_J9VMBase::getObjectHeaderHasBeenMovedInClass()             {return OBJECT_HEADER_HAS_BEEN_MOVED_IN_CLASS;}
-UDATA TR_J9VMBase::getObjectHeaderHasBeenHashedInClass()            {return OBJECT_HEADER_HAS_BEEN_HASHED_IN_CLASS;}
 UDATA TR_J9VMBase::getJ9ObjectFlagsMask32()                         {return (J9_REQUIRED_CLASS_ALIGNMENT - 1);}
 UDATA TR_J9VMBase::getJ9ObjectFlagsMask64()                         {return (J9_REQUIRED_CLASS_ALIGNMENT - 1);}
 UDATA TR_J9VMBase::getOffsetOfJ9ThreadJ9VM()                        {return offsetof(J9VMThread, javaVM);}
@@ -6279,9 +6277,10 @@ TR_J9VMBase::canAllocateInlineClass(TR_OpaqueClassBlock *clazzOffset)
    if (clazz->initializeStatus != 1)
       return false;
 
-   // Can not inline the allocation if the class is an interface, abstract or identityless
-   // (a value type) or if it is a class with identityless fields
-   if ((clazz->romClass->modifiers & (J9AccAbstract | J9AccInterface | J9AccValueType))
+   // Can not inline the allocation if the class is an interface, abstract,
+   // or if it is a class with identityless fields that aren't flattened because
+   // they have to be made to refer to their type's default values
+   if ((clazz->romClass->modifiers & (J9AccAbstract | J9AccInterface))
        || (clazz->classFlags & J9ClassContainsUnflattenedFlattenables))
       return false;
    return true;
@@ -7467,16 +7466,8 @@ TR_J9VM::transformJavaLangClassIsArrayOrIsPrimitive(TR::Compilation * comp, TR::
 
    TR::Node * vftFieldInd;
 
-   if (TR::Compiler->cls.classesOnHeap())
-      {
-      vftFieldInd = TR::Node::createWithSymRef(TR::aloadi, 1, 1, vftField, comp->getSymRefTab()->findOrCreateClassFromJavaLangClassSymbolRef());
-      isArrayField = TR::Node::createWithSymRef(TR::aloadi, 1, 1,vftFieldInd,symRefTab->findOrCreateClassRomPtrSymbolRef());
-      }
-   else
-      {
-      isArrayField = TR::Node::createWithSymRef(TR::aloadi, 1, 1,vftField,symRefTab->findOrCreateClassRomPtrSymbolRef());
-      vftFieldInd  = isArrayField; //pkalle
-      }
+   vftFieldInd = TR::Node::createWithSymRef(TR::aloadi, 1, 1, vftField, comp->getSymRefTab()->findOrCreateClassFromJavaLangClassSymbolRef());
+   isArrayField = TR::Node::createWithSymRef(TR::aloadi, 1, 1,vftFieldInd,symRefTab->findOrCreateClassRomPtrSymbolRef());
 
    if (treeTop->getNode()->getOpCode().isNullCheck())
       {
@@ -7621,10 +7612,7 @@ TR_J9VM::inlineNativeCall(TR::Compilation * comp, TR::TreeTop * callNodeTreeTop,
       case TR::java_lang_Object_getClass:
          TR::Node::recreate(callNode, TR::aloadi);
          callNode->setSymbolReference(comp->getSymRefTab()->findOrCreateVftSymbolRef());
-         if (TR::Compiler->cls.classesOnHeap())
-            {
-            callNode = TR::Node::createWithSymRef(TR::aloadi, 1, 1, callNode, comp->getSymRefTab()->findOrCreateJavaLangClassFromClassSymbolRef());
-            }
+         callNode = TR::Node::createWithSymRef(TR::aloadi, 1, 1, callNode, comp->getSymRefTab()->findOrCreateJavaLangClassFromClassSymbolRef());
          return callNode;
 
       // Note: these cases are not tested and thus are commented out:
@@ -7749,10 +7737,7 @@ TR_J9VM::inlineNativeCall(TR::Compilation * comp, TR::TreeTop * callNodeTreeTop,
                callNode->removeAllChildren();
                TR::SymbolReference *callerClassSymRef = comp->getSymRefTab()->findOrCreateClassSymbol(comp->getMethodSymbol(), -1, convertClassPtrToClassOffset(callerClass));
                callNode->setSymbolReference(callerClassSymRef);
-               if (TR::Compiler->cls.classesOnHeap())
-                  {
-                  callNode = TR::Node::createWithSymRef(TR::aloadi, 1, 1, callNode, comp->getSymRefTab()->findOrCreateJavaLangClassFromClassSymbolRef());
-                  }
+               callNode = TR::Node::createWithSymRef(TR::aloadi, 1, 1, callNode, comp->getSymRefTab()->findOrCreateJavaLangClassFromClassSymbolRef());
                }
             }
          else
@@ -8397,18 +8382,13 @@ TR_J9VM::getClassClassPointer(TR_OpaqueClassBlock *objectClassPointer)
    J9Class *j9class;
    j9class = TR::Compiler->cls.convertClassOffsetToClassPtr(objectClassPointer);
 
-   if (TR::Compiler->cls.classesOnHeap())
-      {
-      void *javaLangClass = J9VM_J9CLASS_TO_HEAPCLASS(TR::Compiler->cls.convertClassOffsetToClassPtr(objectClassPointer));
+   void *javaLangClass = J9VM_J9CLASS_TO_HEAPCLASS(TR::Compiler->cls.convertClassOffsetToClassPtr(objectClassPointer));
 
-      // j9class points to the J9Class corresponding to java/lang/Object
-      if (TR::Compiler->om.generateCompressedObjectHeaders())
-         j9class = (J9Class *)(uintptr_t) *((uint32_t *) ((uintptr_t) javaLangClass + (uintptr_t) TR::Compiler->om.offsetOfObjectVftField()));
-      else
-         j9class = (J9Class *)(*((J9Class **) ((uintptr_t) javaLangClass + (uintptr_t) TR::Compiler->om.offsetOfObjectVftField())));
-      }
+   // j9class points to the J9Class corresponding to java/lang/Object
+   if (TR::Compiler->om.generateCompressedObjectHeaders())
+      j9class = (J9Class *)(uintptr_t) *((uint32_t *) ((uintptr_t) javaLangClass + (uintptr_t) TR::Compiler->om.offsetOfObjectVftField()));
    else
-      j9class = (J9Class *)(*((J9Class **) ((uintptr_t)j9class + (uintptr_t) TR::Compiler->om.offsetOfObjectVftField())));
+      j9class = (J9Class *)(*((J9Class **) ((uintptr_t) javaLangClass + (uintptr_t) TR::Compiler->om.offsetOfObjectVftField())));
 
    j9class = (J9Class *)((uintptr_t)j9class & TR::Compiler->om.maskOfObjectVftField());
 
@@ -9367,7 +9347,7 @@ bool
 TR_J9SharedCacheVM::canRememberClass(TR_OpaqueClassBlock *classPtr)
    {
    if (_sharedCache)
-      return (_sharedCache->rememberClass((J9Class *) classPtr, false) != NULL);
+      return (_sharedCache->rememberClass((J9Class *)classPtr, NULL, false) != NULL);
    return false;
    }
 
@@ -9453,9 +9433,9 @@ TR_J9VMBase::inSnapshotMode()
    {
 #if defined(J9VM_OPT_CRIU_SUPPORT)
    return getJ9JITConfig()->javaVM->internalVMFunctions->isCheckpointAllowed(vmThread());
-#else
+#else /* defined(J9VM_OPT_CRIU_SUPPORT) */
    return false;
-#endif
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
    }
 
 
@@ -9467,7 +9447,7 @@ JIT_HELPER(initialInvokeExactThunkGlue);
 JIT_HELPER(_initialInvokeExactThunkGlue);
 #endif
 
-JNIEXPORT jlong JNICALL Java_java_lang_invoke_ThunkTuple_initialInvokeExactThunk
+jlong JNICALL Java_java_lang_invoke_ThunkTuple_initialInvokeExactThunk
    (JNIEnv *env, jclass clazz)
    {
 #if defined(J9ZOS390)
@@ -9485,7 +9465,7 @@ JNIEXPORT jlong JNICALL Java_java_lang_invoke_ThunkTuple_initialInvokeExactThunk
  * (private interface method, methods in Object) have been adapted away by the java code, so this
  * native only ever deals with iTable interface methods.
  */
-JNIEXPORT jint JNICALL Java_java_lang_invoke_InterfaceHandle_convertITableIndexToVTableIndex
+jint JNICALL Java_java_lang_invoke_InterfaceHandle_convertITableIndexToVTableIndex
   (JNIEnv *env, jclass InterfaceMethodHandle, jlong interfaceArg, jint itableIndex, jlong receiverClassArg)
    {
    J9Class  *interfaceClass = (J9Class*)(intptr_t)interfaceArg;
@@ -9518,12 +9498,7 @@ JNIEXPORT jint JNICALL Java_java_lang_invoke_InterfaceHandle_convertITableIndexT
    }
 
 
-extern "C" {
-JNIEXPORT void JNICALL Java_java_lang_invoke_MutableCallSite_invalidate
-  (JNIEnv *env, jclass MutableCallSite, jlongArray cookieArrayObject);
-}
-
-JNIEXPORT void JNICALL Java_java_lang_invoke_MutableCallSite_invalidate
+void JNICALL Java_java_lang_invoke_MutableCallSite_invalidate
   (JNIEnv *env, jclass MutableCallSite, jlongArray cookieArrayObject)
    {
    J9VMThread          *vmThread  = (J9VMThread*)env;
