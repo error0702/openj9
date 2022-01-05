@@ -98,6 +98,9 @@ isPrivilegedFrameIterator(J9VMThread * currentThread, J9StackWalkState * walkSta
 	if (NULL == walkState->userData2) {
 		J9Class * currentClass = J9_CLASS_FROM_CP(walkState->constantPool);
 		if ((walkState->method == vm->jlrMethodInvoke)
+#if JAVA_SPEC_VERSION >= 18
+			|| (walkState->method == vm->jlrMethodInvokeMH)
+#endif /* JAVA_SPEC_VERSION >= 18 */
 			|| (walkState->method == vm->jliMethodHandleInvokeWithArgs)
 			|| (walkState->method == vm->jliMethodHandleInvokeWithArgsList)
 			|| (vm->srMethodAccessor && VM_VMHelpers::isSameOrSuperclass(J9VM_J9CLASS_FROM_JCLASS(currentThread, vm->srMethodAccessor), currentClass))
@@ -1181,11 +1184,13 @@ done:
 	return result;
 }
 
+#if JAVA_SPEC_VERSION >= 14
 jarray JNICALL
 Java_java_lang_Class_getRecordComponentsImpl(JNIEnv *env, jobject cls)
 {
 	return getRecordComponentsHelper(env, cls);
 }
+#endif /* JAVA_SPEC_VERSION >= 14 */
 
 jarray JNICALL
 Java_java_lang_Class_permittedSubclassesImpl(JNIEnv *env, jobject cls)
@@ -1266,6 +1271,9 @@ isPrivilegedFrameIteratorGetAccSnapshot(J9VMThread * currentThread, J9StackWalkS
 		/* find the callers of each doPrivileged method */
 		J9Class * currentClass = J9_CLASS_FROM_CP(walkState->constantPool);
 		if ((walkState->method == vm->jlrMethodInvoke)
+#if JAVA_SPEC_VERSION >= 18
+			|| (walkState->method == vm->jlrMethodInvokeMH)
+#endif /* JAVA_SPEC_VERSION >= 18 */
 			|| (walkState->method == vm->jliMethodHandleInvokeWithArgs)
 			|| (walkState->method == vm->jliMethodHandleInvokeWithArgsList)
 			|| (vm->srMethodAccessor && VM_VMHelpers::isSameOrSuperclass(J9VM_J9CLASS_FROM_JCLASS(currentThread, vm->srMethodAccessor), currentClass))
@@ -1687,6 +1695,9 @@ isPrivilegedFrameIteratorGetCallerPD(J9VMThread * currentThread, J9StackWalkStat
 	J9JavaVM *vm = currentThread->javaVM;
 	J9Class * currentClass = J9_CLASS_FROM_CP(walkState->constantPool);
 	if ((walkState->method == vm->jlrMethodInvoke)
+#if JAVA_SPEC_VERSION >= 18
+		|| (walkState->method == vm->jlrMethodInvokeMH)
+#endif /* JAVA_SPEC_VERSION >= 18 */
 		|| (walkState->method == vm->jliMethodHandleInvokeWithArgs)
 		|| (walkState->method == vm->jliMethodHandleInvokeWithArgsList)
 		|| (vm->srMethodAccessor && VM_VMHelpers::isSameOrSuperclass(J9VM_J9CLASS_FROM_JCLASS(currentThread, vm->srMethodAccessor), currentClass))

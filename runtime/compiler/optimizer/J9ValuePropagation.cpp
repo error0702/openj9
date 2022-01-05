@@ -1370,6 +1370,7 @@ J9::ValuePropagation::constrainRecognizedMethod(TR::Node *node)
                }
             break;
             }
+#if defined(J9VM_OPT_METHOD_HANDLE)
          case TR::java_lang_invoke_PrimitiveHandle_initializeClassIfRequired:
             {
             TR::Node* mh = node->getArgument(0);
@@ -1414,6 +1415,7 @@ J9::ValuePropagation::constrainRecognizedMethod(TR::Node *node)
                }
             break;
             }
+#endif /* defined(J9VM_OPT_METHOD_HANDLE) */
          case TR::java_lang_invoke_DirectHandle_nullCheckIfRequired:
             {
             TR::Node* mh = node->getArgument(0);
@@ -2322,10 +2324,13 @@ J9::ValuePropagation::innerConstrainAcall(TR::Node *node)
          method->getRecognizedMethod() == TR::jdk_internal_vm_vector_VectorSupport_binaryOp;
          bool isVectorSupportBroadcastCoerced =
          method->getRecognizedMethod() == TR::jdk_internal_vm_vector_VectorSupport_broadcastCoerced;
+         bool isVectorSupportUnaryOp =
+         method->getRecognizedMethod() == TR::jdk_internal_vm_vector_VectorSupport_unaryOp;
 
          if (isVectorSupportLoad ||
              isVectorSupportBinaryOp ||
-             isVectorSupportBroadcastCoerced)
+             isVectorSupportBroadcastCoerced ||
+             isVectorSupportUnaryOp)
             {
             bool isGlobal; // dummy
             int typeChildIndex = (isVectorSupportLoad || isVectorSupportBroadcastCoerced) ? 0 : 1;
@@ -2379,7 +2384,8 @@ J9::ValuePropagation::innerConstrainAcall(TR::Node *node)
                   {
                   newTypeConstraint = TR::VPFixedClass::create(this, constraint->getClass());
 
-                  if (!comp()->compileRelocatableCode())
+                  if (!comp()->compileRelocatableCode()
+                      && comp()->getOSRMode() != TR::involuntaryOSR)
                      {
                      if (constraint->getClassType()
                          && constraint->getClassType()->isArray() == TR_no
@@ -2405,28 +2411,32 @@ J9::ValuePropagation::innerConstrainAcall(TR::Node *node)
                          && constraint->getClassType()->asResolvedClass() )
                   {
                   newTypeConstraint = TR::VPResolvedClass::create(this, constraint->getClass());
-                  if (trace())
-                     traceMsg(comp(), "Object Clone: Resolved Class of node %p \n", node);
-                  if (enableDynamicObjectClone
-                      && constraint->getClassType()->isArray() == TR_no
-                      && !_objectCloneCalls.find(_curTree))
+                  if (!comp()->compileRelocatableCode()
+                      && comp()->getOSRMode() != TR::involuntaryOSR)
                      {
                      if (trace())
-                        traceMsg(comp(), "Object Clone: Resolved Class of node %p object clone\n", node);
-                     _objectCloneCalls.add(_curTree);
-                     _objectCloneTypes.add(new (trStackMemory()) OMR::ValuePropagation::ObjCloneInfo(constraint->getClass(), false));
-                     }
-                  // Currently enabled for X86 as the required codegen support is implemented on X86 only.
-                  // Remove the condition as other platforms receive support.
-                  else if (comp()->cg()->getSupportsDynamicANewArray()
-                      && constraint->getClassType()->isArray() == TR_yes
-                      && !_arrayCloneCalls.find(_curTree)
-                      && !comp()->generateArraylets())
-                     {
-                     if (trace())
-                        traceMsg(comp(), "Object Clone: Resolved Class of node %p array clone\n", node);
-                     _arrayCloneCalls.add(_curTree);
-                     _arrayCloneTypes.add(new (trStackMemory()) OMR::ValuePropagation::ArrayCloneInfo(constraint->getClass(), false));
+                        traceMsg(comp(), "Object Clone: Resolved Class of node %p \n", node);
+                     if (enableDynamicObjectClone
+                         && constraint->getClassType()->isArray() == TR_no
+                         && !_objectCloneCalls.find(_curTree))
+                        {
+                        if (trace())
+                           traceMsg(comp(), "Object Clone: Resolved Class of node %p object clone\n", node);
+                        _objectCloneCalls.add(_curTree);
+                        _objectCloneTypes.add(new (trStackMemory()) OMR::ValuePropagation::ObjCloneInfo(constraint->getClass(), false));
+                        }
+                     // Currently enabled for X86 as the required codegen support is implemented on X86 only.
+                     // Remove the condition as other platforms receive support.
+                     else if (comp()->cg()->getSupportsDynamicANewArray()
+                         && constraint->getClassType()->isArray() == TR_yes
+                         && !_arrayCloneCalls.find(_curTree)
+                         && !comp()->generateArraylets())
+                        {
+                        if (trace())
+                           traceMsg(comp(), "Object Clone: Resolved Class of node %p array clone\n", node);
+                        _arrayCloneCalls.add(_curTree);
+                        _arrayCloneTypes.add(new (trStackMemory()) OMR::ValuePropagation::ArrayCloneInfo(constraint->getClass(), false));
+                        }
                      }
                   }
 #endif

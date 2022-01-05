@@ -23,7 +23,7 @@
 -->
 
 <!DOCTYPE suite SYSTEM "http://testng.org/testng-1.0.dtd">
-<suite name="Java16andUp suite" parallel="none" verbose="2">
+<suite name="Java17andUp test suite" parallel="none" verbose="2">
 	<test name="Jep389Tests_testClinkerFfi">
 		<classes>
 			<class name="org.openj9.test.jep389.downcall.InvalidDownCallTests"/>

@@ -881,12 +881,51 @@ Java_java_lang_invoke_MethodHandleNatives_resolve(JNIEnv *env, jclass clazz, job
 					vmindex = (jlong)(UDATA)methodID;
 					target = (jlong)(UDATA)method;
 
-					new_clazz = J9VM_J9CLASS_TO_HEAPCLASS(J9_CLASS_FROM_METHOD(method));
-
 					J9ROMMethod *romMethod = J9_ROM_METHOD_FROM_RAM_METHOD(methodID->method);
-					new_flags = flags | (romMethod->modifiers & CFR_METHOD_ACCESS_MASK);
-					if (J9_ARE_ANY_BITS_SET(romMethod->modifiers, J9AccMethodCallerSensitive)) {
+					J9UTF8 *methodName = J9ROMMETHOD_NAME(romMethod);
+					U_32 methodModifiers = romMethod->modifiers;
+					new_clazz = J9VM_J9CLASS_TO_HEAPCLASS(J9_CLASS_FROM_METHOD(method));
+					new_flags = methodModifiers & CFR_METHOD_ACCESS_MASK;
+
+					if (J9_ARE_ANY_BITS_SET(methodModifiers, J9AccMethodCallerSensitive)) {
 						new_flags |= MN_CALLER_SENSITIVE;
+					}
+
+					if (J9_ARE_ALL_BITS_SET(flags, MN_IS_METHOD)) {
+						new_flags |= MN_IS_METHOD;
+						if (MH_REF_INVOKEINTERFACE == ref_kind) {
+							Assert_JCL_true(J9_ARE_NO_BITS_SET(methodModifiers, J9AccStatic));
+							if (J9_ARE_ALL_BITS_SET(methodID->vTableIndex, J9_JNI_MID_INTERFACE)) {
+								new_flags |= MH_REF_INVOKEINTERFACE << MN_REFERENCE_KIND_SHIFT;
+							} else if (!J9ROMMETHOD_HAS_VTABLE(romMethod)) {
+								new_flags |= MH_REF_INVOKESPECIAL << MN_REFERENCE_KIND_SHIFT;
+							} else {
+								new_flags |= MH_REF_INVOKEVIRTUAL << MN_REFERENCE_KIND_SHIFT;
+							}
+						} else if (MH_REF_INVOKESPECIAL == ref_kind) {
+							Assert_JCL_true(J9_ARE_NO_BITS_SET(methodModifiers, J9AccStatic));
+							new_flags |= MH_REF_INVOKESPECIAL << MN_REFERENCE_KIND_SHIFT;
+						} else if (MH_REF_INVOKESTATIC == ref_kind) {
+							Assert_JCL_true(J9_ARE_ALL_BITS_SET(methodModifiers, J9AccStatic));
+							new_flags |= MH_REF_INVOKESTATIC << MN_REFERENCE_KIND_SHIFT;
+						} else if (MH_REF_INVOKEVIRTUAL == ref_kind) {
+							Assert_JCL_true(J9_ARE_NO_BITS_SET(methodModifiers, J9AccStatic));
+							if (!J9ROMMETHOD_HAS_VTABLE(romMethod)) {
+								new_flags |= MH_REF_INVOKESPECIAL << MN_REFERENCE_KIND_SHIFT;
+							} else {
+								if (J9_ARE_ALL_BITS_SET(methodID->vTableIndex, J9_JNI_MID_INTERFACE)) {
+									new_clazz = J9VM_J9CLASS_TO_HEAPCLASS(resolvedClass);
+								}
+								new_flags |= MH_REF_INVOKEVIRTUAL << MN_REFERENCE_KIND_SHIFT;
+							}
+						} else {
+							Assert_JCL_unreachable();
+						}
+					} else if (J9_ARE_NO_BITS_SET(methodModifiers, J9AccStatic) && ('<' == (char)*J9UTF8_DATA(methodName))) {
+						new_flags |= MN_IS_CONSTRUCTOR;
+						new_flags |= MH_REF_INVOKESPECIAL << MN_REFERENCE_KIND_SHIFT;
+					} else {
+						Assert_JCL_unreachable();
 					}
 				}
 			} if (J9_ARE_ANY_BITS_SET(flags, MN_IS_FIELD)) {
@@ -1008,7 +1047,7 @@ Java_java_lang_invoke_MethodHandleNatives_resolve(JNIEnv *env, jclass clazz, job
 				J9OBJECT_U64_STORE(currentThread, membernameObject, vm->vmindexOffset, (U_64)vmindex);
 				J9OBJECT_U64_STORE(currentThread, membernameObject, vm->vmtargetOffset, (U_64)target);
 
-				Trc_JCL_java_lang_invoke_MethodHandleNatives_resolve_resolved(env, vmindex, target, new_clazz, flags);
+				Trc_JCL_java_lang_invoke_MethodHandleNatives_resolve_resolved(env, vmindex, target, new_clazz, new_flags);
 
 				result = vmFuncs->j9jni_createLocalRef(env, membernameObject);
 			}
@@ -1507,27 +1546,27 @@ Java_java_lang_invoke_MethodHandleNatives_getMemberVMInfo(JNIEnv *env, jclass cl
 					vmindex = ((J9JNIFieldID*)vmindex)->offset;
 					target = J9VMJAVALANGINVOKEMEMBERNAME_CLAZZ(currentThread, membernameObject);
 				} else {
-					J9JNIMethodID *methodID = (J9JNIMethodID*)vmindex;
-					if (J9_ARE_ANY_BITS_SET(methodID->vTableIndex, J9_JNI_MID_INTERFACE)) {
-						/* vmindex points to an iTable index. */
-						vmindex = methodID->vTableIndex & ~J9_JNI_MID_INTERFACE;
-					} else if (0 == methodID->vTableIndex) {
-						jint refKind = (flags >> MN_REFERENCE_KIND_SHIFT) & MN_REFERENCE_KIND_MASK;
-						if ((MH_REF_INVOKEVIRTUAL == refKind) || (MH_REF_INVOKEINTERFACE == refKind)) {
+					jint refKind = (flags >> MN_REFERENCE_KIND_SHIFT) & MN_REFERENCE_KIND_MASK;
+					if ((MH_REF_INVOKEVIRTUAL == refKind) || (MH_REF_INVOKEINTERFACE == refKind)) {
+						J9JNIMethodID *methodID = (J9JNIMethodID*)vmindex;
+						if (J9_ARE_ANY_BITS_SET(methodID->vTableIndex, J9_JNI_MID_INTERFACE)) {
+							/* vmindex points to an iTable index. */
+							vmindex = (jlong)(methodID->vTableIndex & ~J9_JNI_MID_INTERFACE);
+						} else if (0 == methodID->vTableIndex) {
 							/* initializeMethodID will set J9JNIMethodID->vTableIndex to 0 for private interface
 							 * methods and j.l.Object methods. Reference implementation (RI) expects vmindex to
 							 * be 0 in such cases.
 							 */
 							vmindex = 0;
 						} else {
-							/* RI expects direct invocation, i.e. !invokevirtual and !invokeinterface ref kinds,
-							 * to have a negative vmindex.
-							 */
-							vmindex = -1;
+							/* vmindex points to a vTable index. */
+							vmindex = (jlong)methodID->vTableIndex;
 						}
 					} else {
-						/* vmindex points to a vTable index. */
-						vmindex = methodID->vTableIndex;
+						/* RI expects direct invocation, i.e. !invokevirtual and !invokeinterface ref kinds,
+						 * to have a negative vmindex.
+						 */
+						vmindex = -1;
 					}
 					target = membernameObject;
 				}

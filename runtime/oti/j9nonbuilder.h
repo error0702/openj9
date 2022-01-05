@@ -85,6 +85,7 @@
 #define J9ClassRequiresPrePadding 0x20000
 #define J9ClassIsValueBased 0x40000
 #define J9ClassHasIdentity 0x80000
+#define J9ClassEnsureHashed 0x100000
 
 /* @ddr_namespace: map_to_type=J9FieldFlags */
 
@@ -2050,7 +2051,7 @@ typedef struct J9BCTranslationData {
 /* A given Java feature version uses class-file format (version) + 44. */
 #define BCT_JavaMajorVersionShifted(java_version)  ((44 + (U_32)(java_version)) << BCT_MajorClassFileVersionMaskShift)
 /* When adding support for a new Java feature version, update this appropriately. */
-#define BCT_JavaMaxMajorVersionShifted  BCT_JavaMajorVersionShifted(18)
+#define BCT_JavaMaxMajorVersionShifted  BCT_JavaMajorVersionShifted(19)
 
 typedef struct J9RAMClassFreeListBlock {
 	UDATA size;
@@ -3121,7 +3122,6 @@ typedef struct J9ROMImageHeader {
 
 /* @ddr_namespace: map_to_type=J9ClassLocation */
 
-struct J9Class;
 typedef struct J9ClassLocation {
 	struct J9Class *clazz;
 	IDATA entryIndex;
@@ -3178,7 +3178,7 @@ typedef struct J9Class {
 	struct J9Class* replacedClass;
 	UDATA finalizeLinkOffset;
 	struct J9Class* nextClassInSegment;
-	UDATA* ramConstantPool;
+	struct J9ConstantPool *ramConstantPool;
 	j9object_t* callSites;
 #if defined(J9VM_OPT_OPENJDK_METHODHANDLE)
 	j9object_t* invokeCache;
@@ -3223,6 +3223,9 @@ typedef struct J9Class {
 #define J9CLASS_HAS_4BYTE_PREPADDING(clazz) FALSE
 #define J9CLASS_PREPADDING_SIZE(clazz) 0
 #endif /* defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */
+
+/* For the following, J9_ARE_ANY_BITS_SET fails on zOS, currently under investigation. Issue: #14043 */
+#define J9CLASS_IS_ENSUREHASHED(clazz) (J9_ARE_ALL_BITS_SET((clazz)->classFlags, J9ClassEnsureHashed))
 
 typedef struct J9ArrayClass {
 	UDATA eyecatcher;
@@ -3910,11 +3913,11 @@ typedef struct J9JITConfig {
 	UDATA codeCacheTotalKB;
 	UDATA dataCacheTotalKB;
 	struct J9JITExceptionTable*  ( *jitGetExceptionTableFromPC)(struct J9VMThread * vmThread, UDATA jitPC) ;
-	void*  ( *jitGetStackMapFromPC)(struct J9JavaVM * javaVM, struct J9JITExceptionTable * exceptionTable, UDATA jitPC) ;
-	void*  ( *jitGetInlinerMapFromPC)(struct J9JavaVM * javaVM, struct J9JITExceptionTable * exceptionTable, UDATA jitPC) ;
+	void*  ( *jitGetStackMapFromPC)(struct J9VMThread * currentThread, struct J9JITExceptionTable * exceptionTable, UDATA jitPC) ;
+	void*  ( *jitGetInlinerMapFromPC)(struct J9VMThread * currentThread, struct J9JITExceptionTable * exceptionTable, UDATA jitPC) ;
 	UDATA  ( *getJitInlineDepthFromCallSite)(struct J9JITExceptionTable *metaData, void *inlinedCallSite) ;
 	void*  ( *getJitInlinedCallInfo)(struct J9JITExceptionTable * md) ;
-	void*  ( *getStackMapFromJitPC)(struct J9JavaVM * javaVM, struct J9JITExceptionTable * exceptionTable, UDATA jitPC) ;
+	void*  ( *getStackMapFromJitPC)(struct J9VMThread * currentThread, struct J9JITExceptionTable * exceptionTable, UDATA jitPC) ;
 	void*  ( *getFirstInlinedCallSite)(struct J9JITExceptionTable * metaData, void * stackMap) ;
 	void*  ( *getNextInlinedCallSite)(struct J9JITExceptionTable * metaData, void * inlinedCallSite) ;
 	UDATA  ( *hasMoreInlinedMethods)(void * inlinedCallSite) ;
@@ -4709,7 +4712,9 @@ typedef struct J9InternalVMFunctions {
 	j9object_t ( *resolveConstantDynamic)(struct J9VMThread *vmThread, J9ConstantPool *ramCP, UDATA cpIndex, UDATA resolveFlags) ;
 	j9object_t  ( *resolveInvokeDynamic)(struct J9VMThread *vmThread, J9ConstantPool *ramCP, UDATA cpIndex, UDATA resolveFlags) ;
 	void  (JNICALL *sendResolveOpenJDKInvokeHandle)(struct J9VMThread *vmThread, J9ConstantPool *ramCP, UDATA cpIndex, I_32 refKind, J9Class *resolvedClass, J9ROMNameAndSignature* nameAndSig) ;
+#if JAVA_SPEC_VERSION >= 11
 	void  (JNICALL *sendResolveConstantDynamic)(struct J9VMThread *vmThread, J9ConstantPool *ramCP, UDATA cpIndex, J9ROMNameAndSignature* nameAndSig, U_16* bsmData) ;
+#endif /* JAVA_SPEC_VERSION >= 11 */
 	void  (JNICALL *sendResolveInvokeDynamic)(struct J9VMThread *vmThread, J9ConstantPool *ramCP, UDATA callSiteIndex, J9ROMNameAndSignature* nameAndSig, U_16* bsmData) ;
 	j9object_t  ( *resolveMethodHandleRef)(struct J9VMThread *vmThread, J9ConstantPool *ramCP, UDATA cpIndex, UDATA resolveFlags) ;
 	UDATA  ( *resolveNativeAddress)(struct J9VMThread *currentThread, J9Method *nativeMethod, UDATA runtimeBind) ;
@@ -4734,7 +4739,9 @@ typedef struct J9InternalVMFunctions {
 	omrthread_monitor_t  ( *getMonitorForWait)(struct J9VMThread* vmThread, j9object_t object) ;
 	void  ( *jvmPhaseChange)(struct J9JavaVM* vm, UDATA phase) ;
 	void  ( *prepareClass)(struct J9VMThread *currentThread, struct J9Class *clazz) ;
+#if defined(J9VM_OPT_METHOD_HANDLE)
 	struct J9SFMethodTypeFrame*  ( *buildMethodTypeFrame)(struct J9VMThread *currentThread, j9object_t methodType) ;
+#endif /* defined(J9VM_OPT_METHOD_HANDLE) */
 	void  ( *fatalRecursiveStackOverflow)(struct J9VMThread *currentThread) ;
 	void  ( *setIllegalAccessErrorNonPublicInvokeInterface)(struct J9VMThread *currentThread, J9Method *method) ;
 	IDATA ( *createThreadWithCategory)(omrthread_t* handle, UDATA stacksize, UDATA priority, UDATA suspend, omrthread_entrypoint_t entrypoint, void* entryarg, U_32 category) ;
@@ -5384,6 +5391,9 @@ typedef struct J9JavaVM {
 	jclass srMethodAccessor;
 	jclass srConstructorAccessor;
 	struct J9Method* jlrMethodInvoke;
+#if JAVA_SPEC_VERSION >= 18
+	struct J9Method* jlrMethodInvokeMH;
+#endif /* JAVA_SPEC_VERSION >= 18 */
 	struct J9Method* jliMethodHandleInvokeWithArgs;
 	struct J9Method* jliMethodHandleInvokeWithArgsList;
 	jclass jliArgumentHelper;
@@ -5579,6 +5589,7 @@ typedef struct J9JavaVM {
 	struct J9Pool *cifArgumentTypesCache;
 	omrthread_monitor_t cifArgumentTypesCacheMutex;
 #endif /* JAVA_SPEC_VERSION >= 16 */
+	struct J9HashTable* ensureHashedClasses;
 } J9JavaVM;
 
 #define J9VM_PHASE_NOT_STARTUP  2

@@ -99,6 +99,7 @@
 #include "control/JITServerCompilationThread.hpp"
 #include "control/JITServerHelpers.hpp"
 #include "runtime/JITClientSession.hpp"
+#include "runtime/JITServerAOTDeserializer.hpp"
 #include "net/ClientStream.hpp"
 #include "net/ServerStream.hpp"
 #include "omrformatconsts.h"
@@ -2131,6 +2132,7 @@ bool TR::CompilationInfo::shouldRetryCompilation(TR_MethodToBeCompiled *entry, T
             case compilationStreamMessageTypeMismatch:
             case compilationStreamVersionIncompatible:
             case compilationStreamLostMessage:
+            case aotCacheDeserializationFailure:
 #endif
             case compilationInterrupted:
             case compilationCodeReservationFailure:
@@ -3327,11 +3329,12 @@ void TR::CompilationInfo::stopCompilationThreads()
       {
       if (getPersistentInfo()->getRemoteCompilationMode() == JITServer::SERVER)
          {
-         TR_J9VMBase * vmj9 = (TR_J9VMBase *)(TR_J9VMBase::get(_jitConfig, 0));
+         TR_J9VMBase *vmj9 = (TR_J9VMBase *)TR_J9VMBase::get(_jitConfig, NULL);
          JITServerIProfiler *iProfiler = (JITServerIProfiler *)vmj9->getIProfiler();
          iProfiler->printStats();
          }
       }
+
    static char *printJITServerConnStats = feGetEnv("TR_PrintJITServerConnStats");
    if (printJITServerConnStats)
       {
@@ -3345,6 +3348,15 @@ void TR::CompilationInfo::stopCompilationThreads()
          fprintf(stderr, "Number of connections opened = %u\n", JITServer::ClientStream::getNumConnectionsOpened());
          fprintf(stderr, "Number of connections closed = %u\n", JITServer::ClientStream::getNumConnectionsClosed());
          }
+      }
+
+   static char *printJITServerAOTCacheStats = feGetEnv("TR_PrintJITServerAOTCacheStats");
+   if (printJITServerAOTCacheStats)
+      {
+      if (auto aotCacheMap = getJITServerAOTCacheMap())
+         aotCacheMap->printStats(stderr);
+      if (auto deserializer = getJITServerAOTDeserializer())
+         deserializer->printStats(stderr);
       }
 #endif /* defined(J9VM_OPT_JITSERVER) */
 
@@ -4614,12 +4626,48 @@ TR::CompilationInfo::addMethodToBeCompiled(TR::IlGeneratorMethodDetails & detail
          }
       }
 
-   for (prev = NULL, cur = _methodQueue; cur; prev = cur, cur = cur->_next)
+   J9Method *method = details.getMethod();
+
+   // Ordinary, non-JNI methods that are interpreted have their 'j9method->extra' field
+   // set to J9_JIT_QUEUED_FOR_COMPILATION when they are added to the queue
+   // Thus, we can skip searching the queue if j9method->extra has another value
+   // However, sync compilations do not set method->extra to J9_JIT_QUEUED_FOR_COMPILATION
+   bool skipSearchingForDuplicates = false;
+   static char *disableSkipSearching = feGetEnv("TR_DisableSkipSearchingForRequestDuplicates");
+   if (!disableSkipSearching &&
+       pc == 0 && // Interpreted methods
+       details.isOrdinaryMethod() &&
+       !isJNINative(method) &&
+       !(J9_ROM_METHOD_FROM_RAM_METHOD(method)->modifiers & J9AccNative) &&
+       getJ9MethodVMExtra(method) != J9_JIT_QUEUED_FOR_COMPILATION)
       {
-      numEntries++;
-      queueWeight += cur->_weight;
-      if (cur->getMethodDetails().sameAs(details, fe))
-         break;
+      skipSearchingForDuplicates = true;
+      }
+
+   if (skipSearchingForDuplicates)
+      {
+      // In this case we only have to scan the synchronous requests in the queue
+      for (prev = NULL, cur = _methodQueue; cur; prev = cur, cur = cur->_next)
+         {
+         // Stop the search when we finished with sync entries
+         if (cur->_priority < CP_SYNC_MIN)
+            {
+            cur = NULL; // signal that we din't find the entry
+            break;
+            }
+         if (cur->getMethodDetails().sameAs(details, fe))
+            break;
+         }
+      }
+   else // Scan the entire queue
+      {
+      for (prev = NULL, cur = _methodQueue; cur; prev = cur, cur = cur->_next)
+         {
+         numEntries++;
+         queueWeight += cur->_weight;
+         if (cur->getMethodDetails().sameAs(details, fe))
+            break;
+         }
       }
 
    // NOTE: we do not need to search the methodPool since we cannot reach here if an entry
@@ -4671,20 +4719,23 @@ TR::CompilationInfo::addMethodToBeCompiled(TR::IlGeneratorMethodDetails & detail
    //
    else
       {
-      if (queueWeight != _queueWeight) //QW
+      // If we skipped searching, we cannot do the validation checks
+      if (!skipSearchingForDuplicates)
          {
-         if (TR::Options::isAnyVerboseOptionSet())
-            TR_VerboseLog::writeLineLocked(TR_Vlog_INFO, "Discrepancy for queue weight while adding to queue: computed=%u recorded=%u\n", queueWeight, _queueWeight);
-         // correction
-         _queueWeight = queueWeight;
+         if (queueWeight != _queueWeight) //QW
+            {
+            if (TR::Options::isAnyVerboseOptionSet())
+               TR_VerboseLog::writeLineLocked(TR_Vlog_INFO, "Discrepancy for queue weight while adding to queue: computed=%u recorded=%u\n", queueWeight, _queueWeight);
+            // correction
+            _queueWeight = queueWeight;
+            }
+         if (numEntries != _numQueuedMethods)
+            {
+            if (TR::Options::isAnyVerboseOptionSet())
+               TR_VerboseLog::writeLineLocked(TR_Vlog_INFO, "Discrepancy for queue size while adding to queue: Before adding numEntries=%d  _numQueuedMethods=%d\n", numEntries, _numQueuedMethods);
+            TR_ASSERT(false, "Discrepancy for queue size while adding to queue");
+            }
          }
-      if (numEntries != _numQueuedMethods)
-         {
-         if (TR::Options::isAnyVerboseOptionSet())
-            TR_VerboseLog::writeLineLocked(TR_Vlog_INFO, "Discrepancy for queue size while adding to queue: Before adding numEntries=%d  _numQueuedMethods=%d\n", numEntries, _numQueuedMethods);
-         TR_ASSERT(false, "Discrepancy for queue size while adding to queue");
-         }
-
       cur = getCompilationQueueEntry();
       if (cur == NULL)  // Memory Allocation Failure.
          return NULL;
@@ -4723,9 +4774,8 @@ TR::CompilationInfo::addMethodToBeCompiled(TR::IlGeneratorMethodDetails & detail
          }
       else if (details.isOrdinaryMethod()) // ordinary interpreted methods
          {
-         J9Method *method = details.getMethod();
          isJNINativeMethodRequest = isJNINative(method);
-         if (method && async
+         if (async
             && (getInvocationCount(method) == 0)           // this will filter out JNI natives
             && !(J9_ROM_METHOD_FROM_RAM_METHOD(method)->modifiers & J9AccNative)) // Never change the extra field of a native method
             {
@@ -4741,7 +4791,7 @@ TR::CompilationInfo::addMethodToBeCompiled(TR::IlGeneratorMethodDetails & detail
       incrementMethodQueueSize(); // one more method added to the queue
       *queued = true; // set the flag that we added a new request to the queue
 
-      Trc_JIT_CompRequest(vmThread, details.getMethod(), pc, !async, optimizationPlan->getOptLevel(), (int)priority, _numQueuedMethods);
+      Trc_JIT_CompRequest(vmThread, method, pc, !async, optimizationPlan->getOptLevel(), (int)priority, _numQueuedMethods);
 
       // Increase the queue weight
       uint8_t entryWeight; // must be less than 256
@@ -4754,7 +4804,6 @@ TR::CompilationInfo::addMethodToBeCompiled(TR::IlGeneratorMethodDetails & detail
          // Compilation may be downgraded to cold during classLoadPhase
          // While we cannot anticipate that classLoadPhase will last till the method
          // is extracted from the queue, this is the best estimate
-         J9Method *method = details.getMethod();
          if (TR::CompilationInfo::isJSR292(method))
             {
             entryWeight = (uint32_t)TR::Options::_weightOfJSR292;
@@ -5841,6 +5890,35 @@ void *TR::CompilationInfo::compileOnSeparateThread(J9VMThread * vmThread, TR::Il
             if (compErrCode)
                *compErrCode = compilationInProgress;
             return 0; // mark that compilation is not yet done
+            }
+         // When the compilation queue is very large, it may be better to postpone
+         // the asynchronous compilations by replenishing the invocation counter.
+         // This avoids the overhead associated with searching the right place to
+         // insert into the compilation queue (which is a priority queue)
+         if (getMethodQueueSize() >= TR::Options::_qszLimit &&
+             oldStartPC == 0 && // Only look at interpreted methods
+             details.isOrdinaryMethod()) // Do not apply this optimization to DLT
+            {
+            J9ROMMethod *romMethod = J9_ROM_METHOD_FROM_RAM_METHOD(method);
+            if (!(romMethod->modifiers & J9AccNative)) // We are not allowed to change the invocation count for native methods
+               {
+               int32_t newCount = J9ROMMETHOD_HAS_BACKWARDS_BRANCHES(romMethod) ? TR_DEFAULT_INITIAL_BCOUNT : TR_DEFAULT_INITIAL_COUNT;
+               bool success = TR::CompilationInfo::replenishInvocationCountIfExpired(method, newCount);
+               if (success)
+                  {
+                  if (TR::Options::getCmdLineOptions()->getVerboseOption(TR_VerbosePerformance))
+                     {
+                     TR_VerboseLog::writeLineLocked(TR_Vlog_PERF, "Reencoding count=%d for j9m=%p because Q_SZ is too large", newCount, method);
+                     }
+                  // Release the compilation lock and return
+                  debugPrint(vmThread, "\tapplication thread releasing compilation monitor - comp.req. in progress\n");
+                  debugPrint(vmThread, "-CM\n");
+                  releaseCompMonitor(vmThread);
+                  if (compErrCode)
+                     *compErrCode = compilationNotNeeded;
+                  return 0; // mark that compilation is not yet done
+                  }
+               }
             }
          }
       }
@@ -9427,11 +9505,12 @@ TR::CompilationInfoPerThreadBase::compile(
          _compInfo.getHWProfiler()->registerRecords(metaData, compiler);
          }
 
+      TR_CHTable *chTable = compiler->getCHTable();
+      if (chTable && !chTable->canSkipCommit(compiler))
          {
          TR::ClassTableCriticalSection chTableCommit(&vm);
          TR_ASSERT(!chTableCommit.acquiredVMAccess(), "We should have already acquired VM access at this point.");
-         TR_CHTable *chTable = compiler->getCHTable();
-         if (chTable && chTable->commit(compiler) == false)
+         if (chTable->commit(compiler) == false)
             {
             // If we created a TR_PersistentMethodInfo, fix the next compilation level
             // because if we retry the compilation we will fail an assume later on
@@ -9945,7 +10024,11 @@ TR::CompilationInfo::compilationEnd(J9VMThread * vmThread, TR::IlGeneratorMethod
             }
          else // Non-AOT compilation or remote JIT/AOT compilations (at the JITClient)
             {
-            if (trvm->isAOT_DEPRECATED_DO_NOT_USE() && !TR::CompilationInfo::canRelocateMethod(comp))
+            if ((trvm->isAOT_DEPRECATED_DO_NOT_USE()
+#if defined(J9VM_OPT_JITSERVER)
+                || comp->isDeserializedAOTMethod()
+#endif /* defined(J9VM_OPT_JITSERVER) */
+                ) && !TR::CompilationInfo::canRelocateMethod(comp))
                {
                // Handle the case when relocations are delayed.
                // Delete any assumptions that might still exist in persistent memory
@@ -10775,6 +10858,10 @@ TR::CompilationInfoPerThreadBase::processException(
       // no need to set error code here because error code is set
       // in remoteCompile at JITClient when the compilation failed.
       }
+   catch (const J9::AOTCacheDeserializationFailure &e)
+      {
+      // error code was already set in remoteCompile()
+      }
 #endif /* defined(J9VM_OPT_JITSERVER) */
    catch (...)
       {
@@ -11178,36 +11265,43 @@ TR::CompilationInfo::computeFreePhysicalLimitAndAbortCompilationIfLow(TR::Compil
    }
 
 void
-TR::CompilationInfo::replenishInvocationCount(J9Method* method, TR::Compilation* comp)
+TR::CompilationInfo::replenishInvocationCount(J9Method *method, TR::Compilation *comp)
    {
    // Replenish the counts of the method
    // We are holding the compilation monitor at this point
-   //
    J9ROMMethod *romMethod = J9_ROM_METHOD_FROM_RAM_METHOD(method);
-   if (!(romMethod->modifiers & J9AccNative))// Never change the extra field of a native method
-      {
-      int32_t methodVMExtra = TR::CompilationInfo::getJ9MethodVMExtra(method);
-      if (methodVMExtra == 1 || methodVMExtra == J9_JIT_QUEUED_FOR_COMPILATION)
-         {
-         // We want to use high counts unless the user specified counts on the command line
-         // or he used useLowerMethodCounts (or Xquickstart)
-         int32_t count;
-         if (TR::Options::getCountsAreProvidedByUser() || TR::Options::startupTimeMatters() == TR_yes)
-            count = getCount(romMethod, comp->getOptions(), comp->getOptions());
-         else
-            count = J9ROMMETHOD_HAS_BACKWARDS_BRANCHES(romMethod) ? TR_DEFAULT_INITIAL_BCOUNT : TR_DEFAULT_INITIAL_COUNT;
+   if (romMethod->modifiers & J9AccNative)// Never change the extra field of a native method
+      return;
 
-         TR::CompilationInfo::setInvocationCount(method, count);
-         if (TR::Options::getCmdLineOptions()->getVerboseOption(TR_VerbosePerformance))
-            {
-            // compiler must exist because startPC != NULL
-            TR_VerboseLog::writeLineLocked(TR_Vlog_PERF, "Reencoding count=%d for %s j9m=%p ", count, comp->signature(), method);
-            }
-         }
+   int32_t methodVMExtra = TR::CompilationInfo::getJ9MethodVMExtra(method);
+   if ((methodVMExtra == 1) || (methodVMExtra == J9_JIT_QUEUED_FOR_COMPILATION))
+      {
+      int32_t count;
+#if defined(J9VM_OPT_JITSERVER)
+      // Even if the option to disable AOT relocation delay was specified, we need to delay relocation of deserialized
+      // AOT methods using SVM received from the JITServer AOT cache until the next interpreted invocation. Such methods
+      // cannot be immediately relocated in the current implementation; see CompilationInfo::canRelocateMethod().
+      if (comp->isDeserializedAOTMethodUsingSVM() && comp->getOption(TR_DisableDelayRelocationForAOTCompilations))
+         count = 0;
       else
+#endif /* defined(J9VM_OPT_JITSERVER) */
+      // We want to use high counts unless the user specified counts on the command line
+      // or used useLowerMethodCounts (or -Xquickstart)
+      if (TR::Options::getCountsAreProvidedByUser() || (TR::Options::startupTimeMatters() == TR_yes))
+         count = getCount(romMethod, comp->getOptions(), comp->getOptions());
+      else
+         count = J9ROMMETHOD_HAS_BACKWARDS_BRANCHES(romMethod) ? TR_DEFAULT_INITIAL_BCOUNT : TR_DEFAULT_INITIAL_COUNT;
+
+      TR::CompilationInfo::setInvocationCount(method, count);
+      if (TR::Options::getCmdLineOptions()->getVerboseOption(TR_VerbosePerformance))
          {
-         TR_ASSERT(false, "Unexpected value for method->extra = %p (method=%p)\n", TR::CompilationInfo::getJ9MethodExtra(method), method);
+         // compiler must exist because startPC != NULL
+         TR_VerboseLog::writeLineLocked(TR_Vlog_PERF, "Reencoding count=%d for %s j9m=%p ", count, comp->signature(), method);
          }
+      }
+   else
+      {
+      TR_ASSERT(false, "Unexpected value for method->extra = %p (method=%p)\n", TR::CompilationInfo::getJ9MethodExtra(method), method);
       }
    }
 
@@ -12395,22 +12489,27 @@ bool TR::CompilationInfo::canProcessJProfilingRequest()
 bool
 TR::CompilationInfo::canRelocateMethod(TR::Compilation *comp)
    {
-   bool canRelocateMethod = true;
-   // Prevent the relocation if specific option is given
+   // Delay relocation by default, unless this option is enabled
    if (!comp->getOption(TR_DisableDelayRelocationForAOTCompilations))
-      {
-      canRelocateMethod = false;
-      }
-   else
-      {
-      TR_Debug *debug = TR::Options::getDebug();
-      if (debug)
-         {
-         TR_FilterBST *filter = NULL;
-         canRelocateMethod = debug->methodSigCanBeRelocated(comp->signature(), filter);
-         }
-      }
-   return canRelocateMethod;
+      return false;
+
+#if defined(J9VM_OPT_JITSERVER)
+   // Delay relocation if this is a deserialized AOT method using SVM received from the JITServer AOT cache.
+   // Such methods cannot be immediately relocated in the current implementation. An immediate AOT+SVM load
+   // uses the ID-symbol mapping created during compilation. This mapping is missing when the client receives
+   // a serialized AOT method from the server, and trying to load the deserialized method immediately
+   // triggers fatal assertions in SVM validation in certain cases. As a workaround, we delay the AOT load
+   // until the next interpreted invocation of the method; see CompilationInfo::replenishInvocationCounter().
+   //
+   //TODO: Avoid the overhead of rescheduling this compilation request by handling the deserialized AOT load as if
+   //      the method came from the local SCC, rather than as if it was freshly AOT-compiled at the JITServer.
+   if (comp->isDeserializedAOTMethodUsingSVM())
+      return false;
+#endif /* defined(J9VM_OPT_JITSERVER) */
+
+   TR_Debug *debug = TR::Options::getDebug();
+   TR_FilterBST *filter = NULL;
+   return debug ? debug->methodSigCanBeRelocated(comp->signature(), filter) : true;
    }
 
 #if defined(J9VM_OPT_JITSERVER)

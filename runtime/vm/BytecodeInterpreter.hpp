@@ -174,7 +174,6 @@ private:
 		VMStructHasBeenUpdated(REGISTER_ARGS);
 		return next;
 	}
-#endif /* defined(J9VM_OPT_METHOD_HANDLE) */
 
 	/**
 	 * Modify the MH.invocationCount so that invocations from the interpreter don't
@@ -195,6 +194,7 @@ private:
 		I_32 count = J9VMJAVALANGINVOKEMETHODHANDLE_INVOCATIONCOUNT(_currentThread, methodHandle);
 		J9VMJAVALANGINVOKEMETHODHANDLE_SET_INVOCATIONCOUNT(_currentThread, methodHandle, count - 1);
 	}
+#endif /* defined(J9VM_OPT_METHOD_HANDLE) */
 
 #if defined(DO_SINGLE_STEP)
 	void VMINLINE
@@ -4001,23 +4001,41 @@ done:
 		return EXECUTE_BYTECODE;
 	}
 
-	/* ToDo: unimplemented - https://github.com/eclipse-openj9/openj9/issues/13614 */
 	/* jdk.internal.misc.Unsafe: public native <V> V uninitializedDefaultValue(Class<?> clz); */
 	VMINLINE VM_BytecodeAction
 	inlUnsafeUninitializedDefaultValue(REGISTER_ARGS_LIST)
 	{
-		updateVMStruct(REGISTER_ARGS);
-		Assert_VM_unreachable();
+		j9object_t cls = *(j9object_t*)_sp;
+		j9object_t result = NULL;
+
+		/* TODO (#14073): update this function to have the same behavior as OpenJDK when cls is null or not a vlauetype (currently OpenJDK segfaults in both those scenarios) */
+		if (NULL != cls) {
+			J9Class *j9clazz = J9VM_J9CLASS_FROM_HEAPCLASS(_currentThread, cls);
+			if (J9_IS_J9CLASS_VALUETYPE(j9clazz)) {
+				result = j9clazz->flattenedClassCache->defaultValue;
+			}
+		}
+
+		returnObjectFromINL(REGISTER_ARGS, result, 2);
 		return EXECUTE_BYTECODE;
 	}
 
-	/* ToDo: unimplemented - https://github.com/eclipse-openj9/openj9/issues/13614 */
 	/* jdk.internal.misc.Unsafe: public native <V> long valueHeaderSize(Class<V> clz); */
 	VMINLINE VM_BytecodeAction
 	inlUnsafeValueHeaderSize(REGISTER_ARGS_LIST)
 	{
-		updateVMStruct(REGISTER_ARGS);
-		Assert_VM_unreachable();
+		j9object_t cls = *(j9object_t*)_sp;
+		I_64 result = (I_64)0;
+
+		/* TODO (#14073): update this function to have the same behavior as OpenJDK when cls is null or not a vlauetype (currently OpenJDK segfaults in both those scenarios) */
+		if (NULL != cls) {
+			J9Class *j9clazz = J9VM_J9CLASS_FROM_HEAPCLASS(_currentThread, cls);
+			if (J9_IS_J9CLASS_VALUETYPE(j9clazz)) {
+				result = (I_64)J9VMTHREAD_OBJECT_HEADER_SIZE(_currentThread) + J9CLASS_PREPADDING_SIZE(j9clazz);
+			}
+		}
+
+		returnDoubleFromINL(REGISTER_ARGS, result, 2);
 		return EXECUTE_BYTECODE;
 	}
 
@@ -4775,12 +4793,10 @@ done:
 		U_8 typeCode = 0;
 		if (&ffi_type_void == type) {
 			typeCode = J9NtcVoid;
-		} else if (&ffi_type_uint32 == type) {
+		} else if (&ffi_type_uint8 == type) {
 			typeCode = J9NtcBoolean;
 		} else if (&ffi_type_sint8 == type) {
 			typeCode = J9NtcByte;
-		} else if (&ffi_type_uint16 == type) {
-			typeCode = J9NtcChar;
 		} else if (&ffi_type_sint16 == type) {
 			typeCode = J9NtcShort;
 		} else if (&ffi_type_sint32 == type) {
@@ -4811,8 +4827,8 @@ done:
 		 * with big-endianness given UDATA (8 bytes) is used to hold all types of arguments.
 		 */
 		const U_8 extraBytesOfInt = 4;
-		const U_8 extraBytesOfByte = extraBytesOfInt + 3;
-		const U_8 extraBytesOfShortAndChar = + extraBytesOfInt + 2;
+		const U_8 extraBytesOfShortAndChar = extraBytesOfInt + 2;
+		const U_8 extraBytesOfBoolAndByte = extraBytesOfInt + 3;
 #endif /* J9VM_ENV_LITTLE_ENDIAN */
 #if FFI_NATIVE_RAW_API
 		/* Make sure we can fit a double in each sValues_raw[] slot but assuring we end up
@@ -4896,17 +4912,18 @@ done:
 				values[i] = &(ffiArgs[i]);
 #if !defined(J9VM_ENV_LITTLE_ENDIAN)
 				/* Note: A float number is converted to int by Float.floatToIntBits() in ProgrammableInvoker */
-				if ((J9NtcInt == argType) || (J9NtcBoolean == argType) || (J9NtcFloat == argType)) {
+				if ((J9NtcInt == argType) || (J9NtcFloat == argType)) {
 					values[i] = (void *)((U_64)values[i] + extraBytesOfInt);
 				} else if ((J9NtcShort == argType) || (J9NtcChar == argType)) {
 					values[i] = (void *)((U_64)values[i] + extraBytesOfShortAndChar);
-				} else if (J9NtcByte == argType) {
-					values[i] = (void *)((U_64)values[i] + extraBytesOfByte);
+				} else if ((J9NtcBoolean == argType) || (J9NtcByte == argType)) {
+					values[i] = (void *)((U_64)values[i] + extraBytesOfBoolAndByte);
 				}
 #endif /*J9VM_ENV_LITTLE_ENDIAN */
 			}
 		}
 
+		updateVMStruct(REGISTER_ARGS);
 		VM_VMAccess::inlineExitVMToJNI(_currentThread);
 #if FFI_NATIVE_RAW_API
 		ffi_ptrarray_to_raw(cif, values, values_raw);
@@ -4915,8 +4932,9 @@ done:
 		ffi_call(cif, FFI_FN(function), returnStorage, values);
 #endif /* FFI_NATIVE_RAW_API */
 		VM_VMAccess::inlineEnterVMFromJNI(_currentThread);
+		VMStructHasBeenUpdated(REGISTER_ARGS);
 
-		VM_VMHelpers::convertJNIReturnValue(returnType, returnStorage);
+		VM_VMHelpers::convertFFIReturnValue(_currentThread, returnType, returnStorage);
 		returnDoubleFromINL(REGISTER_ARGS, _currentThread->returnValue, 6);
 		goto done;
 
@@ -8966,7 +8984,7 @@ done:
 	VMINLINE VM_BytecodeAction
 	invokevarhandle(REGISTER_ARGS_LIST)
 	{
-#if defined(J9VM_OPT_METHOD_HANDLE)
+#if defined(J9VM_OPT_METHOD_HANDLE) && (JAVA_SPEC_VERSION >= 11)
 		VM_BytecodeAction rc = GOTO_RUN_METHODHANDLE;
 
 		/* Determine stack shape */
@@ -9042,11 +9060,11 @@ done:
 		}
 done:
 		return rc;
-#else /* defined(J9VM_OPT_METHOD_HANDLE) */
-	/* invokevarhandle is not used for OpenJDK VarHandles (J9VM_OPT_OPENJDK_METHODHANDLE). */
-	Assert_VM_unreachable();
-	return EXECUTE_BYTECODE;
-#endif /* defined(J9VM_OPT_METHOD_HANDLE) */
+#else /* defined(J9VM_OPT_METHOD_HANDLE) && (JAVA_SPEC_VERSION >= 11) */
+		/* invokevarhandle is not used for OpenJDK VarHandles (J9VM_OPT_OPENJDK_METHODHANDLE). */
+		Assert_VM_unreachable();
+		return EXECUTE_BYTECODE;
+#endif /* defined(J9VM_OPT_METHOD_HANDLE) && (JAVA_SPEC_VERSION >= 11) */
 	}
 
 	VMINLINE VM_BytecodeAction

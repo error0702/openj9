@@ -178,6 +178,7 @@ int32_t J9::Options::_qszThresholdToDowngradeOptLevel = -1; // not yet set
 int32_t J9::Options::_qsziThresholdToDowngradeDuringCLP = 0; // -1 or 0 disables the feature and reverts to old behavior
 int32_t J9::Options::_qszThresholdToDowngradeOptLevelDuringStartup = 100000; // a large number disables the feature
 int32_t J9::Options::_cpuUtilThresholdForStarvation = 25; // 25%
+int32_t J9::Options::_qszLimit = 5000; // when limit is reached the JIT will postpone new compilation requests
 
 // If too many GCR are queued we stop counting.
 // Use a large value to disable the feature. 400 is a good default
@@ -725,6 +726,8 @@ TR::OptionTable OMR::Options::_feOptions[] = {
    {"compilationPriorityQSZThreshold=", "M<nnn>\tCompilation queue size threshold when priority of post-profiling"
                                "compilation requests is increased",
         TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_compPriorityQSZThreshold , 0, "F%d", NOT_IN_SUBSET},
+   {"compilationQueueSizeLimit=", "R<nnn>\tWhen limit is reached, first-time compilations are postponed by replenishing the invocation count",
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_qszLimit, 0, "F%d", NOT_IN_SUBSET},
    {"compilationThreadAffinityMask=", "M<nnn>\taffinity mask for compilation threads. Use hexa without 0x",
         TR::Options::setStaticHexadecimal, (intptr_t)&TR::Options::_compThreadAffinityMask, 0, "F%d", NOT_IN_SUBSET},
    {"compilationYieldStatsHeartbeatPeriod=", "M<nnn>\tperiodically print stats about compilation yield points "
@@ -1985,6 +1988,7 @@ bool J9::Options::preProcessJitServer(J9JavaVM *vm, J9JITConfig *jitConfig)
    if (!JITServerAlreadyParsed) // Avoid processing twice for AOT and JIT and produce duplicate messages
       {
       JITServerAlreadyParsed = true;
+      bool disabledShareROMClasses = false;
       if (vm->internalVMFunctions->isJITServerEnabled(vm))
          {
          J9::PersistentInfo::_remoteCompilationMode = JITServer::SERVER;
@@ -2001,6 +2005,10 @@ bool J9::Options::preProcessJitServer(J9JavaVM *vm, J9JITConfig *jitConfig)
          if (xxJITServerShareROMClassesArgIndex > xxDisableJITServerShareROMClassesArgIndex)
             {
             _shareROMClasses = true;
+            }
+         else if (xxDisableJITServerShareROMClassesArgIndex > xxJITServerShareROMClassesArgIndex)
+            {
+            disabledShareROMClasses = true;
             }
          }
       else
@@ -2112,6 +2120,13 @@ bool J9::Options::preProcessJitServer(J9JavaVM *vm, J9JITConfig *jitConfig)
          compInfo->getPersistentInfo()->setServerUID(0);
          jitConfig->clientUID = 0;
          jitConfig->serverUID = 0;
+         }
+
+      if ((compInfo->getPersistentInfo()->getRemoteCompilationMode() == JITServer::SERVER) &&
+          compInfo->getPersistentInfo()->getJITServerUseAOTCache() && !disabledShareROMClasses)
+         {
+         // Enable ROMClass sharing at the server by default (unless explicitly disabled) if using AOT cache
+         _shareROMClasses = true;
          }
       }
 #endif /* defined(J9VM_OPT_JITSERVER) */
@@ -2717,7 +2732,7 @@ bool J9::Options::feLatePostProcess(void * base, TR::OptionSet * optionSet)
       self()->setOption(TR_DisableNextGenHCR);
       }
 
-#if !defined(TR_HOST_X86) && !defined(TR_HOST_S390) && !defined(TR_HOST_POWER)
+#if !defined(TR_HOST_X86) && !defined(TR_HOST_S390) && !defined(TR_HOST_POWER) && !defined(TR_HOST_ARM64)
    //The bit is set when -XX:+JITInlineWatches is specified
    if (J9_ARE_ANY_BITS_SET(javaVM->extendedRuntimeFlags, J9_EXTENDED_RUNTIME_JIT_INLINE_WATCHES))
       TR_ASSERT_FATAL(false, "this platform doesn't support JIT inline field watch");

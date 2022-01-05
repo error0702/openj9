@@ -176,6 +176,17 @@ JVM_DumpDynamicArchive(JNIEnv *env, jstring str)
 #endif /* JAVA_SPEC_VERSION >= 17 */
 
 #if JAVA_SPEC_VERSION >= 18
+JNIEXPORT jboolean JNICALL
+JVM_IsFinalizationEnabled(JNIEnv *env)
+{
+	jboolean isFinalizationEnabled = JNI_TRUE;
+	J9VMThread *currentThread = (J9VMThread*)env;
+	if (J9_ARE_ANY_BITS_SET(currentThread->javaVM->extendedRuntimeFlags, J9_EXTENDED_RUNTIME_DISABLE_FINALIZATION)) {
+		isFinalizationEnabled = JNI_FALSE;
+	}
+	return isFinalizationEnabled;
+}
+
 JNIEXPORT void JNICALL
 JVM_ReportFinalizationComplete(JNIEnv *env, jobject obj)
 {

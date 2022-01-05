@@ -47,7 +47,7 @@
 			<impl>openj9</impl>
 		</impls>
 		<versions>
-			<version>17+</version>
+			<version>17</version>
 		</versions>
 	</test>
 </playlist>

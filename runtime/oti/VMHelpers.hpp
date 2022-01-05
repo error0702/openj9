@@ -343,11 +343,13 @@ public:
 	methodHandleCompiledEntryPoint(J9JavaVM *vm, J9VMThread *currentThread, j9object_t methodHandle)
 	{
 		void *compiledEntryPoint = NULL;
+#if defined(J9VM_OPT_METHOD_HANDLE)
 		if (J9_EXTENDED_RUNTIME_I2J_MH_TRANSITION_ENABLED == (vm->extendedRuntimeFlags & J9_EXTENDED_RUNTIME_I2J_MH_TRANSITION_ENABLED)) {
 			j9object_t thunks = J9VMJAVALANGINVOKEMETHODHANDLE_THUNKS(currentThread, methodHandle);
 			I_64 i2jEntry = J9VMJAVALANGINVOKETHUNKTUPLE_I2JINVOKEEXACTTHUNK(currentThread, thunks);
 			compiledEntryPoint = (void *)(UDATA)i2jEntry;
 		}
+#endif /* defined(J9VM_OPT_METHOD_HANDLE) */
 		return compiledEntryPoint;
 	}
 
@@ -1476,6 +1478,9 @@ exit:
 		J9Class* currentClass = J9_CLASS_FROM_METHOD(method);
 		J9JavaVM* vm = currentThread->javaVM;
 		return ((method == vm->jlrMethodInvoke)
+#if JAVA_SPEC_VERSION >= 18
+				|| (method == vm->jlrMethodInvokeMH)
+#endif /* JAVA_SPEC_VERSION >= 18 */
 				|| (method == vm->jliMethodHandleInvokeWithArgs)
 				|| (method == vm->jliMethodHandleInvokeWithArgsList)
 				|| (vm->srMethodAccessor
@@ -1558,15 +1563,49 @@ exit:
 			*returnStorage = (UDATA)*(U_32*)returnStorage;
 			break;
 		case J9NtcVoid:
-			*returnStorage = (UDATA)0;
+			/* Fall through is intentional */
+		case J9NtcLong:
+			/* Fall through is intentional */
+		case J9NtcDouble:
+			/* Fall through is intentional */
+		case J9NtcClass:
+			break;
+		}
+	}
+
+	/**
+	 * @brief Converts the type of the return value to the return type intended for JEP389/419 FFI downcall/upcall
+	 * @param currentThread[in] The pointer to the current J9VMThread
+	 * @param returnType[in] The type of the return value
+	 * @param returnStorage[in] The pointer to the return value
+	 */
+	static VMINLINE void
+	convertFFIReturnValue(J9VMThread* currentThread, U_8 returnType, UDATA* returnStorage)
+	{
+		switch (returnType) {
+		case J9NtcVoid:
+			currentThread->returnValue = (UDATA)0;
+			break;
+		case J9NtcBoolean:
+			currentThread->returnValue = (UDATA)(U_8)*returnStorage;
+			break;
+		case J9NtcByte:
+			currentThread->returnValue = (UDATA)(IDATA)(I_8)*returnStorage;
+			break;
+		case J9NtcShort:
+			currentThread->returnValue = (UDATA)(IDATA)(I_16)*returnStorage;
+			break;
+		case J9NtcInt:
+			currentThread->returnValue = (UDATA)(IDATA)(I_32)*returnStorage;
+			break;
+		case J9NtcFloat:
+			currentThread->returnValue = (UDATA)*(U_32*)returnStorage;
 			break;
 		case J9NtcLong:
 			/* Fall through is intentional */
 		case J9NtcDouble:
 			/* Fall through is intentional */
 		case J9NtcPointer:
-			/* Fall through is intentional */
-		case J9NtcClass:
 			break;
 		}
 	}
@@ -1818,6 +1857,7 @@ exit:
 	isLambdaFormGeneratedMethod(J9VMThread const *currentThread, J9Method *method)
 	{
 		bool result = false;
+#if defined(J9VM_OPT_OPENJDK_METHODHANDLE)
 		J9Class *methodClass = J9_CLASS_FROM_METHOD(method);
 		if (J9_ARE_ANY_BITS_SET(methodClass->classFlags, J9ClassIsAnonymous) || J9ROMCLASS_IS_HIDDEN(methodClass->romClass)) {
 			J9Class *lambdaFormClass = J9VMJAVALANGINVOKELAMBDAFORM_OR_NULL(currentThread->javaVM);
@@ -1825,6 +1865,7 @@ exit:
 				result = true;
 			}
 		}
+#endif /* defined(J9VM_OPT_OPENJDK_METHODHANDLE) */
 		return result;
 	}
 

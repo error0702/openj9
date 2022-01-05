@@ -298,6 +298,7 @@ omr_add_exports(jclse
 	Java_com_ibm_oti_vm_VM_localGC
 	Java_com_ibm_oti_vm_VM_markCurrentThreadAsSystemImpl
 	Java_com_ibm_oti_vm_VM_setCommonData
+	Java_com_ibm_oti_vm_VM_getJ9ConstantPoolFromJ9Class
 	Java_com_ibm_rmi_io_IIOPInputStream_00024LUDCLStackWalkOptimizer_LUDCLMarkFrame
 	Java_com_ibm_rmi_io_IIOPInputStream_00024LUDCLStackWalkOptimizer_LUDCLUnmarkFrameImpl
 	Java_com_ibm_virtualization_management_internal_GuestOS_retrieveMemoryUsageImpl
@@ -334,7 +335,6 @@ omr_add_exports(jclse
 	Java_java_lang_Class_isClassADeclaredClass
 	Java_java_lang_Class_isClassAnEnclosedClass
 	Java_java_lang_Class_isCircularDeclaringClass
-	Java_java_lang_Class_getRecordComponentsImpl
 	Java_java_lang_Class_permittedSubclassesImpl
 	Java_java_lang_Compiler_commandImpl
 	Java_java_lang_Compiler_compileClassImpl
@@ -594,6 +594,7 @@ endif()
 # java 15+
 if(NOT JAVA_SPEC_VERSION LESS 15)
 	omr_add_exports(jclse
+		Java_java_lang_Class_getRecordComponentsImpl
 		Java_java_lang_Class_isHiddenImpl
 		Java_java_lang_ClassLoader_defineClassImpl1
 	)
