@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2021 IBM Corp. and others
+ * Copyright (c) 2018, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -77,6 +77,7 @@ SPECS = ['ppc64_aix' : CURRENT_RELEASES,
          'ppc64_aix_mixed' : CURRENT_RELEASES,
          'ppc64le_linux'  : CURRENT_RELEASES,
          'ppc64le_linux_cm' : CURRENT_RELEASES - '11',
+         'ppc64le_linux_criu' : CURRENT_RELEASES,
          'ppc64le_linux_uma' : CURRENT_RELEASES,
          'ppc64le_linux_jit' : CURRENT_RELEASES,
          'ppc64le_linux_xl' : CURRENT_RELEASES,
@@ -85,6 +86,7 @@ SPECS = ['ppc64_aix' : CURRENT_RELEASES,
          'ppc64le_linux_mixed' : CURRENT_RELEASES,
          's390x_linux'    : CURRENT_RELEASES,
          's390x_linux_cm' : CURRENT_RELEASES - '11',
+         's390x_linux_criu' : CURRENT_RELEASES,
          's390x_linux_uma' : CURRENT_RELEASES,
          's390x_linux_jit' : CURRENT_RELEASES,
          's390x_linux_xl' : CURRENT_RELEASES,
@@ -99,6 +101,7 @@ SPECS = ['ppc64_aix' : CURRENT_RELEASES,
          's390x_zos_mixed' : ['11'],
          'x86-64_linux'   : CURRENT_RELEASES,
          'x86-64_linux_cm': CURRENT_RELEASES - '11',
+         'x86-64_linux_criu': CURRENT_RELEASES,
          'x86-64_linux_uma' : CURRENT_RELEASES,
          'x86-64_linux_xl': CURRENT_RELEASES,
          'x86-64_linux_xl_cm': CURRENT_RELEASES - '11',
@@ -126,6 +129,7 @@ SPECS = ['ppc64_aix' : CURRENT_RELEASES,
          'x86-64_windows_mixed' : CURRENT_RELEASES,
          'aarch64_linux' : CURRENT_RELEASES,
          'aarch64_linux_cm': CURRENT_RELEASES,
+         'aarch64_linux_criu': CURRENT_RELEASES,
          'aarch64_linux_uma': CURRENT_RELEASES,
          'aarch64_linux_xl' : CURRENT_RELEASES,
          'aarch64_linux_xl_cm': CURRENT_RELEASES,
@@ -180,6 +184,7 @@ SHORT_NAMES = ['all' : ['ppc64le_linux','s390x_linux','x86-64_linux','ppc64_aix'
             'aixmxd' : ['ppc64_aix_mixed'],
             'zlinux' : ['s390x_linux'],
             'zlinuxcm' : ['s390x_linux_cm'],
+            'zlinuxcriu' : ['s390x_linux_criu'],
             'zlinuxuma' : ['s390x_linux_uma'],
             'zlinuxjit' : ['s390x_linux_jit'],
             'zlinuxlargeheap' : ['s390x_linux_xl'],
@@ -190,6 +195,7 @@ SHORT_NAMES = ['all' : ['ppc64le_linux','s390x_linux','x86-64_linux','ppc64_aix'
             'plinux' : ['ppc64le_linux'],
             'plinuxcmake' : ['ppc64le_linux_cm'],
             'plinuxcm' : ['ppc64le_linux_cm'],
+            'plinuxcriu' : ['ppc64le_linux_criu'],
             'plinuxuma' : ['ppc64le_linux_uma'],
             'plinuxjit' : ['ppc64le_linux_jit'],
             'plinuxlargeheap' : ['ppc64le_linux_xl'],
@@ -202,6 +208,7 @@ SHORT_NAMES = ['all' : ['ppc64le_linux','s390x_linux','x86-64_linux','ppc64_aix'
             'xlinux' : ['x86-64_linux'],
             'xlinuxcmake' : ['x86-64_linux_cm'],
             'xlinuxcm' : ['x86-64_linux_cm'],
+            'xlinuxcriu' : ['x86-64_linux_criu'],
             'xlinuxuma' : ['x86-64_linux_uma'],
             'xlinuxxlcm' : ['x86-64_linux_xl_cm'],
             'xlinuxxluma' : ['x86-64_linux_xl_uma'],
@@ -231,6 +238,7 @@ SHORT_NAMES = ['all' : ['ppc64le_linux','s390x_linux','x86-64_linux','ppc64_aix'
             'osxmxd': ['x86-64_mac_mixed'],
             'alinux64' : ['aarch64_linux'],
             'alinux64cm' : ['aarch64_linux_cm'],
+            'alinux64criu' : ['aarch64_linux_criu'],
             'alinux64uma' : ['aarch64_linux_uma'],
             'alinux64xl' : ['aarch64_linux_xl'],
             'alinux64xlcm' : ['aarch64_linux_xl_cm'],
@@ -447,13 +455,6 @@ try {
                                 def EXTRA_MAKE_OPTIONS = get_value_by_spec(EXTRA_MAKE_OPTIONS_MAP, SDK_VERSION, SPEC)
                                 def OPENJDK_CLONE_DIR = get_value_by_spec(OPENJDK_CLONE_DIR_MAP, SDK_VERSION, SPEC)
 
-                                def ADOPTOPENJDK_REPO = ''
-                                def ADOPTOPENJDK_BRANCH = ''
-                                if (ADOPTOPENJDK_MAP.get(SDK_VERSION)) {
-                                    ADOPTOPENJDK_REPO = ADOPTOPENJDK_MAP.get(SDK_VERSION).get('repoUrl')
-                                    ADOPTOPENJDK_BRANCH = ADOPTOPENJDK_MAP.get(SDK_VERSION).get('branch')
-                                }
-
                                 builds["${job_name}"] = {
                                     if (AUTOMATIC_GENERATION != 'false') {
                                         node(SETUP_LABEL) {
@@ -462,7 +463,7 @@ try {
                                         }
                                     }
                                     pipelinesStatus[job_name] = 'RUNNING'
-                                    build(job_name, REPO, BRANCH, SHAS, OPENJ9_REPO, OPENJ9_BRANCH, OMR_REPO, OMR_BRANCH, SPEC, SDK_VERSION, BUILD_NODE, TEST_NODE, EXTRA_GETSOURCE_OPTIONS, EXTRA_CONFIGURE_OPTIONS, EXTRA_MAKE_OPTIONS, OPENJDK_CLONE_DIR, ADOPTOPENJDK_REPO, ADOPTOPENJDK_BRANCH, AUTOMATIC_GENERATION, CUSTOM_DESCRIPTION, ARCHIVE_JAVADOC, CODE_COVERAGE)
+                                    build(job_name, REPO, BRANCH, SHAS, OPENJ9_REPO, OPENJ9_BRANCH, OMR_REPO, OMR_BRANCH, SPEC, SDK_VERSION, BUILD_NODE, TEST_NODE, EXTRA_GETSOURCE_OPTIONS, EXTRA_CONFIGURE_OPTIONS, EXTRA_MAKE_OPTIONS, OPENJDK_CLONE_DIR, ADOPTOPENJDK_REPO, ADOPTOPENJDK_BRANCH, AUTOMATIC_GENERATION, CUSTOM_DESCRIPTION, ARCHIVE_JAVADOC, CODE_COVERAGE, USE_TESTENV_PROPERTIES)
                                 }
                             }
                         }
@@ -526,7 +527,7 @@ try {
     draw_summary_table()
 }
 
-def build(JOB_NAME, OPENJDK_REPO, OPENJDK_BRANCH, SHAS, OPENJ9_REPO, OPENJ9_BRANCH, OMR_REPO, OMR_BRANCH, SPEC, SDK_VERSION, BUILD_NODE, TEST_NODE, EXTRA_GETSOURCE_OPTIONS, EXTRA_CONFIGURE_OPTIONS, EXTRA_MAKE_OPTIONS, OPENJDK_CLONE_DIR, ADOPTOPENJDK_REPO, ADOPTOPENJDK_BRANCH, AUTOMATIC_GENERATION, CUSTOM_DESCRIPTION, ARCHIVE_JAVADOC, CODE_COVERAGE) {
+def build(JOB_NAME, OPENJDK_REPO, OPENJDK_BRANCH, SHAS, OPENJ9_REPO, OPENJ9_BRANCH, OMR_REPO, OMR_BRANCH, SPEC, SDK_VERSION, BUILD_NODE, TEST_NODE, EXTRA_GETSOURCE_OPTIONS, EXTRA_CONFIGURE_OPTIONS, EXTRA_MAKE_OPTIONS, OPENJDK_CLONE_DIR, ADOPTOPENJDK_REPO, ADOPTOPENJDK_BRANCH, AUTOMATIC_GENERATION, CUSTOM_DESCRIPTION, ARCHIVE_JAVADOC, CODE_COVERAGE, USE_TESTENV_PROPERTIES) {
     stage ("${JOB_NAME}") {
         JOB = build job: JOB_NAME,
                 parameters: [
@@ -569,7 +570,8 @@ def build(JOB_NAME, OPENJDK_REPO, OPENJDK_BRANCH, SHAS, OPENJ9_REPO, OPENJ9_BRAN
                     string(name: 'SCM_REFSPEC', value: SCM_REFSPEC),
                     string(name: 'SCM_REPO', value: SCM_REPO),
                     booleanParam(name: 'ARCHIVE_JAVADOC', value: ARCHIVE_JAVADOC),
-                    booleanParam(name: 'CODE_COVERAGE', value: CODE_COVERAGE)]
+                    booleanParam(name: 'CODE_COVERAGE', value: CODE_COVERAGE),
+                    booleanParam(name: 'USE_TESTENV_PROPERTIES', value: USE_TESTENV_PROPERTIES)]
         return JOB
     }
 }
