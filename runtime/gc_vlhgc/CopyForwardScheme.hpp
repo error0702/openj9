@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 /**
@@ -301,6 +301,9 @@ private:
 	 */
 	MMINLINE void scanOwnableSynchronizerObjectSlots(MM_EnvironmentVLHGC *env, MM_AllocationContextTarok *reservingContext, J9Object *objectPtr, ScanReason reason);
 
+
+	MMINLINE void scanContinuationNativeSlots(MM_EnvironmentVLHGC *env, MM_AllocationContextTarok *reservingContext, J9Object *objectPtr, ScanReason reason);
+	MMINLINE void scanContinuationObject(MM_EnvironmentVLHGC *env, MM_AllocationContextTarok *reservingContext, J9Object *objectPtr, ScanReason reason);
 	/**
 	 * Called whenever a ownable synchronizer object is scaned during CopyForwardScheme. Places the object on the thread-specific buffer of gc work thread.
 	 * @param env -- current thread environment
@@ -315,8 +318,9 @@ private:
 	 * @param reservingContext[in] The context to which we would prefer to copy any objects discovered in this method
 	 * @param objectPtr current object being scanned.
 	 * @param reason to scan (dirty card, packet, scan cache, overflow)
+	 * @return true if all slots have been copied successfully
 	 */
-	void scanMixedObjectSlots(MM_EnvironmentVLHGC *env, MM_AllocationContextTarok *reservingContext, J9Object *objectPtr, ScanReason reason);
+	bool scanMixedObjectSlots(MM_EnvironmentVLHGC *env, MM_AllocationContextTarok *reservingContext, J9Object *objectPtr, ScanReason reason);
 	/**
 	 * Scan the slots of a reference mixed object.
 	 * Copy and forward all relevant slots values found in the object.
@@ -524,7 +528,7 @@ private:
 	 * @param listLock[out] Returns the lock associated with the returned memory
 	 * @return a pointer to the storage reserved for allocation, or NULL on failure.
 	 */
-	void *reserveMemoryForObject(MM_EnvironmentVLHGC *env, UDATA compactGroup, UDATA objectSize, MM_LightweightNonReentrantLock** listLock);
+	void *reserveMemoryForObject(MM_EnvironmentVLHGC *env, uintptr_t compactGroup, uintptr_t objectSize, MM_LightweightNonReentrantLock** listLock);
 
 	/**
 	 * Reserve memory for a general cache to be used as the copy destination of a survivor space.
@@ -536,7 +540,7 @@ private:
 	 * @param listLock[out] Returns the lock associated with the returned memory
 	 * @return true if the cache was allocated, false otherwise.
 	 */
-	bool reserveMemoryForCache(MM_EnvironmentVLHGC *env, UDATA compactGroup, UDATA maxCacheSize, void **addrBase, void **addrTop, MM_LightweightNonReentrantLock** listLock);
+	bool reserveMemoryForCache(MM_EnvironmentVLHGC *env, uintptr_t compactGroup, uintptr_t maxCacheSize, void **addrBase, void **addrTop, MM_LightweightNonReentrantLock** listLock);
 
 	/**
 	 * Creates a new chunk of scan caches by using heap memory and attaches them to the free cache list.
@@ -553,7 +557,7 @@ private:
 	 * @param objectReserveSizeInBytes Amount of bytes to be reserved (can be greater than the original object size) for copying.
 	 * @return a CopyScanCache which contains the reserved memory or NULL if the reserve was not successful.
 	 */
-	MMINLINE MM_CopyScanCacheVLHGC *reserveMemoryForCopy(MM_EnvironmentVLHGC *env, J9Object *objectToEvacuate, MM_AllocationContextTarok *reservingContext, UDATA objectReserveSizeInBytes);
+	MMINLINE MM_CopyScanCacheVLHGC *reserveMemoryForCopy(MM_EnvironmentVLHGC *env, J9Object *objectToEvacuate, MM_AllocationContextTarok *reservingContext, uintptr_t objectReserveSizeInBytes);
 
 	void flushCaches(MM_CopyScanCacheVLHGC *cache);
 	
@@ -771,6 +775,7 @@ private:
 	void scanFinalizableList(MM_EnvironmentVLHGC *env, j9object_t headObject);
 #endif /* J9VM_GC_FINALIZATION */
 
+	void scanContinuationObjects(MM_EnvironmentVLHGC *env);
 	/**
 	 * Clear the cycle's mark map for all regions that are part of the evacuate set.
 	 * @param env GC thread.
@@ -1123,11 +1128,9 @@ public:
 		return false;
 	}
 
-	void abandonTLHRemainder(MM_EnvironmentVLHGC *env, bool preserveRemainders = false);
+	void abandonTLHRemainders(MM_EnvironmentVLHGC *env);
+	void doStackSlot(MM_EnvironmentVLHGC *env, J9Object *fromObject, J9Object** slotPtr, J9StackWalkState *walkState, const void *stackLocation);
 
-	/* after Global GC or before first PGC after GMP, we need to reset all of TLHRemainders */
-	void resetAllTLHRemainders(MM_EnvironmentVLHGC *env);
-	MMINLINE void discardHeapChunk(MM_CopyForwardCompactGroup *compactGroupForMarkData, void *base, void *top);
 	friend class MM_CopyForwardGMPCardCleaner;
 	friend class MM_CopyForwardNoGMPCardCleaner;
 	friend class MM_CopyForwardSchemeTask;
@@ -1135,5 +1138,11 @@ public:
 	friend class MM_CopyForwardSchemeRootClearer;
 	friend class MM_CopyForwardSchemeAbortScanner;
 };
+
+typedef struct StackIteratorData4CopyForward {
+	MM_CopyForwardScheme *copyForwardScheme;
+	MM_EnvironmentVLHGC *env;
+	J9Object *fromObject;
+} StackIteratorData4CopyForward;
 
 #endif /* COPYFORWARDSCHEME_HPP_ */

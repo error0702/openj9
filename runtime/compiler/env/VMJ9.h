@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #ifndef VMJ9_h
@@ -65,6 +65,7 @@ class TR_PersistentClassInfo;
 #if defined(J9VM_OPT_JITSERVER)
 class TR_Listener;
 class JITServerStatisticsThread;
+class MetricsServer;
 #endif /* defined(J9VM_OPT_JITSERVER) */
 struct TR_CallSite;
 struct TR_CallTarget;
@@ -127,6 +128,7 @@ typedef struct TR_JitPrivateConfig
 #if defined(J9VM_OPT_JITSERVER)
    TR_Listener   *listener;
    JITServerStatisticsThread   *statisticsThreadObject;
+   MetricsServer *metricsServer;
 #endif /* defined(J9VM_OPT_JITSERVER) */
    TR::CodeCacheManager *codeCacheManager; // reachable from JitPrivateConfig for kca's benefit
    TR_DataCacheManager *dcManager;  // reachable from JitPrivateConfig for kca's benefit
@@ -134,7 +136,7 @@ typedef struct TR_JitPrivateConfig
    TR_YesNoMaybe aotValidHeader;
    void          (*j9jitrt_lock_log)(void *voidConfig);
    void          (*j9jitrt_unlock_log)(void *voidConfig);
-   int           (*j9jitrt_printf)(void *voidConfig, char *format, ...) ;
+   int           (*j9jitrt_printf)(void *voidConfig, const char *format, ...) ;
 
    // Runtime phase profiling buffer
    //
@@ -160,37 +162,37 @@ TR_StaticFinalData
 extern "C" {
 #endif
 
-   J9VMThread * getJ9VMThreadFromTR_VM(void * vm);
+   J9VMThread * getJ9VMThreadFromTR_VM(void *vm);
    J9JITConfig * getJ9JitConfigFromFE(void *vm);
-   TR::FILE *j9jit_fopen(char *fileName, const char *mode, bool useJ9IO);
+   TR::FILE *j9jit_fopen(const char *fileName, const char *mode, bool useJ9IO);
    void j9jit_fclose(TR::FILE *pFile);
    void j9jit_seek(void *voidConfig, TR::FILE *pFile, IDATA offset, I_32 whence);
    IDATA j9jit_read(void *voidConfig, TR::FILE *pFile, void *buf, IDATA nbytes);
    void j9jit_fflush(TR::FILE *pFile);
    void j9jit_lock_vlog(void *voidConfig);
    void j9jit_unlock_vlog(void *voidConfig);
-   void j9jit_printf(void *voidConfig, char *format, ...);
-   I_32 j9jit_vprintf(void *voidConfig, char *format, va_list args);
-   I_32 j9jit_fprintf(TR::FILE *pFile, char *format, ...);
-   I_32 j9jit_vfprintf(TR::FILE *pFile, char *format, va_list args);
+   void j9jit_printf(void *voidConfig, const char *format, ...);
+   I_32 j9jit_vprintf(void *voidConfig, const char *format, va_list args);
+   I_32 j9jit_fprintf(TR::FILE *pFile, const char *format, ...);
+   I_32 j9jit_vfprintf(TR::FILE *pFile, const char *format, va_list args);
 
    void j9jitrt_lock_log(void *voidConfig);
    void j9jitrt_unlock_log(void *voidConfig);
-   I_32 j9jitrt_printf(void *voidConfig, char *format, ...);
+   I_32 j9jitrt_printf(void *voidConfig, const char *format, ...);
 
-   I_32 j9jit_fopenName(char *fileName);
-   I_32 j9jit_fopen_existing(char *fileName);
-   I_32 j9jit_fmove(char * pathExist, char * pathNew);
+   I_32 j9jit_fopenName(const char *fileName);
+   I_32 j9jit_fopen_existing(const char *fileName);
+   I_32 j9jit_fmove(const char * pathExist, const char * pathNew);
    void j9jit_fcloseId(I_32 fileId);
-   I_32 j9jit_fread(I_32 fd, void * buf, IDATA nbytes);
+   I_32 j9jit_fread(I_32 fd, void *buf, IDATA nbytes);
    I_32 j9jit_fseek(I_32 fd, I_32 whence);
    I_64 j9jit_time_current_time_millis();
-   I_32 j9jit_vfprintfId(I_32 fileId, char *format, ...);
-   I_32 j9jit_fprintfId(I_32 fileId, char *format, ...);
+   I_32 j9jit_vfprintfId(I_32 fileId, const char *format, ...);
+   I_32 j9jit_fprintfId(I_32 fileId, const char *format, ...);
 
    void jitHookClassLoadHelper(J9VMThread *vmThread,
-                               J9JITConfig * jitConfig,
-                               J9Class * cl,
+                               J9JITConfig *jitConfig,
+                               J9Class *cl,
                                TR::CompilationInfo *compInfo,
                                UDATA *classLoadEventFailed);
 
@@ -241,6 +243,7 @@ public:
    virtual bool needsContiguousCodeAndDataCacheAllocation() { return false; }
    virtual bool supportsJitMethodEntryAlignment() { return true; }
    virtual bool canUseSymbolValidationManager() { return false; }
+   virtual bool canTrackAOTDependencies() { return false; }
 
 /////
    // Inlining optimization
@@ -251,6 +254,14 @@ public:
 /////
    virtual bool isGetImplInliningSupported();
 
+   /**
+    * \brief Indicates whether the native \c java.lang.ref.Reference
+    * methods, \c getImpl and \c refersTo, can be inlined.
+    *
+    * \return \c true if they can be inlined; \c false otherwise
+    */
+   virtual bool isGetImplAndRefersToInliningSupported();
+
    virtual uintptr_t getClassDepthAndFlagsValue(TR_OpaqueClassBlock * classPointer);
    virtual uintptr_t getClassFlagsValue(TR_OpaqueClassBlock * classPointer);
 
@@ -258,7 +269,6 @@ public:
    virtual bool isCloneable(TR_OpaqueClassBlock *);
    virtual bool isInterfaceClass(TR_OpaqueClassBlock * clazzPointer);
    virtual bool isConcreteClass(TR_OpaqueClassBlock * clazzPointer);
-   virtual bool isEnumClass(TR_OpaqueClassBlock * clazzPointer, TR_ResolvedMethod *method);
    virtual bool isPrimitiveClass(TR_OpaqueClassBlock *clazz);
    virtual bool isPrimitiveArray(TR_OpaqueClassBlock *);
    virtual bool isReferenceArray(TR_OpaqueClassBlock *);
@@ -275,6 +285,7 @@ public:
    virtual bool needClassAndMethodPointerRelocations() { return false; }
    virtual bool needRelocationsForStatics() { return false; }
    virtual bool needRelocationsForCurrentMethodPC() { return false; }
+   virtual bool needRelocationsForCurrentMethodStartPC() { return false; }
    virtual bool needRelocationsForBodyInfoData() { return false; }
    virtual bool needRelocationsForPersistentInfoData() { return false; }
    virtual bool needRelocationsForLookupEvaluationData() { return false; }
@@ -287,15 +298,15 @@ public:
 
    virtual TR::DataType dataTypeForLoadOrStore(TR::DataType dt) { return (dt == TR::Int8 || dt == TR::Int16) ? TR::Int32 : dt; }
 
-   static bool createGlobalFrontEnd(J9JITConfig * jitConfig, TR::CompilationInfo * compInfo);
+   static bool createGlobalFrontEnd(J9JITConfig *jitConfig, TR::CompilationInfo *compInfo);
    static TR_J9VMBase * get(J9JITConfig *, J9VMThread *, VM_TYPE vmType=DEFAULT_VM);
    static char *getJ9FormattedName(J9JITConfig *, J9PortLibrary *, char *, size_t, char *, char *, bool suffix=false);
 
    int32_t *getStringClassEnableCompressionFieldAddr(TR::Compilation *comp, bool isVettedForAOT);
-   virtual bool stringEquals(TR::Compilation * comp, uintptr_t* stringLocation1, uintptr_t* stringLocation2, int32_t& result);
-   virtual bool getStringHashCode(TR::Compilation * comp, uintptr_t* stringLocation, int32_t& result);
+   virtual bool stringEquals(TR::Compilation *comp, uintptr_t *stringLocation1, uintptr_t *stringLocation2, int32_t &result);
+   virtual bool getStringHashCode(TR::Compilation *comp, uintptr_t *stringLocation, int32_t &result);
 
-   virtual bool isThunkArchetype(J9Method * method);
+   virtual bool isThunkArchetype(J9Method *method);
 
    J9VMThread * vmThread();
 
@@ -305,22 +316,22 @@ public:
    bool fsdIsEnabled() { return _flags.testAny(FSDIsEnabled); }
    void setFSDIsEnabled(bool b) { _flags.set(FSDIsEnabled, b); }
 
-   uint32_t getInstanceFieldOffset(TR_OpaqueClassBlock * classPointer, char * fieldName, char * sig)
+   uint32_t getInstanceFieldOffset(TR_OpaqueClassBlock *classPointer, const char *fieldName, const char *sig)
       {
       return getInstanceFieldOffset(classPointer, fieldName, (uint32_t)strlen(fieldName), sig, (uint32_t)strlen(sig));
       }
-   uint32_t getInstanceFieldOffset(TR_OpaqueClassBlock * classPointer, char * fieldName, char * sig, uintptr_t options)
+   uint32_t getInstanceFieldOffset(TR_OpaqueClassBlock *classPointer, const char *fieldName, const char *sig, uintptr_t options)
       {
       return getInstanceFieldOffset(classPointer, fieldName, (uint32_t)strlen(fieldName), sig, (uint32_t)strlen(sig), options);
       }
 
-   virtual uint32_t getInstanceFieldOffset(TR_OpaqueClassBlock * classPointer, char * fieldName,
-                                                     uint32_t fieldLen, char * sig, uint32_t sigLen, UDATA options);
-   virtual uint32_t getInstanceFieldOffset(TR_OpaqueClassBlock * classPointer, char * fieldName,
-                                                     uint32_t fieldLen, char * sig, uint32_t sigLen);
+   virtual uint32_t getInstanceFieldOffset(TR_OpaqueClassBlock *classPointer, const char *fieldName,
+                                                     uint32_t fieldLen, const char *sig, uint32_t sigLen, UDATA options);
+   virtual uint32_t getInstanceFieldOffset(TR_OpaqueClassBlock *classPointer, const char *fieldName,
+                                                     uint32_t fieldLen, const char *sig, uint32_t sigLen);
 
    // Not implemented
-   virtual TR_ResolvedMethod * getObjectNewInstanceImplMethod(TR_Memory *) { return 0; }
+   virtual TR_ResolvedMethod *getObjectNewInstanceImplMethod(TR_Memory *) { return 0; }
 
    virtual bool stackWalkerMaySkipFrames(TR_OpaqueMethodBlock *method, TR_OpaqueClassBlock *methodClass) = 0;
 
@@ -329,12 +340,80 @@ public:
    virtual bool supportsGuardMerging()        { return true; }
    virtual bool canDevirtualizeDispatch()     { return true; }
    virtual bool doStringPeepholing()          { return true; }
+   virtual bool isPortableSCCEnabled();
 
-   virtual bool forceUnresolvedDispatch() { return false; }
+   /**
+    * \brief Determine whether resolved direct dispatch is guaranteed.
+    *
+    * Resolved direct dispatch means that the sequence generated for a resolved
+    * direct call will not attempt to resolve a constant pool entry at runtime.
+    * If resolved direct dispatch is guaranteed, the compiler may generate
+    * resolved direct call nodes that do not correspond straightforwardly to
+    * any invokespecial or invokestatic bytecode instruction, e.g. for private
+    * invokevirtual, private invokeinterface, invokeinterface calling final
+    * Object methods, and refined invokeBasic(), linkToSpecial(), and
+    * linkToStatic(). If OTOH it is not guaranteed, the compiler must refrain
+    * from creating such call nodes.
+    *
+    * Note that even if resolved direct dispatch is not guaranteed, there may
+    * be special cases in which it is nonetheless possible or even required for
+    * code generation. This query simply determines whether it can be relied
+    * upon by earlier stages of the compiler.
+    *
+    * \param[in] comp the compilation object
+    * \return true if resolved direct dispatch is guaranteed, false otherwise
+    */
+   virtual bool isResolvedDirectDispatchGuaranteed(TR::Compilation *comp)
+      {
+      return true;
+      }
 
-   virtual TR_OpaqueMethodBlock * getMethodFromClass(TR_OpaqueClassBlock *, char *, char *, TR_OpaqueClassBlock * = NULL);
+   /**
+    * \brief Determine whether resolved virtual dispatch is guaranteed.
+    *
+    * Resolved virtual dispatch means that the sequence generated for a
+    * resolved virtual call will not attempt to resolve a constant pool entry
+    * at runtime. If resolved virtual dispatch is guaranteed, the compiler may
+    * generate resolved virtual call nodes that do not correspond
+    * straightforwardly to any invokevirtual bytecode instruction, e.g. for
+    * refined invokeVirtual(), and for invokeinterface calling non-final Object
+    * methods. If OTOH it is not guaranteed, the compiler must refrain from
+    * creating such call nodes.
+    *
+    * Note that even if resolved virtual dispatch is not guaranteed, there may
+    * be special cases in which it is nonetheless possible or even required for
+    * code generation. This query simply determines whether it can be relied
+    * upon by earlier stages of the compiler.
+    *
+    * \param[in] comp the compilation object
+    * \return true if resolved virtual dispatch is guaranteed, false otherwise
+    */
+   virtual bool isResolvedVirtualDispatchGuaranteed(TR::Compilation *comp)
+      {
+      return true;
+      }
 
-   TR_OpaqueMethodBlock * getMatchingMethodFromNameAndSignature(TR_OpaqueClassBlock * classPointer, const char* methodName, const char *signature, bool validate = true);
+   // NOTE: isResolvedInterfaceDispatchGuaranteed() is omitted because there is
+   // not yet any such thing as a resolved interface call node. At present, any
+   // transformation (e.g. refinement of linkToInterface()) that would require
+   // a resolved interface dispatch guarantee is simply impossible. If/when
+   // resolved interface calls are implemented in order to allow for such
+   // transformations, this query should be defined as well.
+
+   // Get the length needed to contain the class chain associated with this class
+   uintptr_t necessaryClassChainLength(J9Class *clazz) { return 2 + numInterfacesImplemented(clazz) + numSuperclasses(clazz); }
+   uint32_t numInterfacesImplemented(J9Class *clazz);
+   uintptr_t numSuperclasses(J9Class *clazz) { return TR::Compiler->cls.classDepthOf(convertClassPtrToClassOffset(clazz)); }
+
+protected:
+   // Shared logic for both TR_J9SharedCacheVM and TR_J9SharedCacheServerVM
+   bool isAotResolvedDirectDispatchGuaranteed(TR::Compilation *comp);
+   bool isAotResolvedVirtualDispatchGuaranteed(TR::Compilation *comp);
+
+public:
+   virtual TR_OpaqueMethodBlock *getMethodFromClass(TR_OpaqueClassBlock *, const char *, const char *, TR_OpaqueClassBlock * = NULL);
+
+   TR_OpaqueMethodBlock *getMatchingMethodFromNameAndSignature(TR_OpaqueClassBlock *classPointer, const char* methodName, const char *signature, bool validate = true);
 
    virtual void getResolvedMethods(TR_Memory *, TR_OpaqueClassBlock *, List<TR_ResolvedMethod> *);
    /**
@@ -355,14 +434,39 @@ public:
 
    TR_OpaqueMethodBlock *getResolvedInterfaceMethod(J9ConstantPool *ownerCP, TR_OpaqueClassBlock * classObject, int32_t cpIndex);
 
-   uintptr_t getReferenceField(uintptr_t objectPointer, char *fieldName, char *fieldSignature)
+   uintptr_t getReferenceField(uintptr_t objectPointer, const char *fieldName, const char *fieldSignature)
       {
       return getReferenceFieldAt(objectPointer, getInstanceFieldOffset(getObjectClass(objectPointer), fieldName, fieldSignature));
       }
-   uintptr_t getVolatileReferenceField(uintptr_t objectPointer, char *fieldName, char *fieldSignature)
+   uintptr_t getVolatileReferenceField(uintptr_t objectPointer, const char *fieldName, const char *fieldSignature)
       {
       return getVolatileReferenceFieldAt(objectPointer, getInstanceFieldOffset(getObjectClass(objectPointer), fieldName, fieldSignature));
       }
+
+   /**
+    * @brief Get the known object index of a MethodHandle cached in a VarHandle's MH table
+    * corresponding to the access descriptor. When the VarHandle is known, we can evaluate
+    * the result of java/lang/invoke/Invokers.checkVarHandleGenericType at compile time and
+    * obtain the MethodHandle which can then allow us to inline the call target.
+    *
+    * @param comp the compilation
+    * @param vhIndex the VarHandle object index
+    * @param adIndex the AccessDescriptor object index
+    * @return TR::KnownObjectTable::Index the MH object index if success, TR::KnownObjectTable::UNKNOWN otherwise
+    */
+   virtual TR::KnownObjectTable::Index getMethodHandleTableEntryIndex(TR::Compilation *comp, TR::KnownObjectTable::Index vhIndex, TR::KnownObjectTable::Index adIndex);
+
+   /**
+    * @brief Get the known object index of a cached MemorySegmentView VarHandle belonging to a value Layout object.
+    * When the Layout object is known, we can evaluate the result of
+    * jdk/internal/foreign/layout/ValueLayouts$AbstractValueLayout.accessHandle()Ljava/lang/invoke/VarHandle;
+    * as long as the layout object's handle field is not null.
+    *
+    * @param comp the compilation
+    * @param layoutIndex the ValueLayout$AbstractValueLayout object index
+    * @return TR::KnownObjectTable::Index the known object index of the MemorySegmentView VarHandle, TR::KnownObjectTable::UNKNOWN otherwise
+    */
+   virtual TR::KnownObjectTable::Index getLayoutVarHandle(TR::Compilation *comp, TR::KnownObjectTable::Index layoutIndex);
 
    virtual TR::Method * createMethod(TR_Memory *, TR_OpaqueClassBlock *, int32_t);
    virtual TR_ResolvedMethod * createResolvedMethod(TR_Memory *, TR_OpaqueMethodBlock *, TR_ResolvedMethod * = 0, TR_OpaqueClassBlock * = 0);
@@ -431,8 +535,6 @@ public:
 
    virtual TR::TreeTop *lowerTree(TR::Compilation *, TR::Node *, TR::TreeTop *);
 
-   virtual bool canRelocateDirectNativeCalls() {return true; }
-
    virtual bool storeOffsetToArgumentsInVirtualIndirectThunks() { return false; }
 
 
@@ -449,7 +551,10 @@ public:
    virtual uintptr_t         thisThreadGetJavaPCOffset();
    virtual uintptr_t         thisThreadGetJavaSPOffset();
    virtual uintptr_t         thisThreadGetJavaLiteralsOffset();
-
+#if JAVA_SPEC_VERSION >= 19
+   virtual uintptr_t         thisThreadGetOwnedMonitorCountOffset();
+   virtual uintptr_t         thisThreadGetCallOutCountOffset();
+#endif
    // Move to CompilerEnv VM?
    virtual uintptr_t         thisThreadGetSystemSPOffset();
 
@@ -469,7 +574,8 @@ public:
    uintptr_t                 getOffsetOfSuperclassesInClassObject();
    uintptr_t                 getOffsetOfBackfillOffsetField();
 
-   virtual TR_OpaqueClassBlock * getBaseComponentClass(TR_OpaqueClassBlock * clazz, int32_t & numDims) { return 0; }
+   static TR_OpaqueClassBlock *staticGetBaseComponentClass(TR_OpaqueClassBlock *clazz, int32_t &numDims);
+   virtual TR_OpaqueClassBlock *getBaseComponentClass(TR_OpaqueClassBlock *clazz, int32_t &numDims) { return NULL; }
 
    bool vftFieldRequiresMask(){ return ~TR::Compiler->om.maskOfObjectVftField() != 0; }
 
@@ -529,6 +635,7 @@ public:
    virtual TR_OpaqueClassBlock *getObjectClass(uintptr_t objectPointer);
    virtual TR_OpaqueClassBlock *getObjectClassAt(uintptr_t objectAddress);
    virtual TR_OpaqueClassBlock *getObjectClassFromKnownObjectIndex(TR::Compilation *comp, TR::KnownObjectTable::Index idx);
+   virtual TR_OpaqueClassBlock *getObjectClassFromKnownObjectIndex(TR::Compilation *comp, TR::KnownObjectTable::Index idx, bool *isJavaLangClass);
    virtual uintptr_t           getReferenceFieldAt(uintptr_t objectPointer, uintptr_t offsetFromHeader);
    virtual uintptr_t           getVolatileReferenceFieldAt(uintptr_t objectPointer, uintptr_t offsetFromHeader);
    virtual uintptr_t           getReferenceFieldAtAddress(uintptr_t fieldAddress);
@@ -536,24 +643,38 @@ public:
    virtual uintptr_t           getStaticReferenceFieldAtAddress(uintptr_t fieldAddress);
    virtual int32_t              getInt32FieldAt(uintptr_t objectPointer, uintptr_t fieldOffset);
 
-   int32_t getInt32Field(uintptr_t objectPointer, char *fieldName)
+   /* Used to contain all information needed for getObjectClassInfoFromObjectReferenceLocation
+    * to create a VPKnownObject constraint.
+    */
+   struct ObjectClassInfo
+      {
+      TR_OpaqueClassBlock *clazz;
+      TR_OpaqueClassBlock *jlClass;
+      bool isFixedJavaLangClass;
+      bool isString;
+      TR::KnownObjectTable::Index knownObjectIndex;
+      };
+   virtual ObjectClassInfo getObjectClassInfoFromObjectReferenceLocation
+                                    (TR::Compilation *comp, uintptr_t objectReferenceLocation);
+
+   int32_t getInt32Field(uintptr_t objectPointer, const char *fieldName)
       {
       return getInt32FieldAt(objectPointer, getInstanceFieldOffset(getObjectClass(objectPointer), fieldName, "I"));
       }
 
-   int64_t getInt64Field(uintptr_t objectPointer, char *fieldName)
+   int64_t getInt64Field(uintptr_t objectPointer, const char *fieldName)
       {
       return getInt64FieldAt(objectPointer, getInstanceFieldOffset(getObjectClass(objectPointer), fieldName, "J"));
       }
    virtual int64_t              getInt64FieldAt(uintptr_t objectPointer, uintptr_t fieldOffset);
    virtual void                 setInt64FieldAt(uintptr_t objectPointer, uintptr_t fieldOffset, int64_t newValue);
-   void setInt64Field(uintptr_t objectPointer, char *fieldName, int64_t newValue)
+   void setInt64Field(uintptr_t objectPointer, const char *fieldName, int64_t newValue)
       {
       setInt64FieldAt(objectPointer, getInstanceFieldOffset(getObjectClass(objectPointer), fieldName, "J"), newValue);
       }
 
    virtual bool                 compareAndSwapInt64FieldAt(uintptr_t objectPointer, uintptr_t fieldOffset, int64_t oldValue, int64_t newValue);
-   bool compareAndSwapInt64Field(uintptr_t objectPointer, char *fieldName, int64_t oldValue, int64_t newValue)
+   bool compareAndSwapInt64Field(uintptr_t objectPointer, const char *fieldName, int64_t oldValue, int64_t newValue)
       {
       return compareAndSwapInt64FieldAt(objectPointer, getInstanceFieldOffset(getObjectClass(objectPointer), fieldName, "J"), oldValue, newValue);
       }
@@ -564,6 +685,8 @@ public:
 
    virtual TR_OpaqueClassBlock *getClassFromJavaLangClass(uintptr_t objectPointer);
    virtual TR_arrayTypeCode    getPrimitiveArrayTypeCode(TR_OpaqueClassBlock* clazz);
+   virtual TR::DataType        getClassPrimitiveDataType(TR_OpaqueClassBlock* clazz);
+   virtual TR_OpaqueClassBlock *getArrayClassFromDataType(TR::DataType type, bool booleanClass);
    virtual TR_OpaqueClassBlock * getSystemClassFromClassName(const char * name, int32_t length, bool callSiteVettedForAOT=false) { return 0; }
    virtual TR_OpaqueClassBlock * getByteArrayClass();
 
@@ -583,7 +706,7 @@ public:
    virtual uintptr_t         getConstantPoolFromClass(TR_OpaqueClassBlock *);
 
    virtual uintptr_t         getOffsetOfIsArrayFieldFromRomClass();
-   virtual uintptr_t         getOffsetOfClassAndDepthFlags();
+   virtual uintptr_t         getOffsetOfClassDepthAndFlags();
    virtual uintptr_t         getOffsetOfClassFlags();
    virtual uintptr_t         getOffsetOfArrayComponentTypeField();
    virtual uintptr_t         getOffsetOfIndexableSizeField();
@@ -619,12 +742,7 @@ public:
    virtual uintptr_t         getCellSizeForSizeClass(uintptr_t);
    virtual uintptr_t         getObjectSizeClass(uintptr_t);
 
-   uintptr_t                 thisThreadMonitorCacheOffset();
    uintptr_t                 thisThreadOSThreadOffset();
-
-   uintptr_t                 getMonitorNextOffset();
-   uintptr_t                 getMonitorOwnerOffset();
-   uintptr_t                 getMonitorEntryCountOffset();
 
    uintptr_t                 getRealtimeSizeClassesOffset();
    uintptr_t                 getSmallCellSizesOffset();
@@ -691,7 +809,6 @@ public:
    virtual bool isQueuedForVeryHotOrScorching(TR_ResolvedMethod *calleeMethod, TR::Compilation *comp);
 
    //getSymbolAndFindInlineTarget queries
-   virtual bool supressInliningRecognizedInitialCallee(TR_CallSite* callsite, TR::Compilation* comp);
    virtual int checkInlineableWithoutInitialCalleeSymbol (TR_CallSite* callsite, TR::Compilation* comp);
 
 #ifdef J9VM_OPT_JAVA_CRYPTO_ACCELERATION
@@ -699,7 +816,19 @@ public:
    virtual bool inlineNativeCryptoMethod(TR::Node *callNode, TR::Compilation *comp);
 #endif
 
-   virtual TR::Node * inlineNativeCall(TR::Compilation *,  TR::TreeTop *, TR::Node *) { return 0; }
+   /**
+    * \brief Generates inline IL for recognized native method calls, if possible
+    *
+    * \param[in] comp The current \ref TR::Compilation object
+    * \param[in] callNodeTreeTop The \ref TR::TreeTop that contains the \c callNode
+    * \param[in] callNode The \ref TR::Node for the native call that is to be inlined
+    *
+    * \return A \ref TR::Node representing the result of the call, if the call was
+    *         inlined.  If the call was not inlined, and
+    *         - the call might need to be processed as a direct JNI call, \c NULL is returned;
+    *         - otherwise, \c callNode is returned.
+    */
+   virtual TR::Node * inlineNativeCall(TR::Compilation *comp,  TR::TreeTop * callNodeTreeTop, TR::Node *callNode) { return 0; }
 
    virtual bool               inlinedAllocationsMustBeVerified() { return false; }
 
@@ -742,9 +871,8 @@ public:
    virtual bool     needsInvokeExactJ2IThunk(TR::Node *node,  TR::Compilation *comp);
    virtual void setInvokeExactJ2IThunk(void *thunkptr, TR::Compilation *comp);
 
-   virtual void *findPersistentJ2IThunk(char *signatureChars);
-   virtual void *findPersistentThunk(char *signatureChars, uint32_t signatureLength);
-   virtual void * persistJ2IThunk(void *thunk);
+   virtual void *findPersistentMHJ2IThunk(char *signatureChars);
+   virtual void * persistMHJ2IThunk(void *thunk);
 
 
    // Object manipulation
@@ -756,7 +884,7 @@ public:
    virtual uintptr_t *mutableCallSite_bypassLocation(uintptr_t mutableCallSite);
    virtual uintptr_t *mutableCallSite_findOrCreateBypassLocation(uintptr_t mutableCallSite);
 
-   virtual TR_OpaqueMethodBlock *lookupArchetype(TR_OpaqueClassBlock *clazz, char *name, char *signature);
+   virtual TR_OpaqueMethodBlock *lookupArchetype(TR_OpaqueClassBlock *clazz, const char *name, const char *signature);
    virtual TR_OpaqueMethodBlock *lookupMethodHandleThunkArchetype(uintptr_t methodHandle);
    virtual TR_ResolvedMethod    *createMethodHandleArchetypeSpecimen(TR_Memory *, uintptr_t *methodHandleLocation, TR_ResolvedMethod *owningMethod = 0);
    virtual TR_ResolvedMethod    *createMethodHandleArchetypeSpecimen(TR_Memory *, TR_OpaqueMethodBlock *archetype, uintptr_t *methodHandleLocation, TR_ResolvedMethod *owningMethod = 0); // more efficient if you already know the archetype
@@ -795,30 +923,39 @@ public:
     *    VM access is not required
     */
    virtual TR_OpaqueMethodBlock* targetMethodFromMethodHandle(TR::Compilation* comp, TR::KnownObjectTable::Index objIndex);
+
+   /// A summary of the method dispatch information in a MemberName.
+   struct MemberNameMethodInfo
+      {
+      TR_OpaqueMethodBlock *vmtarget; ///< the target J9Method
+      uintptr_t vmindex; ///< the interpreter vtable offset, itable index, or -1
+      TR_OpaqueClassBlock *clazz; ///< the relevant subtype of the defining class of vmtarget
+      int32_t refKind; ///< one of the MH_REF_* constants (JVMS table 5.4.3.5-A)
+      };
+
    /*
-    * \brief
-    *    Return MemberName.vmindex, a J9JNIMethodID pointer containing vtable/itable offset for the MemberName method
-    *    Caller must acquire VM access
+    * \brief Summarize a MemberName representing a method or constructor.
+    *
+    * \param comp the compilation object
+    * \param objIndex the known object index of the MemberName object
+    * \param[out] out filled on success, zeroed on failure
+    * \return true on success, false on error (e.g. not a MemberName)
     */
-   virtual J9JNIMethodID* jniMethodIdFromMemberName(uintptr_t memberName);
-   /*
+   virtual bool getMemberNameMethodInfo(
+      TR::Compilation* comp,
+      TR::KnownObjectTable::Index objIndex,
+      MemberNameMethodInfo *out);
+
+   /**
     * \brief
-    *    Return MemberName.vmindex, a J9JNIMethodID pointer containing vtable/itable offset for the MemberName method
-    *    VM access is not required
+    *    invokedynamic resolution can either result in a valid entry in the corresponding CallSite table slot if successful,
+    *    or an exception object otherwise. The entry is considered valid when the object in the slot is an array type.
+    *    This helper must be used before trying to access elements of an invokeCacheArray corresponding to an invokedynamic bytecode
+    * \param invokeCacheArray the invokeCacheArray address
+    * \return true if entry is an array type; false otherwise
     */
-   virtual J9JNIMethodID* jniMethodIdFromMemberName(TR::Compilation* comp, TR::KnownObjectTable::Index objIndex);
-   /*
-    * \brief
-    *    Return vtable or itable index of a method represented by MemberName
-    *    Caller must acquire VM access
-    */
-   virtual uintptr_t vTableOrITableIndexFromMemberName(uintptr_t memberName);
-   /*
-    * \brief
-    *    Return vtable or itable index of a method represented by MemberName
-    *    VM access is not required
-    */
-   virtual uintptr_t vTableOrITableIndexFromMemberName(TR::Compilation* comp, TR::KnownObjectTable::Index objIndex);
+   virtual bool isInvokeCacheEntryAnArray(uintptr_t *invokeCacheArray);
+
    /*
     * \brief
     *    Create and return a resolved method from member name index of an invoke cache array.
@@ -912,7 +1049,7 @@ public:
     * \param mhIndex known object index of the java/lang/invoke/MemberName object
     * \param fieldName the name of the field for which we return the known object index
     */
-   virtual TR::KnownObjectTable::Index getMemberNameFieldKnotIndexFromMethodHandleKnotIndex(TR::Compilation *comp, TR::KnownObjectTable::Index mhIndex, char *fieldName);
+   virtual TR::KnownObjectTable::Index getMemberNameFieldKnotIndexFromMethodHandleKnotIndex(TR::Compilation *comp, TR::KnownObjectTable::Index mhIndex, const char *fieldName);
 
    /**
     * \brief
@@ -958,6 +1095,30 @@ public:
     */
    virtual bool isForceInline(TR_ResolvedMethod *method);
 
+   /**
+    * \brief Determine whether a method is annotated with @DontInline.
+    * \param method method
+    * \return true if a @DontInline annotation is present, false otherwise
+    */
+   virtual bool isDontInline(TR_ResolvedMethod *method);
+
+   /**
+    * \brief Determine whether a method is annotated with @IntrinsicCandidate.
+    * \param method method
+    * \return true if a @IntrinsicCandidate annotation is present, false otherwise
+    */
+   virtual bool isIntrinsicCandidate(TR_ResolvedMethod *method);
+
+   /**
+    * \brief Determine whether a method is annotated with @ChangesCurrentThread.
+    * This annotation is only intended for use within JCL code, and will be ignored
+    * if the method is not part of JCL.
+    *
+    * \param method the method
+    * \return true if method is part of JCL AND annotated with @ChangesCurrentThread, false otherwise.
+    */
+   virtual bool isChangesCurrentThread(TR_ResolvedMethod *method);
+
    /*
     * \brief
     *    tell whether it's possible to dereference a field given the field symbol at compile time
@@ -977,7 +1138,6 @@ public:
    virtual bool      isString(TR_OpaqueClassBlock *clazz);
    virtual TR_YesNoMaybe typeReferenceStringObject(TR_OpaqueClassBlock *clazz);
    virtual bool      isJavaLangObject(TR_OpaqueClassBlock *clazz);
-   virtual bool      isString(uintptr_t objectPointer);
    virtual int32_t   getStringLength(uintptr_t objectPointer);
    virtual uint16_t  getStringCharacter(uintptr_t objectPointer, int32_t index);
    virtual intptr_t getStringUTF8Length(uintptr_t objectPointer);
@@ -1125,7 +1285,7 @@ public:
 
    /**
     * \brief Load class flags field of the specified class and test whether the value type
-    *        field is set.
+    *        flag is set.
     * \param j9ClassRefNode A node representing a reference to a \ref J9Class
     * \return \ref TR::Node that evaluates to a non-zero integer if the class is a value type,
     *         or zero if the class is an identity type
@@ -1133,9 +1293,74 @@ public:
    TR::Node * testIsClassValueType(TR::Node *j9ClassRefNode);
 
    /**
+    * \brief Load class flags field of the specified class and test whether the hasIdentity
+    *        flag is set.
+    * \param j9ClassRefNode A node representing a reference to a \ref J9Class
+    * \return \ref TR::Node that evaluates to a non-zero integer if the class is an identity type,
+    *         or zero otherwise
+    */
+   TR::Node * testIsClassIdentityType(TR::Node *j9ClassRefNode);
+
+   /**
+    * \brief Generate IL to load the value of the \c componentType field of the specified
+    *        \ref J9ArrayClass.  The class must be a \ref J9ArrayClass or garbage will be loaded.
+    *        IL might load this field unconditionally, but must only dereference the loaded value
+    *        if the class actually is an array class.
+    * \param j9ClassRefNode A node representing a reference to a \ref J9Class
+    * \return A \ref TR::Node that loads the value of the \c componentType field
+    */
+   TR::Node * loadArrayClassComponentType(TR::Node *j9ClassRefNode);
+
+   /**
+    * \brief Generate IL to load the value of the \c classDepthAndFlags field of the
+    *        specified \ref J9Class.
+    * \param j9ClassRefNode A node representing a reference to a \ref J9Class
+    * \return A \ref TR::Node that loads the value of the \c classDepthAndFlags field
+    */
+   TR::Node * loadClassDepthAndFlags(TR::Node *j9ClassRefNode);
+
+   /**
+    * \brief Generate IL to load the \c classDepthAndFlags field of the specified
+    *        \ref J9Class, and apply the mask specified by \c flagsToTest.
+    * \param j9ClassRefNode A node representing a reference to a \ref J9Class
+    * \param flagsToTest Flags to use as a mask for the \ref classAndFlags field
+    * \return A \ref TR::Node that produces the result of loading \c classDepthAndFlags
+    *         and applying the \c flagsToTest mask to it.
+    */
+   TR::Node * testAreSomeClassDepthAndFlagsSet(TR::Node *j9ClassRefNode, uint32_t flagsToTest);
+
+   /**
+    * \brief Generate IL to test whether the specified \ref J9Class is an array class.
+    * \param j9ClassRefNode A node representing a reference to a \ref J9Class
+    * \return A \ref TR::Node that will evaluate to zero if the specified \ref J9Class
+    *         is not an array class, or the value of
+    *         \c TR::Compiler->cls.flagValueForArrayCheck (which is non-zero) if it is
+    *         an array class.
+    */
+   TR::Node * testIsClassArrayType(TR::Node *j9ClassRefNode);
+
+   /**
+    * \brief Generate IL to test whether the array's class is null-restricted
+    * \param j9ClassRefNode A node representing a reference to a \ref J9Class
+    * \return \ref TR::Node that tests whether the array's class flags has the
+    *         \ref J9ClassArrayIsNullRestricted flag set, yielding a non-zero result if the
+    *         flag is set, or zero otherwise.
+    */
+   TR::Node * testIsArrayClassNullRestrictedType(TR::Node *j9ClassRefNode);
+
+   /**
+    * \brief Test whether any of the specified flags is set on the array's component class
+    * \param arrayBaseAddressNode A node representing a reference to the array base address
+    * \param ifCmpOp If comparison opCode such as ificmpeq or ificmpne
+    * \param flagsToTest The class field flags that are to be checked
+    * \return \ref TR::Node that compares the masked array component class flags to a zero integer
+    */
+   TR::Node * checkSomeArrayCompClassFlags(TR::Node *arrayBaseAddressNode, TR::ILOpCodes ifCmpOp, uint32_t flagsToTest);
+
+   /**
     * \brief Check whether or not the array component class is value type
     * \param arrayBaseAddressNode A node representing a reference to the array base address
-    * \param ifCmpOp If comparison opCode such as ifcmpeq or ificmpne
+    * \param ifCmpOp If comparison opCode such as ificmpeq or ificmpne
     * \return \ref TR::Node that compares the array component class J9ClassIsValueType flag to a zero integer
     */
    TR::Node * checkArrayCompClassValueType(TR::Node *arrayBaseAddressNode, TR::ILOpCodes ifCmpOp);
@@ -1149,6 +1374,15 @@ public:
 
    virtual bool isAnonymousClass(TR_OpaqueClassBlock *j9clazz) { return (J9_ARE_ALL_BITS_SET(((J9Class*)j9clazz)->romClass->extraModifiers, J9AccClassAnonClass)); }
    virtual bool isAnonymousClass(J9ROMClass *romClass) { return (J9_ARE_ALL_BITS_SET(romClass->extraModifiers, J9AccClassAnonClass)); }
+
+   /**
+    * \brief Check whether or not the class object is a hidden class
+    *
+    * \param j9clazz the class location
+    * \return true if class is hidden class, false otherwise
+    */
+   virtual bool isHiddenClass(TR_OpaqueClassBlock *j9clazz) { return (J9_ARE_ALL_BITS_SET(((J9Class*)j9clazz)->romClass->extraModifiers, J9AccClassHidden)); }
+
    virtual int64_t getCpuTimeSpentInCompThread(TR::Compilation * comp); // resolution is 0.5 sec or worse. Returns -1 if unavailable
 
    virtual void * getClassLoader(TR_OpaqueClassBlock * classPointer);
@@ -1173,6 +1407,10 @@ public:
 
    TR_J9SharedCache *     _sharedCache;
 
+#if defined(J9VM_OPT_JITSERVER)
+   TR_J9DeserializerSharedCache *_deserializerSharedCache;
+#endif /* defined(J9VM_OPT_JITSERVER) */
+
    static int32_t *       staticDFPHWAvailField;
    static bool            cachedStaticDFPAvailField;
 
@@ -1187,16 +1425,23 @@ public:
    uint8_t *allocateDataCacheRecord(uint32_t numBytes,  TR::Compilation *comp, bool contiguous,
                                 bool *shouldRetryAllocation, uint32_t allocationType, uint32_t *size);
 
-   virtual int findOrCreateMethodSymRef(TR::Compilation* comp, TR::ResolvedMethodSymbol* owningMethodSym, char* classSig, char** methodSig, TR::SymbolReference** symRefs, int methodCount);
-   virtual int findOrCreateMethodSymRef(TR::Compilation* comp, TR::ResolvedMethodSymbol* owningMethodSym, char** methodSig, TR::SymbolReference** symRefs, int methodCount);
-   virtual TR::SymbolReference* findOrCreateMethodSymRef(TR::Compilation* comp, TR::ResolvedMethodSymbol* owningMethodSym, char* classSig, char* methodSig);
-   virtual TR::SymbolReference* findOrCreateMethodSymRef(TR::Compilation* comp, TR::ResolvedMethodSymbol* owningMethodSym, char* methodSig);
+   virtual int findOrCreateMethodSymRef(TR::Compilation *comp, TR::ResolvedMethodSymbol *owningMethodSym, const char *classSig, const char **methodSig, TR::SymbolReference **symRefs, int methodCount);
+   virtual int findOrCreateMethodSymRef(TR::Compilation *comp, TR::ResolvedMethodSymbol *owningMethodSym, const char **methodSig, TR::SymbolReference **symRefs, int methodCount);
+   virtual TR::SymbolReference* findOrCreateMethodSymRef(TR::Compilation *comp, TR::ResolvedMethodSymbol *owningMethodSym, const char *classSig, const char *methodSig);
+   virtual TR::SymbolReference* findOrCreateMethodSymRef(TR::Compilation *comp, TR::ResolvedMethodSymbol *owningMethodSym, const char *methodSig);
 
    virtual bool isOwnableSyncClass(TR_OpaqueClassBlock *clazz);
    const char *getJ9MonitorName(J9ThreadMonitor* monitor);
 
+   virtual bool  isContinuationClass(TR_OpaqueClassBlock *clazz);
+
    virtual TR_J9SharedCache *sharedCache() { return _sharedCache; }
    virtual void              freeSharedCache();
+   virtual void              setSharedCache(TR_J9SharedCache *sharedCache) { _sharedCache = sharedCache; }
+
+#if defined(J9VM_OPT_JITSERVER)
+   TR_J9DeserializerSharedCache *deserializerSharedCache() const { return _deserializerSharedCache; }
+#endif /* defined(J9VM_OPT_JITSERVER) */
 
    const char *getByteCodeName(uint8_t opcode);
 
@@ -1233,11 +1478,13 @@ public:
    virtual uintptr_t getLocalFragmentOffset();
    virtual int32_t getLocalObjectAlignmentInBytes();
 
-   uint32_t getInstanceFieldOffsetIncludingHeader(char* classSignature, char * fieldName, char * fieldSig, TR_ResolvedMethod* method);
+   uint32_t getInstanceFieldOffsetIncludingHeader(const char* classSignature, const char * fieldName, const char * fieldSig, TR_ResolvedMethod* method);
 
    virtual void markHotField( TR::Compilation *, TR::SymbolReference *, TR_OpaqueClassBlock *, bool);
    virtual void reportHotField(int32_t reducedCpuUtil, J9Class* clazz, uint8_t fieldOffset,  uint32_t reducedFrequency);
    virtual bool isHotReferenceFieldRequired();
+   virtual bool isIndexableDataAddrPresent();
+   virtual bool isOffHeapAllocationEnabled();
    virtual void markClassForTenuredAlignment( TR::Compilation *comp, TR_OpaqueClassBlock *opclazz, uint32_t alignFromStart);
 
    virtual bool shouldDelayAotLoad() { return false; }
@@ -1251,9 +1498,42 @@ public:
    virtual bool isStringCompressionEnabledVM();
    virtual void *getInvokeExactThunkHelperAddress(TR::Compilation *comp, TR::SymbolReference *glueSymRef, TR::DataType dataType);
 
-   bool inSnapshotMode();
+   /**
+    * \brief Answers whether snapshots (checkpoints) that will include this compiled body
+    * (if/when it is successfully compiled) can be taken.
+    *
+    * \return True if snapshots can be taken, false if no snapshots that will include this
+    * body are allowed.
+    */
+   virtual bool inSnapshotMode();
+
+   /**
+    * \brief Answers whether the JIT should generate portable restore code.
+    *
+    * \return True if portable restore code should be generated, false otherwise.
+    */
+   virtual bool isPortableRestoreModeEnabled();
+
+   /**
+    * \brief Answers whether checkpoint and restore mode is enabled (but not necessarily
+    * whether snapshots can be taken or if any restores have already occurred).
+    *
+    * \return True if checkpoint and restore mode is enabled, false otherwise.
+    */
+   virtual bool isSnapshotModeEnabled();
+
+   /**
+    * \brief Answers whether or not Thread.currentThread() is immutable.
+    *
+    * \return True if Thread.currentThread() is immutable.
+    */
+   virtual bool isJ9VMThreadCurrentThreadImmutable();
 
 protected:
+   bool isSignatureForPrimitiveType(const char * sig, int32_t sigLength)
+      {
+      return sigLength == 1 && (*sig == 'I' || *sig == 'Z' || *sig == 'C' || *sig == 'B' || *sig == 'J' || *sig == 'F' || *sig == 'D' || *sig == 'S');
+      }
 
    enum // _flags
       {
@@ -1273,7 +1553,17 @@ public:
 
    virtual bool               classHasBeenExtended(TR_OpaqueClassBlock *);
    virtual bool               classHasBeenReplaced(TR_OpaqueClassBlock *);
-   virtual TR::Node *         inlineNativeCall( TR::Compilation *,  TR::TreeTop *, TR::Node *);
+   /**
+    * \brief Generates inline IL for recognized native method calls, if possible
+    * \param[in] comp The current \ref TR::Compilation object
+    * \param[in] callNodeTreeTop The \ref TR::TreeTop that contains the \c callNode
+    * \param[in] callNode The \ref TR::Node for the native call that is to be inlined
+    * \return A \ref TR::Node representing the result of the call, if the call was
+    *         inlined.  If the call was not inlined, and
+    *         - the call might need to be processed as a direct JNI call, \c NULL is returned;
+    *         - otherwise, \c callNode is returned.
+    */
+   virtual TR::Node *         inlineNativeCall( TR::Compilation *comp,  TR::TreeTop *callNodeTreeTop, TR::Node *callNode);
    virtual bool               transformJlrMethodInvoke(J9Method *callerMethod, J9Class *callerClass);
    virtual TR_OpaqueClassBlock *getClassOfMethod(TR_OpaqueMethodBlock *method);
    virtual int32_t            getObjectAlignmentInBytes();
@@ -1283,15 +1573,32 @@ public:
    virtual void               initializeHasFixedFrameC_CallingConvention();
 
    virtual bool               isPublicClass(TR_OpaqueClassBlock *clazz);
-   virtual TR_OpaqueMethodBlock *getMethodFromName(char * className, char *methodName, char *signature);
+   virtual TR_OpaqueMethodBlock *getMethodFromName(const char *className, const char *methodName, const char *signature);
 
    virtual TR_OpaqueClassBlock * getComponentClassFromArrayClass(TR_OpaqueClassBlock * arrayClass);
    virtual TR_OpaqueClassBlock * getArrayClassFromComponentClass(TR_OpaqueClassBlock *componentClass);
+   /** \brief
+     *     Retrieves the nullRestrictedArrayClass from the array component class.
+     *
+     *  \param componentClass
+     *     The array component class
+     *
+     *  \return
+     *     A pointer to nullRestrictedArrayClass if it exists, otherwise NULL
+     */
+   virtual TR_OpaqueClassBlock * getNullRestrictedArrayClassFromComponentClass(TR_OpaqueClassBlock *componentClass);
    virtual TR_OpaqueClassBlock * getLeafComponentClassFromArrayClass(TR_OpaqueClassBlock * arrayClass);
    virtual int32_t               getNewArrayTypeFromClass(TR_OpaqueClassBlock *clazz);
-   virtual TR_OpaqueClassBlock * getClassFromSignature(const char * sig, int32_t length, TR_ResolvedMethod *method, bool isVettedForAOT=false);
-   virtual TR_OpaqueClassBlock * getClassFromSignature(const char * sig, int32_t length, TR_OpaqueMethodBlock *method, bool isVettedForAOT=false);
-   virtual TR_OpaqueClassBlock * getBaseComponentClass(TR_OpaqueClassBlock * clazz, int32_t & numDims);
+   virtual TR_OpaqueClassBlock *getClassFromSignature(const char * sig, int32_t sigLength, TR_ResolvedMethod *method, bool isVettedForAOT=false);
+   virtual TR_OpaqueClassBlock *getClassFromSignature(const char * sig, int32_t sigLength, TR_OpaqueMethodBlock *method, bool isVettedForAOT=false);
+   virtual TR_OpaqueClassBlock *getClassFromSignature(const char * sig, int32_t sigLength, TR_OpaqueClassBlock *clazz, bool isVettedForAOT=false);
+   virtual TR_OpaqueClassBlock *getClassFromSignature(const char * sig, int32_t sigLength, J9ConstantPool * constantPool, bool isVettedForAOT=false);
+
+   virtual TR_OpaqueClassBlock *getBaseComponentClass(TR_OpaqueClassBlock *clazz, int32_t &numDims)
+      {
+      return staticGetBaseComponentClass(clazz, numDims);
+      }
+
    virtual TR_OpaqueClassBlock * getSystemClassFromClassName(const char * name, int32_t length, bool isVettedForAOT=false);
    virtual TR_YesNoMaybe      isInstanceOf(TR_OpaqueClassBlock *instanceClass, TR_OpaqueClassBlock *castClass, bool instanceIsFixed, bool castIsFixed = true, bool optimizeForAOT=false);
 
@@ -1326,8 +1633,6 @@ public:
 
    virtual TR_StaticFinalData dereferenceStaticFinalAddress(void *staticAddress, TR::DataType addressType);
 
-   TR_OpaqueClassBlock * getClassFromSignature(const char * sig, int32_t sigLength, J9ConstantPool * constantPool);
-
 private:
    void transformJavaLangClassIsArrayOrIsPrimitive( TR::Compilation *, TR::Node * callNode,  TR::TreeTop * treeTop, int32_t andMask);
    void transformJavaLangClassIsArray( TR::Compilation *, TR::Node * callNode,  TR::TreeTop * treeTop);
@@ -1344,8 +1649,8 @@ public:
 
    // replacing calls to isAOT
    virtual bool               canUseSymbolValidationManager() { return true; }
+   virtual bool               canTrackAOTDependencies()                       { return true; }
    virtual bool               supportsCodeCacheSnippets()                     { return false; }
-   virtual bool               canRelocateDirectNativeCalls()                  { return false; }
    virtual bool               needClassAndMethodPointerRelocations()          { return true; }
    virtual bool               inlinedAllocationsMustBeVerified()              { return true; }
    virtual bool               needRelocationsForHelpers()                     { return true; }
@@ -1353,10 +1658,10 @@ public:
    virtual bool               supportsFastNanoTime()                          { return false; }
    virtual bool               needRelocationsForStatics()                     { return true; }
    virtual bool               needRelocationsForCurrentMethodPC()             { return true; }
+   virtual bool               needRelocationsForCurrentMethodStartPC()        { return true; }
    virtual bool               needRelocationsForLookupEvaluationData()        { return true; }
    virtual bool               needRelocationsForBodyInfoData()                { return true; }
    virtual bool               needRelocationsForPersistentInfoData()          { return true; }
-   virtual bool               forceUnresolvedDispatch()                       { return true; }
    virtual bool               nopsAlsoProcessedByRelocations()                { return true; }
    virtual bool               supportsGuardMerging()                          { return false; }
    virtual bool               canDevirtualizeDispatch()                       { return false; }
@@ -1369,6 +1674,9 @@ public:
    virtual bool               needsContiguousCodeAndDataCacheAllocation()     { return true; }
    virtual bool               needRelocatableTarget()                          { return true; }
    virtual bool               isStable(int cpIndex, TR_ResolvedMethod *owningMethod, TR::Compilation *comp) { return false; }
+
+   virtual bool               isResolvedDirectDispatchGuaranteed(TR::Compilation *comp);
+   virtual bool               isResolvedVirtualDispatchGuaranteed(TR::Compilation *comp);
 
    virtual bool               shouldDelayAotLoad();
 
@@ -1385,8 +1693,8 @@ public:
    virtual TR_OpaqueClassBlock *getClassOfMethod(TR_OpaqueMethodBlock *method);
    virtual void               getResolvedMethods(TR_Memory *, TR_OpaqueClassBlock *, List<TR_ResolvedMethod> *);
    virtual TR_ResolvedMethod *getResolvedMethodForNameAndSignature(TR_Memory * trMemory, TR_OpaqueClassBlock * classPointer, const char* methodName, const char *signature);
-   virtual uint32_t           getInstanceFieldOffset(TR_OpaqueClassBlock * classPointer, char * fieldName,
-                                                     uint32_t fieldLen, char * sig, uint32_t sigLen, UDATA options);
+   virtual uint32_t           getInstanceFieldOffset(TR_OpaqueClassBlock * classPointer, const char * fieldName,
+                                                     uint32_t fieldLen, const char * sig, uint32_t sigLen, UDATA options);
 
    virtual TR_OpaqueMethodBlock *getResolvedVirtualMethod(TR_OpaqueClassBlock * classObject, int32_t cpIndex, bool ignoreReResolve = true);
    virtual TR_OpaqueMethodBlock *getResolvedInterfaceMethod(TR_OpaqueMethodBlock *ownerMethod, TR_OpaqueClassBlock * classObject, int32_t cpIndex);
@@ -1398,15 +1706,24 @@ public:
    virtual bool               sameClassLoaders(TR_OpaqueClassBlock *, TR_OpaqueClassBlock *);
    virtual bool               isUnloadAssumptionRequired(TR_OpaqueClassBlock *, TR_ResolvedMethod *);
    virtual bool               classHasBeenExtended(TR_OpaqueClassBlock *);
-   virtual bool               isGetImplInliningSupported();
    virtual bool               isPublicClass(TR_OpaqueClassBlock *clazz);
    virtual bool               hasFinalizer(TR_OpaqueClassBlock * classPointer);
    virtual uintptr_t         getClassDepthAndFlagsValue(TR_OpaqueClassBlock * classPointer);
    virtual uintptr_t         getClassFlagsValue(TR_OpaqueClassBlock * classPointer);
-   virtual TR_OpaqueMethodBlock * getMethodFromClass(TR_OpaqueClassBlock *, char *, char *, TR_OpaqueClassBlock * = NULL);
+   virtual TR_OpaqueMethodBlock * getMethodFromClass(TR_OpaqueClassBlock *, const char *, const char *, TR_OpaqueClassBlock * = NULL);
    virtual bool               isPrimitiveClass(TR_OpaqueClassBlock *clazz);
    virtual TR_OpaqueClassBlock * getComponentClassFromArrayClass(TR_OpaqueClassBlock * arrayClass);
    virtual TR_OpaqueClassBlock * getArrayClassFromComponentClass(TR_OpaqueClassBlock *componentClass);
+   /** \brief
+     *     Retrieves the nullRestrictedArrayClass from the array component class.
+     *
+     *  \param componentClass
+     *     The array component class
+     *
+     *  \return
+     *     A pointer to nullRestrictedArrayClass if it exists, otherwise NULL
+     */
+   virtual TR_OpaqueClassBlock * getNullRestrictedArrayClassFromComponentClass(TR_OpaqueClassBlock *componentClass);
    virtual TR_OpaqueClassBlock * getLeafComponentClassFromArrayClass(TR_OpaqueClassBlock * arrayClass);
    virtual TR_OpaqueClassBlock * getBaseComponentClass(TR_OpaqueClassBlock * clazz, int32_t & numDims);
    virtual TR_OpaqueClassBlock * getClassFromNewArrayType(int32_t arrayType);
@@ -1414,8 +1731,7 @@ public:
    virtual bool               isClassVisible(TR_OpaqueClassBlock * sourceClass, TR_OpaqueClassBlock * destClass);
    virtual bool               isPrimitiveArray(TR_OpaqueClassBlock *);
    virtual bool               isReferenceArray(TR_OpaqueClassBlock *);
-   virtual TR_OpaqueClassBlock * getClassFromSignature(const char * sig, int32_t length, TR_ResolvedMethod *method, bool isVettedForAOT=false);
-   virtual TR_OpaqueClassBlock * getClassFromSignature(const char * sig, int32_t length, TR_OpaqueMethodBlock *method, bool isVettedForAOT=false);
+   virtual TR_OpaqueClassBlock * getClassFromSignature(const char * sig, int32_t length, J9ConstantPool *constantPool, bool isVettedForAOT=false);
    virtual TR_OpaqueClassBlock * getSystemClassFromClassName(const char * name, int32_t length, bool isVettedForAOT=false);
 
    virtual intptr_t          methodTrampolineLookup( TR::Compilation *, TR::SymbolReference *symRef, void *callSite);
@@ -1430,8 +1746,7 @@ public:
    virtual void *getJ2IThunk(char *signatureChars, uint32_t signatureLength,  TR::Compilation *comp);
    virtual void *setJ2IThunk(char *signatureChars, uint32_t signatureLength, void *thunkptr,  TR::Compilation *comp);
 
-   virtual void * persistJ2IThunk(void *thunk);
-   virtual void *persistThunk(char *signatureChars, uint32_t signatureLength, uint8_t *thunkStart, uint32_t totalSize);
+   virtual void * persistMHJ2IThunk(void *thunk);
 
    virtual TR_ResolvedMethod * getObjectNewInstanceImplMethod(TR_Memory *);
    virtual bool                   supportAllocationInlining( TR::Compilation *comp, TR::Node *node);
@@ -1473,6 +1788,14 @@ static inline char * utf8Data(J9UTF8 * name, int32_t & len)
    {
    len = J9UTF8_LENGTH(name);
    return (char *)J9UTF8_DATA(name);
+   }
+
+static inline J9UTF8 *str2utf8(const char *string, int32_t length, TR_Memory *trMemory, TR_AllocationKind allocKind)
+   {
+   J9UTF8 *utf8 = (J9UTF8 *)trMemory->allocateMemory(length + sizeof(J9UTF8), allocKind);
+   J9UTF8_SET_LENGTH(utf8, length);
+   memcpy(J9UTF8_DATA(utf8), string, length);
+   return utf8;
    }
 
 inline bool isValidVmStateIndex(uint32_t &index)

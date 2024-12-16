@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "codegen/CodeGenerator.hpp"
@@ -80,10 +80,15 @@ J9::ARM::UnresolvedDataSnippet::emitSnippetBody()
    cursor += 4;
 
    *(int32_t *)cursor = (intptr_t)getAddressOfDataReference();   // Code Cache RA
-   cg()->addExternalRelocation(new (cg()->trHeapMemory()) TR::ExternalRelocation(
-               cursor,
-               NULL,
-               TR_AbsoluteMethodAddress, cg()), __FILE__, __LINE__, getNode());
+   cg()->addExternalRelocation(
+      TR::ExternalRelocation::create(
+         cursor,
+         NULL,
+         TR_AbsoluteMethodAddress,
+         cg()),
+      __FILE__,
+      __LINE__,
+      getNode());
    cursor += 4;
 
    if (getDataSymbol()->isCallSiteTableEntry())
@@ -101,11 +106,16 @@ J9::ARM::UnresolvedDataSnippet::emitSnippetBody()
    cursor += 4;
 
    *(int32_t *)cursor = (intptr_t)getDataSymbolReference()->getOwningMethod(cg()->comp())->constantPool();  // CP
-   cg()->addExternalRelocation(new (cg()->trHeapMemory()) TR::ExternalRelocation(
-               cursor,
-               *(uint8_t **)cursor,
-               getNode() ? (uint8_t *)getNode()->getInlinedSiteIndex() : (uint8_t *)-1,
-               TR_ConstantPool, cg()), __FILE__, __LINE__, getNode());
+   cg()->addExternalRelocation(
+      TR::ExternalRelocation::create(
+         cursor,
+         *(uint8_t **)cursor,
+         getNode() ? (uint8_t *)getNode()->getInlinedSiteIndex() : (uint8_t *)-1,
+         TR_ConstantPool,
+         cg()),
+      __FILE__,
+      __LINE__,
+      getNode());
    cursor += 4;
 
    *(int32_t *)cursor = getMemoryReference()->getOffset(); // offset

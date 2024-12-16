@@ -1,5 +1,5 @@
 rem
-rem Copyright (c) 2001, 2018 IBM Corp. and others
+rem Copyright IBM Corp. and others 2001
 rem
 rem This program and the accompanying materials are made available under
 rem the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@ rem Exception [1] and GNU General Public License, version 2 with the
 rem OpenJDK Assembly Exception [2].
 rem
 rem [1] https://www.gnu.org/software/classpath/license.html
-rem [2] http://openjdk.java.net/legal/assembly-exception.html
+rem [2] https://openjdk.org/legal/assembly-exception.html
 rem
-rem SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+rem SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
 rem
 
 %1\java -DTESTBASE=%3 -DTESTSUITE=%8 -DTOOLSDIR=%2 -DEXTDIR=%5 -DNETDIR=%6 -DEXE=%4 -DVMOPTIONS=%9 -jar C:\j9test\cmdlinetester\cmdlinetester.jar -config %3\%8\%8_win.xml -xids all -xlist %3\%7

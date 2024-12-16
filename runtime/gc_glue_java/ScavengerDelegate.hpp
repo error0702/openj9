@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2019, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2019
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #if !defined(SCAVENGERDELEGATEJAVA_HPP_)
@@ -25,6 +25,7 @@
 
 #include "j9.h"
 #include "omrcfg.h"
+#include "omrgcconsts.h"
 
 #if defined(OMR_GC_MODRON_SCAVENGER)
 
@@ -68,6 +69,8 @@ private:
 	MM_GCExtensions *_extensions;
 	volatile bool _shouldScavengeFinalizableObjects; /**< Set to true at the beginning of a collection if there are any pending finalizable objects */
 	volatile bool _shouldScavengeUnfinalizedObjects; /**< Set to true at the beginning of a collection if there are any unfinalized objects */
+	volatile bool _shouldScavengeContinuationObjects; /**< Set to true at the beginning of a collection if there are any continuation objects in new space */
+	volatile bool _shouldIterateContinuationObjects; /**< Set to true at the beginning of a collection if there are any continuation objects */
 	volatile bool _shouldScavengeSoftReferenceObjects; /**< Set to true if there are any SoftReference objects discovered */
 	volatile bool _shouldScavengeWeakReferenceObjects; /**< Set to true if there are any WeakReference objects discovered */
 	volatile bool _shouldScavengePhantomReferenceObjects; /**< Set to true if there are any PhantomReference objects discovered */
@@ -124,7 +127,7 @@ public:
 	void mainThreadGarbageCollect_scavengeComplete(MM_EnvironmentBase *envBase);
 	void mainThreadGarbageCollect_scavengeSuccess(MM_EnvironmentBase *envBase);
 	bool internalGarbageCollect_shouldPercolateGarbageCollect(MM_EnvironmentBase *envBase, PercolateReason *reason, U_32 *gcCode);
-	GC_ObjectScanner *getObjectScanner(MM_EnvironmentStandard *env, omrobjectptr_t objectPtr, void *allocSpace, uintptr_t flags);
+	GC_ObjectScanner *getObjectScanner(MM_EnvironmentStandard *env, omrobjectptr_t objectPtr, void *allocSpace, uintptr_t flags, MM_ScavengeScanReason reason, bool *shouldRemember);
 	void flushReferenceObjects(MM_EnvironmentStandard *env);
 	bool hasIndirectReferentsInNewSpace(MM_EnvironmentStandard *env, omrobjectptr_t objectPtr);
 	bool scavengeIndirectObjectSlots(MM_EnvironmentStandard *env, omrobjectptr_t objectPtr);
@@ -153,9 +156,14 @@ public:
 	}
 
 	void setShouldScavengeUnfinalizedObjects(bool shouldScavenge) { _shouldScavengeUnfinalizedObjects = shouldScavenge; }
+	void setShouldScavengeContinuationObjects(bool shouldScavenge) { _shouldScavengeContinuationObjects = shouldScavenge; }
+	void setShouldIterateContinuationObjects(bool shouldIterate) { _shouldIterateContinuationObjects = shouldIterate; }
+	bool scanContinuationNativeSlots(MM_EnvironmentStandard *env, omrobjectptr_t objectPtr, MM_ScavengeScanReason reason, bool beingMounted = false);
 
 	volatile bool getShouldScavengeFinalizableObjects() { return _shouldScavengeFinalizableObjects; }
 	volatile bool getShouldScavengeUnfinalizedObjects() { return _shouldScavengeUnfinalizedObjects; }
+	volatile bool getShouldScavengeContinuationObjects() { return _shouldScavengeContinuationObjects; }
+	volatile bool getShouldIterateContinuationObjects() { return _shouldIterateContinuationObjects; }
 	volatile bool getShouldScavengeSoftReferenceObjects() { return _shouldScavengeSoftReferenceObjects; }
 	volatile bool getShouldScavengeWeakReferenceObjects() { return _shouldScavengeWeakReferenceObjects; }
 	volatile bool getShouldScavengePhantomReferenceObjects() { return _shouldScavengePhantomReferenceObjects; }
@@ -169,6 +177,7 @@ public:
 	void poisonSlots(MM_EnvironmentBase *env);
 	void healSlots(MM_EnvironmentBase *env);
 #endif /* defined(OMR_ENV_DATA64) && defined(OMR_GC_FULL_POINTERS) */
+	void doStackSlot(MM_EnvironmentStandard *env, omrobjectptr_t *slotPtr, MM_ScavengeScanReason reason, bool *shouldRemember);
 
 	bool initialize(MM_EnvironmentBase *env);
 	void tearDown(MM_EnvironmentBase *env);
@@ -177,4 +186,11 @@ public:
 };
 
 #endif /* OMR_GC_MODRON_SCAVENGER */
+typedef struct StackIteratorData4Scavenge {
+	MM_ScavengerDelegate *scavengerDelegate;
+	MM_EnvironmentStandard *env;
+	MM_ScavengeScanReason reason;
+	bool *shouldRemember;
+} StackIteratorData4Scavenge;
+
 #endif /* SCAVENGERDELEGATEJAVA_HPP_ */

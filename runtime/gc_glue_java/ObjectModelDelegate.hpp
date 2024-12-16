@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2017, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2017
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #ifndef OBJECTMODELDELEGATE_HPP_
@@ -368,8 +368,7 @@ public:
 				}
 			}
 
-			uintptr_t dataSize = _arrayObjectModel->getDataSizeInBytes(clazz, elements);
-			GC_ArrayletObjectModel::ArrayLayout layout = _arrayObjectModel->getArrayletLayout(clazz, dataSize);
+			GC_ArrayletObjectModel::ArrayLayout layout = _arrayObjectModel->getArrayletLayout(clazz, elements);
 			size = _arrayObjectModel->getSizeInBytesWithHeader(clazz, layout, elements);
 		} else {
 			size = _mixedObjectModel->getSizeInBytesWithoutHeader(clazz) + J9GC_OBJECT_HEADER_SIZE(this);
@@ -460,6 +459,16 @@ public:
 	 */
 	void calculateObjectDetailsForCopy(MM_EnvironmentBase *env, MM_ForwardedHeader *forwardedHeader, uintptr_t *objectCopySizeInBytes, uintptr_t *objectReserveSizeInBytes, uintptr_t *hotFieldAlignmentDescriptor);
 #endif /* defined(OMR_GC_MODRON_SCAVENGER) */
+
+	/**
+	 * Initialize an object of minimal object size at given addr. Specifically, java/lang/object is used.
+	 *
+	 * There is an assumption that the object is not visible (referred) by anyone, so the minimum initialization can be done.
+	 *
+	 * @param[in] env The environment for the calling thread.
+	 * @param[in] allocAddr address at which the object is created.
+	 */
+	void initializeMinimumSizeObject(MM_EnvironmentBase *env, void *allocAddr);
 
 	/**
 	 * Constructor receives a copy of OMR's object flags mask, normalized to low order byte. Delegate

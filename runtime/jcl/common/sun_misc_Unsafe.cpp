@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1998, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 1998
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "j9.h"
@@ -38,6 +38,7 @@
 #include "ArrayCopyHelpers.hpp"
 #include "AtomicSupport.hpp"
 #include "ObjectMonitor.hpp"
+#include "UnsafeAPI.hpp"
 #include "VMHelpers.hpp"
 
 extern "C" {
@@ -361,7 +362,7 @@ Java_sun_misc_Unsafe_park(JNIEnv *env, jobject receiver, jboolean isAbsolute, jl
 	J9JavaVM *vm = currentThread->javaVM;
 	J9InternalVMFunctions *vmFuncs = vm->internalVMFunctions;
 	vmFuncs->internalEnterVMFromJNI(currentThread);
-	vmFuncs->threadParkImpl(currentThread, (IDATA)isAbsolute, (I_64)time);
+	vmFuncs->threadParkImpl(currentThread, isAbsolute ? TRUE : FALSE, (I_64)time);
 	vmFuncs->internalExitVMToJNI(currentThread);
 }
 
@@ -405,9 +406,16 @@ Java_sun_misc_Unsafe_monitorEnter(JNIEnv *env, jobject receiver, jobject obj)
 		vmFuncs->setCurrentExceptionUTF(currentThread, J9VMCONSTANTPOOL_JAVALANGNULLPOINTEREXCEPTION, NULL);
 	} else {
 		UDATA monresult = vmFuncs->objectMonitorEnter(currentThread, J9_JNI_UNWRAP_REFERENCE(obj));
-		if (0 == monresult) {
+		if (J9_OBJECT_MONITOR_ENTER_FAILED(monresult)) {
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+			if (J9_OBJECT_MONITOR_CRIU_SINGLE_THREAD_MODE_THROW == monresult) {
+				vmFuncs->setCRIUSingleThreadModeJVMCRIUException(currentThread, 0, 0);
+			} else
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
+			if (J9_OBJECT_MONITOR_OOM == monresult) {
 oom:
-			vmFuncs->setNativeOutOfMemoryError(currentThread, 0, 0);
+				vmFuncs->setNativeOutOfMemoryError(currentThread, 0, 0);
+			}
 		} else if (J9_UNEXPECTED(!VM_ObjectMonitor::recordJNIMonitorEnter(currentThread, (j9object_t)monresult))) {
 			vmFuncs->objectMonitorExit(currentThread, (j9object_t)monresult);
 			goto oom;
@@ -565,7 +573,7 @@ copyMemory(J9VMThread* currentThread, j9object_t sourceObject, UDATA sourceOffse
 		UDATA destOffset, UDATA actualSize)
 {
 	/* Because array data is always 8-aligned, only the alignment of the offsets (and byte size) need be considered */
-	UDATA const headerSize = J9VMTHREAD_CONTIGUOUS_HEADER_SIZE(currentThread);
+	UDATA const headerSize = VM_UnsafeAPI::arrayBase(currentThread);
 	UDATA logElementSize = determineCommonAlignment(sourceOffset, destOffset, actualSize);
 	UDATA sourceIndex = (sourceOffset - headerSize) >> logElementSize;
 	UDATA destIndex = (destOffset - headerSize) >> logElementSize;
@@ -588,7 +596,7 @@ static VMINLINE void
 copyMemoryByte(J9VMThread* currentThread, j9object_t sourceObject, UDATA sourceOffset, j9object_t destObject,
 		UDATA destOffset)
 {
-	UDATA const headerSize = J9VMTHREAD_CONTIGUOUS_HEADER_SIZE(currentThread);
+	UDATA const headerSize = VM_UnsafeAPI::arrayBase(currentThread);
 	UDATA sourceIndex = sourceOffset - headerSize;
 	UDATA destIndex = destOffset - headerSize;
 
@@ -688,7 +696,7 @@ illegal:
 		if (!J9ROMCLASS_IS_PRIMITIVE_TYPE(((J9ArrayClass*)clazz)->componentType->romClass)) {
 			goto illegal;
 		}
-		offset -= J9VMTHREAD_CONTIGUOUS_HEADER_SIZE(currentThread);
+		offset -= VM_UnsafeAPI::arrayBase(currentThread);
 		VM_ArrayCopyHelpers::primitiveArrayFill(currentThread, object, (UDATA)offset, actualSize, (U_8)value);
 	}
 	vmFuncs->internalExitVMToJNI(currentThread);
@@ -803,8 +811,8 @@ Java_sun_misc_Unsafe_shouldBeInitialized(JNIEnv *env, jobject receiver, jclass c
 		vmFuncs->setCurrentExceptionUTF(currentThread, J9VMCONSTANTPOOL_JAVALANGNULLPOINTEREXCEPTION, NULL);
 	} else {
 		j9object_t classObject = J9_JNI_UNWRAP_REFERENCE(clazz);
-		J9Class *j9clazz =  J9VM_J9CLASS_FROM_HEAPCLASS(currentThread, classObject);
-		if (VM_VMHelpers::classRequiresInitialization(currentThread, j9clazz)) {
+		J9Class *j9clazz = J9VM_J9CLASS_FROM_HEAPCLASS(currentThread, classObject);
+		if (J9ClassInitSucceeded != j9clazz->initializeStatus) {
 			result = JNI_TRUE;
 		}
 	}
@@ -833,7 +841,11 @@ Java_jdk_internal_misc_Unsafe_objectFieldOffset1(JNIEnv *env, jobject receiver, 
 		if (NULL == romField) {
 			vmFuncs->setCurrentExceptionUTF(currentThread, J9VMCONSTANTPOOL_JAVALANGINTERNALERROR, NULL);
 		} else if (J9_ARE_ANY_BITS_SET(romField->modifiers, J9AccStatic)) {
-			vmFuncs->setCurrentExceptionUTF(currentThread, J9VMCONSTANTPOOL_JAVALANGILLEGALARGUMENTEXCEPTION, NULL);
+			offset = fieldID->offset | J9_SUN_STATIC_FIELD_OFFSET_TAG;
+
+			if (J9_ARE_ANY_BITS_SET(romField->modifiers, J9AccFinal)) {
+				offset |= J9_SUN_FINAL_FIELD_OFFSET_TAG;
+			}
 		} else {
 			offset = (jlong)fieldID->offset + J9VMTHREAD_OBJECT_HEADER_SIZE(currentThread);
 		}

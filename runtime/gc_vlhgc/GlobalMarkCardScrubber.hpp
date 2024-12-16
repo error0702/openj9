@@ -1,6 +1,6 @@
 
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,9 +16,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 
@@ -83,6 +83,9 @@ private:
 	 */
 	bool scrubMixedObject(MM_EnvironmentVLHGC *env, J9Object *objectPtr);
 
+	bool scrubContinuationNativeSlots(MM_EnvironmentVLHGC *env, J9Object *objectPtr);
+	bool scrubContinuationObject(MM_EnvironmentVLHGC *env, J9Object *objectPtr);
+
 	/**
 	 * Scrub a SCAN_POINTER_ARRAY_OBJECT.
 	 * @param env[in] the current thread
@@ -104,16 +107,6 @@ private:
 	 */
 	bool scrubClassLoaderObject(MM_EnvironmentVLHGC *env, J9Object *classLoaderObject);
 
-	/**
-	 * Given the specified reference from fromObject to toObject, determine if the card can
-	 * be scrubbed (marked clean).
-	 * @param env[in] the current thread
-	 * @param fromObject[in] the object being scanned
-	 * @param toObject[in] an object referenced from fromObject
-	 * @return true if the card may be scrubbed, false if cleaning is required
-	 */
-	bool mayScrubReference(MM_EnvironmentVLHGC *env, J9Object *fromObject, J9Object* toObject);
-	
 	/**
 	 * Scans the marked objects in the [lowAddress..highAddress) range to determine if these objects need to be scanned during
 	 * card cleaning. The receiver uses its _markMap to determine which objects in the range are marked.
@@ -180,6 +173,16 @@ public:
 	 */
 	UDATA getScrubbedObjects() { return _statistics._scrubbedObjects; }
 
+	/**
+	 * Given the specified reference from fromObject to toObject, determine if the card can
+	 * be scrubbed (marked clean).
+	 * @param env[in] the current thread
+	 * @param fromObject[in] the object being scanned
+	 * @param toObject[in] an object referenced from fromObject
+	 * @return true if the card may be scrubbed, false if cleaning is required
+	 */
+	bool mayScrubReference(MM_EnvironmentVLHGC *env, J9Object *fromObject, J9Object* toObject);
+
 };
 
 class MM_ParallelScrubCardTableTask : public MM_ParallelTask
@@ -187,7 +190,7 @@ class MM_ParallelScrubCardTableTask : public MM_ParallelTask
 private:
 	MM_CycleState * const _cycleState; /**< Current cycle state information */
 	bool _timeLimitWasHit;	/**< true if any requests to check the time came in after we had hit our time threshold */
-	const I_64 _timeThreshold;	/**< The millisecond which represents the end of this increment */
+	const U_64 _timeThreshold;	/**< The ticks which represents the end of this increment */
 	
 public:
 
@@ -213,7 +216,7 @@ public:
 	 */
 	MM_ParallelScrubCardTableTask(MM_EnvironmentBase *env,
 			MM_ParallelDispatcher *dispatcher, 
-			I_64 timeThreshold,
+			U_64 timeThreshold,
 			MM_CycleState *cycleState) :
 		MM_ParallelTask(env, dispatcher)
 		,_cycleState(cycleState)
@@ -224,5 +227,11 @@ public:
 	};
 };
 
+typedef struct StackIteratorData4GlobalMarkCardScrubber {
+	MM_GlobalMarkCardScrubber *globalMarkCardScrubber;
+	MM_EnvironmentVLHGC *env;
+	J9Object *fromObject;
+	bool *doScrub;
+} StackIteratorData4GlobalMarkCardScrubber;
 
 #endif /* GLOBALMARKCARDSCRUBBER_HPP_ */

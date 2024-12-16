@@ -1,4 +1,4 @@
-# Copyright (c) 2017, 2021 IBM Corp. and others
+# Copyright IBM Corp. and others 2017
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,9 +14,9 @@
 # OpenJDK Assembly Exception [2].
 #
 # [1] https://www.gnu.org/software/classpath/license.html
-# [2] http://openjdk.java.net/legal/assembly-exception.html
+# [2] https://openjdk.org/legal/assembly-exception.html
 #
-# SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+# SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
 
 # To use this docker file:
 # 1.Depends on your OS platform, build the base openj9 docker
@@ -73,3 +73,6 @@ RUN echo yes | cpan install JSON Text::CSV XML::Parser
 # and openj9/test dir to the Docker image by using cmd:
 #   `docker run -it -v <path_to_openj9_sdk_roots>:/java -v <path_to_openj9_test_dir>:/test openj9-buildandtest`
 VOLUME [ "/test", "/java" ]
+
+# Set the default user
+USER 1000

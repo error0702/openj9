@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2018 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "jvmtiHelpers.h"
@@ -53,7 +53,7 @@ jvmtiGetFieldName(jvmtiEnv* env,
 		ENSURE_PHASE_START_OR_LIVE(env);
 
 		ENSURE_JCLASS_NON_NULL(klass);
-		ENSURE_JFIELDID_NON_NULL(field);
+		ENSURE_JFIELDID_VALID(field);
 
 		romFieldShape = ((J9JNIFieldID *) field)->field;
 
@@ -149,7 +149,7 @@ jvmtiGetFieldDeclaringClass(jvmtiEnv* env,
 		ENSURE_PHASE_START_OR_LIVE(env);
 
 		ENSURE_JCLASS_NON_NULL(klass);
-		ENSURE_JFIELDID_NON_NULL(field);
+		ENSURE_JFIELDID_VALID(field);
 		ENSURE_NON_NULL(declaring_class_ptr);
 
 		fieldClass = getCurrentClass(((J9JNIFieldID *) field)->declaringClass);
@@ -188,7 +188,7 @@ jvmtiGetFieldModifiers(jvmtiEnv* env,
 		ENSURE_PHASE_START_OR_LIVE(env);
 
 		ENSURE_JCLASS_NON_NULL(klass);
-		ENSURE_JFIELDID_NON_NULL(field);
+		ENSURE_JFIELDID_VALID(field);
 		ENSURE_NON_NULL(modifiers_ptr);
 
 		romField = ((J9JNIFieldID *) field)->field;
@@ -230,7 +230,7 @@ jvmtiIsFieldSynthetic(jvmtiEnv* env,
 		ENSURE_CAPABILITY(env, can_get_synthetic_attribute);
 
 		ENSURE_JCLASS_NON_NULL(klass);
-		ENSURE_JFIELDID_NON_NULL(field);
+		ENSURE_JFIELDID_VALID(field);
 		ENSURE_NON_NULL(is_synthetic_ptr);
 
 		romFieldShape = ((J9JNIFieldID *) field)->field;

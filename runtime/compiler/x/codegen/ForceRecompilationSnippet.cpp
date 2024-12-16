@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "x/codegen/ForceRecompilationSnippet.hpp"
@@ -50,20 +50,22 @@ uint8_t *TR::X86ForceRecompilationSnippet::emitSnippetBody()
 
    TR::SymbolReference *helper = cg()->symRefTab()->findOrCreateRuntimeHelper(cg()->comp()->target().is64Bit()? TR_AMD64induceRecompilation : TR_IA32induceRecompilation);
    intptr_t helperAddress = (intptr_t)helper->getMethodAddress();
-   *buffer++ = 0xe8; // CallImm4
-   if (NEEDS_TRAMPOLINE(helperAddress, buffer+4, cg()))
+   *buffer = 0xe8; // CallImm4
+   if (cg()->directCallRequiresTrampoline(helperAddress, reinterpret_cast<intptr_t>(buffer++)))
       {
       helperAddress = TR::CodeCacheManager::instance()->findHelperTrampoline(helper->getReferenceNumber(), (void *)buffer);
       TR_ASSERT(IS_32BIT_RIP(helperAddress, buffer+4), "Local helper trampoline should be reachable directly.\n");
       }
    *(int32_t *)buffer = ((uint8_t*)helperAddress - buffer) - 4;
 
-   cg()->addExternalRelocation(new (cg()->trHeapMemory())
-      TR::ExternalRelocation(
+   cg()->addExternalRelocation(
+      TR::ExternalRelocation::create(
          buffer,
          (uint8_t *)helper,
          TR_HelperAddress, cg()),
-         __FILE__, __LINE__, getNode());
+      __FILE__,
+      __LINE__,
+      getNode());
 
    buffer += 4;
 

@@ -1,6 +1,6 @@
 <?xml version='1.0' encoding='UTF-8'?>
 <!--
-  Copyright (c) 2016, 2021 IBM Corp. and others
+  Copyright IBM Corp. and others 2016
 
   This program and the accompanying materials are made available under
   the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,11 +16,12 @@
   OpenJDK Assembly Exception [2].
 
   [1] https://www.gnu.org/software/classpath/license.html
-  [2] http://openjdk.java.net/legal/assembly-exception.html
+  [2] https://openjdk.org/legal/assembly-exception.html
 
-  SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+  SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
 -->
 <playlist xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../TKG/playlist.xsd">
+	<include>../variables.mk</include>
 	<test>
 		<testCaseName>cmdLineTester_GCRegressionTests</testCaseName>
 		<variations>
@@ -29,9 +30,33 @@
 			<variation>Mode551</variation>
 			<variation>Mode610</variation>
 		</variations>
-		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) -DTESTSJARPATH=$(Q)$(TEST_RESROOT)$(D)gcRegressionTests.jar$(Q) -DRESJAR=$(CMDLINETESTER_RESJAR) \
+		<command>$(JAVA_COMMAND) $(CMDLINETESTER_JVM_OPTIONS) -DTESTSJARPATH=$(Q)$(TEST_RESROOT)$(D)gcRegressionTests.jar$(Q) -DRESJAR=$(CMDLINETESTER_RESJAR) \
 		-DEXE=$(SQ)$(JAVA_COMMAND) $(JVM_OPTIONS)$(SQ) -jar $(CMDLINETESTER_JAR) -config $(Q)$(TEST_RESROOT)$(D)gcRegressionTests.xml$(Q) \
-		-explainExcludes -xids all,$(PLATFORM),$(VARIATION) -plats all,$(PLATFORM),$(VARIATION) -xlist $(Q)$(TEST_RESROOT)$(D)gcRegressionTests_excludes.xml$(Q) -nonZeroExitWhenError; \
+		-explainExcludes -xids all,$(PLATFORM),$(VARIATION),$(JDK_VERSION) -plats all,$(PLATFORM),$(VARIATION) -xlist $(Q)$(TEST_RESROOT)$(D)gcRegressionTests_excludes.xml$(Q) -nonZeroExitWhenError; \
+		$(TEST_STATUS)</command>
+		<levels>
+			<level>sanity</level>
+		</levels>
+		<groups>
+			<group>functional</group>
+		</groups>
+		<impls>
+			<impl>openj9</impl>
+			<impl>ibm</impl>
+		</impls>
+	</test>
+	<test>
+		<testCaseName>cmdLineTester_GCRotatingVerboseLogTests</testCaseName>
+		<variations>
+			<variation>NoOptions</variation>
+			<variation>Mode110</variation>
+			<variation>Mode501</variation>
+			<variation>Mode551</variation>
+			<variation>Mode610</variation>
+		</variations>
+		<command>$(JAVA_COMMAND) $(CMDLINETESTER_JVM_OPTIONS) -DTESTSJARPATH=$(Q)$(TEST_RESROOT)$(D)gcRegressionTests.jar$(Q) -DRESJAR=$(CMDLINETESTER_RESJAR) \
+		-DEXE=$(SQ)$(JAVA_COMMAND) $(JVM_OPTIONS)$(SQ) -jar $(CMDLINETESTER_JAR) -config $(Q)$(TEST_RESROOT)$(D)gcRotatingVerboseLogTests.xml$(Q) \
+		-explainExcludes -xids all,$(PLATFORM),$(VARIATION) -plats all,$(PLATFORM),$(VARIATION) -xlist $(Q)$(TEST_RESROOT)$(D)gcRotatingVerboseLogTests_excludes.xml$(Q) -nonZeroExitWhenError; \
 		$(TEST_STATUS)</command>
 		<levels>
 			<level>sanity</level>
@@ -49,7 +74,7 @@
 		<variations>
 			<variation>NoOptions</variation>
 		</variations>
-		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) -DTESTSJARPATH=$(Q)$(TEST_RESROOT)$(D)gcRegressionTests.jar$(Q) -DRESJAR=$(CMDLINETESTER_RESJAR) \
+		<command>$(JAVA_COMMAND) $(CMDLINETESTER_JVM_OPTIONS) -DTESTSJARPATH=$(Q)$(TEST_RESROOT)$(D)gcRegressionTests.jar$(Q) -DRESJAR=$(CMDLINETESTER_RESJAR) \
 		-DEXE=$(SQ)$(JAVA_COMMAND) $(JVM_OPTIONS)$(SQ) -jar $(CMDLINETESTER_JAR) -config $(Q)$(TEST_RESROOT)$(D)gcRegressionTests.xml$(Q) \
 		-explainExcludes -xids all,$(PLATFORM),$(VARIATION) -plats all,$(PLATFORM),$(VARIATION) -xlist $(Q)$(TEST_RESROOT)$(D)gcRegressionTests_excludes.xml$(Q) -nonZeroExitWhenError; \
 		$(TEST_STATUS)</command>
@@ -69,9 +94,9 @@
 		<variations>
 			<variation>Mode301</variation>
 		</variations>
-		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) -DTESTSJARPATH=$(Q)$(TEST_RESROOT)$(D)gcRegressionTests.jar$(Q) -DRESJAR=$(CMDLINETESTER_RESJAR) \
+		<command>$(JAVA_COMMAND) $(CMDLINETESTER_JVM_OPTIONS) -DTESTSJARPATH=$(Q)$(TEST_RESROOT)$(D)gcRegressionTests.jar$(Q) -DRESJAR=$(CMDLINETESTER_RESJAR) \
 		-DEXE=$(SQ)$(JAVA_COMMAND) $(JVM_OPTIONS)$(SQ) -jar $(CMDLINETESTER_JAR) -config $(Q)$(TEST_RESROOT)$(D)gcRegressionTests.xml$(Q) \
-		-explainExcludes -xids all,$(PLATFORM),Mode301 -plats all,$(PLATFORM),Mode301 -xlist $(Q)$(TEST_RESROOT)$(D)gcRegressionTests_excludes.xml$(Q) -explainExcludes -nonZeroExitWhenError; \
+		-explainExcludes -xids all,$(PLATFORM),Mode301,$(JDK_VERSION) -plats all,$(PLATFORM),Mode301 -xlist $(Q)$(TEST_RESROOT)$(D)gcRegressionTests_excludes.xml$(Q) -explainExcludes -nonZeroExitWhenError; \
 		$(TEST_STATUS)</command>
 		<levels>
 			<level>sanity</level>

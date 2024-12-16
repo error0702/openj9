@@ -2,7 +2,7 @@
 
 print_license() {
 cat <<- EOF
-# Copyright (c) 2019, 2021 IBM Corp. and others
+# Copyright IBM Corp. and others 2019
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -18,9 +18,9 @@ cat <<- EOF
 # OpenJDK Assembly Exception [2].
 #
 # [1] https://www.gnu.org/software/classpath/license.html
-# [2] http://openjdk.java.net/legal/assembly-exception.html
+# [2] https://openjdk.org/legal/assembly-exception.html
 #
-# SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+# SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
 EOF
 }
 
@@ -31,7 +31,8 @@ usage() {
   echo "Options:"
   echo "  --help|-h             print this help, then exit"
   echo "  --arch=...            specify the processor architecture (default: host architecture)"
-  echo "  --build               build the docker image (overrides '--print')"
+  echo "  --build[=engine]      build the image (overrides '--print'). Optionally specify the engine (default: docker, or podman, if found)"
+  echo "  --criu                include CRIU"
   echo "  --cuda                include CUDA header files"
   echo "  --dist=...            specify the Linux distribution (e.g. centos, ubuntu)"
   echo "  --freemarker          include freemarker.jar"
@@ -50,9 +51,10 @@ fi
 if [ $arch = x86_64 -o $arch = ppc64le ] ; then
   echo "  bash mkdocker.sh --tag=openj9/cent7 --dist=centos --version=7  --build"
 fi
-  echo "  bash mkdocker.sh --tag=openj9/ub16  --dist=ubuntu --version=16 --build"
   echo "  bash mkdocker.sh --tag=openj9/ub18  --dist=ubuntu --version=18 --build"
   echo "  bash mkdocker.sh --tag=openj9/ub20  --dist=ubuntu --version=20 --build"
+  echo "  bash mkdocker.sh --tag=openj9/ub22  --dist=ubuntu --version=22 --build"
+  echo "  bash mkdocker.sh --tag=openj9/ub24  --dist=ubuntu --version=24 --build"
   exit 1
 }
 
@@ -60,8 +62,12 @@ fi
 action=print
 all_versions=
 arch=
-cuda=no
+criu=no
+cuda_src=
+cuda_tag=
 dist=unspecified
+engine=docker
+engine_specified=0
 freemarker=no
 gen_git_cache=yes
 jdk_versions=all
@@ -86,8 +92,17 @@ parse_options() {
       --build)
         action=build
         ;;
+      --build=*)
+        action=build
+        engine="${arg#*=}"
+        engine_specified=1
+        ;;
+      --criu)
+        criu=3.17.1
+        ;;
       --cuda)
-        cuda=9.0
+        cuda_src=/usr/local/cuda-12.0
+        cuda_tag=12.0.0-devel-ubuntu18.04
         ;;
       --dist=*)
         dist="${arg#*=}"
@@ -119,6 +134,15 @@ parse_options() {
         ;;
     esac
   done
+
+  # If --build was specified without an engine, and `docker` isn't on $PATH,
+  # and `podman` is on $PATH, then assume they're okay to use `podman`.
+  if [ "${action}" = build ] \
+     && [ "${engine_specified}" -eq 0 ] \
+     && ! command -v "$engine" >/dev/null 2>&1 \
+     && command -v podman >/dev/null 2>&1 ; then
+    engine=podman
+  fi
 }
 
 validate_options() {
@@ -148,6 +172,10 @@ validate_options() {
             echo "CentOS version 6 is not supported on $arch" >&2
             exit 1
           fi
+          if [ $arch = x86_64 ] ; then
+            # Certificates are old on CentOS:6 so we can't expect wget to check.
+            wget_O="wget --no-check-certificate --progress=dot:mega -O"
+          fi
           ;;
         7)
           ;;
@@ -163,10 +191,10 @@ validate_options() {
       ;;
     ubuntu)
       case $version in
-        16 | 18 | 20)
+        18 | 20 | 22 | 24)
           version=$version.04
           ;;
-        16.04 | 18.04 | 20.04)
+        18.04 | 20.04 | 22.04 | 24.04)
           ;;
         unspecified)
           echo "Unspecified Ubuntu version: use '--version' option" >&2
@@ -177,6 +205,10 @@ validate_options() {
           exit 1
           ;;
       esac
+      if [ $version = 24.04 ] ; then
+          # userid 1000 already exists in 24.04
+          userid=1001
+      fi
       ;;
     unspecified)
       echo "Unspecified distribution: use '--dist' option" >&2
@@ -188,8 +220,36 @@ validate_options() {
       ;;
   esac
 
+  # If CRIU is requested, validate the architecture.
+  if [ $criu != no ] ; then
+    case "$arch" in
+      x86_64)
+        if [ $dist = centos ] ; then
+          # overwrite CRIU version
+          criu=3.12
+          if [ $version = 6 ] ; then
+            echo "CRIU is not supported on CentOS version: '$version'" >&2
+            exit 1
+          fi
+        fi
+        ;;
+      s390x)
+        # overwrite CRIU version
+        criu=3.12
+        if [ $dist:$version != ubuntu:18.04 ] ; then
+          echo "CRIU is only supported on ubuntu:18.04 for s390x" >&2
+          exit 1
+        fi
+        ;;
+      *)
+        echo "CRIU is not supported on architecture: '$arch'" >&2
+        exit 1
+        ;;
+    esac
+  fi
+
   # If CUDA is requested, validate the architecture.
-  if [ $cuda != no ] ; then
+  if [ "x$cuda_tag" != x ] ; then
     case "$arch" in
       ppc64le | x86_64)
         ;;
@@ -200,7 +260,7 @@ validate_options() {
     esac
   fi
 
-  all_versions="8 11 17 next"
+  all_versions="8 11 17 21 23 next"
   local -A known_version
   local version
   for version in $all_versions ; do
@@ -209,6 +269,9 @@ validate_options() {
 
   if [ "$jdk_versions" = all ] ; then
     jdk_versions="$all_versions"
+  elif [ -z "$jdk_versions" ] ; then
+    echo "At least one JDK version must be specified" >&2
+    exit 1
   fi
 
   for version in ${jdk_versions} ; do
@@ -217,6 +280,11 @@ validate_options() {
       exit 1
     fi
   done
+
+  if [ "${action}" = build ] && ! command -v "$engine" >/dev/null 2>&1 ; then
+    echo "Executable '$engine' could not be found. Update \$PATH or use another engine with '--build=engine'" >&2
+    exit 1
+  fi
 }
 
 build_cmd() {
@@ -253,11 +321,11 @@ for tag in ${tags[@]} ; do
 done
 fi
   echo ""
-if [ $cuda != no ] ; then
-  echo "FROM nvidia/cuda:${cuda}-devel-ubuntu16.04 AS cuda-dev"
+if [ "x$cuda_tag" != x ] ; then
+  echo "FROM nvidia/cuda:$cuda_tag AS cuda-dev"
   echo ""
 fi
-  echo "FROM $dist:$version"
+  echo "FROM $dist:$version AS base"
 }
 
 install_centos_packages() {
@@ -297,7 +365,9 @@ fi
   echo "    libdwarf \\"
   echo "    libdwarf-devel \\"
   echo "    libffi-devel \\"
+if [ $version != 6 ] ; then
   echo "    libstdc++-static \\"
+fi
   echo "    libX11-devel \\"
   echo "    libXext-devel \\"
   echo "    libXi-devel \\"
@@ -318,6 +388,7 @@ fi
   echo "    perl-devel \\"
   echo "    perl-ExtUtils-MakeMaker \\" # required by git
   echo "    perl-GD \\"
+  echo "    perl-IPC-Cmd \\" # required for openssl v3 compiles
   echo "    perl-libwww-perl \\"
   echo "    perl-Time-HiRes \\"
   echo "    systemtap-devel \\"
@@ -329,6 +400,15 @@ fi
   echo "    xz \\"
   echo "    zip \\"
   echo "    zlib-devel \\" # required by git, python
+if [ $criu != no ] ; then
+  echo "    iproute \\"
+  echo "    libbsd \\"
+  echo "    libnet \\"
+  echo "    libnl3 \\"
+  echo "    protobuf-c \\"
+  echo "    protobuf-python \\"
+  echo "    python-ipaddress \\"
+fi
   echo " && yum clean all"
   echo ""
   local autoconf_version=2.69
@@ -352,6 +432,12 @@ fi
   echo " && ln -sf gcc /usr/bin/cc \\"
   echo " && ln -sf g++ /usr/bin/c++ \\"
   echo " && rm -f gcc-7.tar.xz"
+  echo ""
+  echo "# Install gcc-11.2."
+  echo "RUN cd /usr/local \\"
+  echo " && $wget_O gcc-11.tar.xz 'https://ci.adoptopenjdk.net/userContent/gcc/gcc112.$arch.tar.xz' \\"
+  echo " && tar -xJf gcc-11.tar.xz \\"
+  echo " && rm -f gcc-11.tar.xz"
   echo ""
   local ant_version=1.10.5
   echo "# Install ant."
@@ -396,7 +482,9 @@ if [ $arch = x86_64 ] ; then
   echo " && $wget_O gettext.tar.gz http://ftp.gnu.org/gnu/gettext/gettext-$gettext_version.tar.gz \\"
   echo " && tar -xzf gettext.tar.gz \\"
   echo " && cd gettext-$gettext_version \\"
+if [ $version != 6 ] ; then
   echo " && ./autogen.sh --skip-gnulib \\"
+fi
   echo " && ./configure --disable-nls \\"
   echo " && make \\"
   echo " && make install \\"
@@ -438,14 +526,16 @@ fi
 }
 
 install_ubuntu_packages() {
+  echo "ARG DEBIAN_FRONTEND=noninteractive"
+  echo "ENV TZ=America/Toronto"
+  echo ""
   echo "RUN apt-get update \\"
+if [ $version = 18.04 ] || [ $version = 20.04 ] ; then
   echo " && apt-get install -qq -y --no-install-recommends \\"
   echo "    software-properties-common \\"
-if [ $version = 16.04 ] ; then
-  echo "    python-software-properties \\"
-fi
   echo " && add-apt-repository ppa:ubuntu-toolchain-r/test \\"
   echo " && apt-get update \\"
+fi
   echo " && apt-get install -qq -y --no-install-recommends \\"
   echo "    ant \\"
   echo "    ant-contrib \\"
@@ -454,11 +544,23 @@ fi
   echo "    ca-certificates \\"
   echo "    cmake \\"
   echo "    cpio \\"
+if [ $criu != no ] && [ $version != 20.04 ] ; then
+  echo "    criu \\"
+fi
   echo "    curl \\"
   echo "    file \\"
-if [ $arch != s390x ] ; then
-  echo "    g++-7 \\"
-  echo "    gcc-7 \\"
+if [ $version = 18.04 ] ; then
+  echo "    g++-8 \\"
+  echo "    gcc-8 \\"
+elif [ $version = 20.04 ] ; then
+  echo "    g++-10 \\"
+  echo "    gcc-10 \\"
+elif [ $version = 22.04 ] ; then
+  echo "    g++-11 \\"
+  echo "    gcc-11 \\"
+else
+  echo "    g++-13 \\"
+  echo "    gcc-13 \\"
 fi
   echo "    gdb \\"
   echo "    git \\"
@@ -492,9 +594,6 @@ fi
   echo "    openssh-server \\"
   echo "    perl \\"
   echo "    pkg-config \\"
-if [ $version = 16.04 ] ; then
-  echo "    realpath \\"
-fi
   echo "    ssh \\"
   echo "    systemtap-sdt-dev \\"
   echo "    unzip \\"
@@ -502,6 +601,18 @@ fi
   echo "    xvfb \\"
   echo "    zip \\"
   echo "    zlib1g-dev \\"
+if [ $criu != no ] ; then
+if [ $version = 18.04 ] ; then
+  echo "    libcap2-bin \\"
+fi
+  echo "    libnet1 \\"
+  echo "    libnl-3-200 \\"
+if [ $version = 20.04 ] ; then
+  echo "    libnftables1 \\"
+fi
+  echo "    libprotobuf-c1 \\"
+  echo "    python3-protobuf \\"
+fi
   echo " && rm -rf /var/lib/apt/lists/*"
 }
 
@@ -513,34 +624,6 @@ if [ $dist = centos ] ; then
   install_centos_packages
 else
   install_ubuntu_packages
-fi
-}
-
-install_compilers() {
-if [ $arch = s390x ] ; then
-  echo ""
-  local gcc_version=7.5
-  echo "# Install gcc."
-  echo "RUN cd /usr/local \\"
-  echo " && $wget_O gcc.tar.xz 'https://ci.adoptopenjdk.net/userContent/gcc/gcc750+ccache.$arch.tar.xz' \\"
-  echo " && tar -xJf gcc.tar.xz --strip-components=1 \\"
-  echo " && rm -f gcc.tar.xz"
-  echo ""
-  echo "# Create various symbolic links."
-  echo "RUN ln -s lib/$arch-linux-gnu /usr/lib64 \\"
-if [ $dist:$version = ubuntu:18.04 ] ; then
-  # On s390x perl needs version 4 of mpfr, but we only have version 6.
-  echo " && ln -s libmpfr.so.6 /usr/lib64/libmpfr.so.4 \\"
-fi
-  # /usr/local/include/c++ is a directory that already exists so we create these symbolic links in two steps.
-  echo " && ( cd /usr/local/include && for f in \$(ls /usr/include/s390x-linux-gnu/c++) ; do test -e \$f || ln -s /usr/include/s390x-linux-gnu/c++/\$f . ; done ) \\"
-  echo " && ln -s \$(ls -d /usr/include/s390x-linux-gnu/* | grep -v '/c++\$') /usr/local/include \\"
-  echo " && ln -sf ../local/bin/g++-$gcc_version /usr/bin/g++-7 \\"
-  echo " && ln -sf ../local/bin/gcc-$gcc_version /usr/bin/gcc-7"
-fi
-if [ $dist != centos ] ; then
-  echo ""
-  echo "ENV CC=gcc-7 CXX=g++-7"
 fi
 }
 
@@ -574,16 +657,19 @@ prepare_user() {
 create_user() {
   echo ""
   echo "# Add user home and copy authorized_keys and known_hosts."
-  echo "RUN useradd -ms /bin/bash --uid $userid $user \\"
+  echo "RUN useradd -ms /bin/bash --uid $userid $user --home-dir /home/$user \\"
   echo " && mkdir /home/$user/.ssh \\"
   echo " && chmod 700 /home/$user/.ssh"
   echo "COPY authorized_keys known_hosts /home/$user/.ssh/"
-  echo "RUN chmod -R go= /home/$user/.ssh \\"
-  echo " && echo "ulimit -u 32000 -n 2048" >> /home/$user/.bashrc"
+  echo "RUN chmod -R go= /home/$user/.ssh"
 }
 
 adjust_user_directory_perms() {
   echo "RUN chown -R $user:$user /home/$user"
+}
+
+set_user() {
+  echo "USER $user"
 }
 
 install_freemarker() {
@@ -606,29 +692,35 @@ bootjdk_dirs() {
 bootjdk_url() {
   local jdk_arch=${arch/x86_64/x64}
   local jdk_version=$1
-  if [ $jdk_version -lt 17 ] ; then
+  if [ $jdk_version -le 23 ] ; then
     echo https://api.adoptopenjdk.net/v3/binary/latest/$jdk_version/ga/linux/$jdk_arch/jdk/openj9/normal/adoptopenjdk
   else
     echo https://api.adoptium.net/v3/binary/latest/$jdk_version/ga/linux/$jdk_arch/jdk/hotspot/normal/eclipse
   fi
 }
 
+bootjdk_version() {
+  local jdk_version=$1
+  case $jdk_version in
+    8 | 11 | 17)
+      echo $jdk_version
+      ;;
+    21)
+      echo 21
+      ;;
+    23 | next)
+      echo 23
+      ;;
+    *)
+      echo "Unsupported JDK version: '$jdk_version'" >&2
+      exit 1
+      ;;
+  esac
+}
+
 install_bootjdks() {
-  local bootjdk_versions=
   local version
-  local -A wanted
-  for version in $jdk_versions ; do
-    if [ $version = next ] ; then
-      wanted[17]=yes
-    else
-      wanted[$version]=yes
-    fi
-  done
-  for version in ${all_versions/next/} ; do
-    if [ "${wanted[$version]}" = yes ] ; then
-      bootjdk_versions="$bootjdk_versions $version"
-    fi
-  done
+  local bootjdk_versions=$(for version in $jdk_versions ; do bootjdk_version $version ; done | sort -n -u)
   echo ""
   echo "# Download and install boot JDKs."
   echo "RUN cd /tmp \\"
@@ -642,17 +734,74 @@ done
   echo " && rm -f jdk*.tar.gz"
 }
 
+install_criu() {
+  echo ""
+  local criu_name=criu-${criu}
+  echo "# Install prerequisites for CRIU build."
+  echo "FROM base AS criu-builder"
+if [ $dist = centos ] ; then
+  echo "RUN yum -y install \\"
+  echo "    gnutls-devel \\"
+  echo "    iptables \\"
+  echo "    libbsd-devel \\"
+  echo "    libcap-devel \\"
+  echo "    libnet-devel \\"
+  echo "    libnl3-devel \\"
+  echo "    pkgconfig \\"
+  echo "    protobuf-c-devel \\"
+  echo "    protobuf-devel"
+else
+  echo "RUN apt-get update \\"
+  echo " && apt-get install -qq -y --no-install-recommends \\"
+  echo "    iptables \\"
+  echo "    libbsd-dev \\"
+  echo "    libcap-dev \\"
+  echo "    libnet1-dev \\"
+  echo "    libgnutls28-dev \\"
+  echo "    libgnutls30 \\"
+if [ $version = 20.04 ] ; then
+  echo "    libnftables-dev \\"
+fi
+  echo "    libnl-3-dev \\"
+  echo "    libprotobuf-c-dev \\"
+  echo "    libprotobuf-dev \\"
+  echo "    python3-distutils \\"
+  echo "    protobuf-c-compiler \\"
+  echo "    protobuf-compiler"
+fi
+  echo "# Build CRIU from source."
+  echo "RUN cd /tmp \\"
+  echo " && $wget_O criu.tar.gz https://github.com/checkpoint-restore/criu/archive/refs/tags/v${criu}.tar.gz \\"
+  echo " && tar -xzf criu.tar.gz \\"
+  echo " && mv $criu_name criu-build \\"
+  echo " && cd criu-build \\"
+  echo " && make \\"
+  echo " && make DESTDIR=/tmp/$criu_name install-lib install-criu \\"
+  echo " && cd .. \\"
+  echo " && rm -fr criu.tar.gz criu-build"
+  echo "# Install CRIU."
+  echo "FROM base"
+  echo "COPY --from=criu-builder /tmp/$criu_name/usr/local /usr/local"
+  echo "# Set CRIU capabilities."
+if [ $dist = centos ] ; then
+  echo "RUN setcap cap_chown,cap_dac_override,cap_dac_read_search,cap_fowner,cap_fsetid,cap_kill,cap_setgid,cap_setuid,cap_setpcap,cap_net_bind_service,cap_net_broadcast,cap_net_admin,cap_ipc_lock,cap_ipc_owner,cap_sys_module,cap_sys_rawio,cap_sys_chroot,cap_sys_ptrace,cap_sys_pacct,cap_sys_admin,cap_sys_resource,cap_sys_time,cap_lease,cap_audit_control,cap_setfcap,cap_syslog=eip /usr/local/sbin/criu"
+else
+  echo "RUN setcap cap_chown,cap_dac_override,cap_dac_read_search,cap_fowner,cap_fsetid,cap_kill,cap_setgid,cap_setuid,cap_setpcap,cap_net_admin,cap_sys_chroot,cap_sys_ptrace,cap_sys_admin,cap_sys_resource,cap_sys_time,cap_audit_control=eip /usr/local/sbin/criu"
+fi
+}
+
 install_cuda() {
   echo ""
   echo "# Copy header files necessary to build a VM with CUDA support."
-  echo "RUN mkdir -p /usr/local/cuda-${cuda}/nvvm"
-  echo "COPY --from=cuda-dev /usr/local/cuda-${cuda}/include      /usr/local/cuda-${cuda}/include"
-  echo "COPY --from=cuda-dev /usr/local/cuda-${cuda}/nvvm/include /usr/local/cuda-${cuda}/nvvm/include"
-  echo "ENV CUDA_HOME=/usr/local/cuda-${cuda}"
+  echo "RUN mkdir -p /usr/local/cuda/nvvm"
+  echo "COPY --from=cuda-dev $cuda_src/include      /usr/local/cuda/include"
+  echo "COPY --from=cuda-dev $cuda_src/nvvm/include /usr/local/cuda/nvvm/include"
+  echo "ENV CUDA_HOME=/usr/local/cuda"
 }
 
 install_python() {
   local python_version=3.7.3
+  local python_short_version=${python_version%.*}
   echo ""
   echo "# Install python."
   echo "RUN cd /tmp \\"
@@ -664,12 +813,17 @@ install_python() {
   echo " && make install \\"
   echo " && cd .. \\"
   echo " && rm -rf python.tar.xz Python-$python_version"
+if [ $criu != no ] && [ $dist = ubuntu ]; then
+  echo ""
+  echo "# Set capabilities for python3."
+  echo "RUN setcap cap_sys_admin=eip /usr/local/bin/python$python_short_version"
+fi
 }
 
 adjust_ldconfig() {
   echo ""
   echo "# Run ldconfig to discover newly installed shared libraries."
-  echo "RUN for dir in lib lib64 ; do echo /usr/local/\$dir ; done > /etc/ld.so.conf.d/usr-local.conf \\"
+  echo "RUN for dir in lib lib64 lib/x86_64-linux-gnu ; do echo /usr/local/\$dir ; done > /etc/ld.so.conf.d/usr-local.conf \\"
   echo " && ldconfig"
 }
 
@@ -732,15 +886,16 @@ print_dockerfile() {
   print_license
   preamble
   install_packages
+if [ $criu != no ] ; then
+  install_criu
+fi
   create_user
-if [ $cuda != no ] ; then
+if [ "x$cuda_tag" != x ] ; then
   install_cuda
 fi
 if [ $freemarker = yes ] ; then
   install_freemarker
 fi
-  install_compilers
-
   install_cmake
   install_python
 
@@ -752,12 +907,13 @@ if [ $gen_git_cache = yes ] ; then
   create_git_cache
 fi
   adjust_user_directory_perms
+  set_user
 }
 
 main() {
   if [ $action = build ] ; then
     prepare_user
-    print_dockerfile | docker $(build_cmd -)
+    print_dockerfile | $engine $(build_cmd -)
   else
     print_dockerfile
   fi

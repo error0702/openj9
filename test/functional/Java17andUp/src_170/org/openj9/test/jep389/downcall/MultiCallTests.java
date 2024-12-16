@@ -1,5 +1,5 @@
-/*******************************************************************************
- * Copyright (c) 2021, 2021 IBM Corp. and others
+/*
+ * Copyright IBM Corp. and others 2021
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,27 +15,26 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
 package org.openj9.test.jep389.downcall;
 
-import org.testng.annotations.Test;
 import org.testng.Assert;
-import org.testng.AssertJUnit;
+import org.testng.annotations.Test;
+
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodType;
 
 import jdk.incubator.foreign.Addressable;
 import jdk.incubator.foreign.CLinker;
-import static jdk.incubator.foreign.CLinker.*;
+import static jdk.incubator.foreign.CLinker.C_INT;
 import jdk.incubator.foreign.FunctionDescriptor;
-import jdk.incubator.foreign.ResourceScope;
 import jdk.incubator.foreign.SymbolLookup;
 
 /**
- * Test cases for JEP 389: Foreign Linker API (Incubator) DownCall for primitive types,
+ * Test cases for JEP 389: Foreign Linker API (Incubator) for primitive types in downcall,
  * which verifies multiple downcalls with the same or different layouts or argument/return types.
  */
 @Test(groups = { "level.sanity" })

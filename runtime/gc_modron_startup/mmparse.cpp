@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,11 +15,11 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
- 
+
 /**
  * @file
  * @ingroup GC_Modron_Startup
@@ -73,7 +73,6 @@
 #define OPT_NUMA_NONE "-Xnuma:none"
 #define OPT_XXMAXRAMPERCENT "-XX:MaxRAMPercentage="
 #define OPT_XXINITIALRAMPERCENT "-XX:InitialRAMPercentage="
-
 /**
  * @}
  */
@@ -167,20 +166,48 @@ typedef enum {
  * Find, consume and record an option from the argument list.
  * Given an option string and the match type, find the argument in the to be consumed list.
  * If found, consume it.
- * 
+ *
  * @return -1 if the argument was not consumed properly, otherwise the index position of the argument (>=0)
  */
 static IDATA
 option_set(J9JavaVM* vm, const char* option, IDATA match)
 {
-	return FIND_AND_CONSUME_ARG2(match, option, NULL);
+	return FIND_AND_CONSUME_VMARG2(match, option, NULL);
+}
+
+/**
+ * Find, consume and record an option from the argument list.
+ * Given an option string and the match type, find the argument in the to be consumed list.
+ * If not found, return success.
+ * If found, consume it, verify the memory value.
+ *
+ * @return OPTION_OK if option is found and consumed or option not present, OPTION_MALFORMED  if the option was malformed, OPTION_OVERFLOW if the option overflowed.
+ * @note value stored at address is invalid if failure returned
+ * @note optionIndex contains position of argument on command line if success returned, else -1
+ */
+static IDATA
+option_set_to_opt_args(J9JavaVM* vm, const char* option, IDATA* optionIndex, IDATA match, UDATA* address, J9VMInitArgs* args)
+{
+	IDATA returnCode = OPTION_OK;
+	IDATA value = 0;
+
+	IDATA element = FIND_AND_CONSUME_ARG2(args, match, option, NULL);
+	*optionIndex = element;
+
+	if (element >= 0) {
+		returnCode = GET_MEMORY_VALUE_ARGS(args, element, option, value);
+		if (OPTION_OK == returnCode) {
+			*address = value;
+		}
+	}
+	return returnCode;
 }
 
 /**
  * Find, consume and record an option from the argument list.
  * Given an option string and the match type, find the argument in the to be consumed list.
  * If found, consume it, verify the memory value.
- * 
+ *
  * @return OPTION_OK if option is found and consumed or option not present, OPTION_MALFORMED  if the option was malformed, OPTION_OVERFLOW if the option overflowed.
  * @note value stored at address is invalid if failure returned
  * @note optionIndex contains position of argument on command line if success returned, else -1
@@ -188,11 +215,10 @@ option_set(J9JavaVM* vm, const char* option, IDATA match)
 static IDATA
 option_set_to_opt(J9JavaVM* vm, const char* option, IDATA* optionIndex, IDATA match, UDATA* address)
 {
-	IDATA element;
 	IDATA returnCode = OPTION_OK;
-	UDATA value;
+	UDATA value = 0;
 
-	element = FIND_AND_CONSUME_ARG2(match, option, NULL);
+	IDATA element = FIND_AND_CONSUME_VMARG2(match, option, NULL);
 	*optionIndex = element;
 
 	if (element >= 0) {
@@ -208,7 +234,7 @@ option_set_to_opt(J9JavaVM* vm, const char* option, IDATA* optionIndex, IDATA ma
  * Find, consume and record an option from the argument list.
  * Given an option string and the match type, find the argument in the to be consumed list.
  * If found, consume it, verify the memory value.
- * 
+ *
  * @return OPTION_OK if option is found and consumed or option not present, OPTION_MALFORMED  if the option was malformed, OPTION_OVERFLOW if the option overflowed.
  * @note value stored at address is invalid if failure returned
  * @note optionIndex contains position of argument on command line if success returned, else -1
@@ -216,11 +242,10 @@ option_set_to_opt(J9JavaVM* vm, const char* option, IDATA* optionIndex, IDATA ma
 static IDATA
 option_set_to_opt_percent(J9JavaVM* vm, const char* option, IDATA* optionIndex, IDATA match, UDATA* address)
 {
-	IDATA element;
 	IDATA returnCode = OPTION_OK;
-	UDATA value;
+	UDATA value = 0;
 
-	element = FIND_AND_CONSUME_ARG2(match, option, NULL);
+	IDATA element = FIND_AND_CONSUME_VMARG2(match, option, NULL);
 	*optionIndex = element;
 
 	if (element >= 0) {
@@ -228,7 +253,7 @@ option_set_to_opt_percent(J9JavaVM* vm, const char* option, IDATA* optionIndex, 
 		if (OPTION_OK == returnCode) {
 			*address = value;
 		}
-	} 
+	}
 	return returnCode;
 }
 
@@ -237,27 +262,63 @@ option_set_to_opt_percent(J9JavaVM* vm, const char* option, IDATA* optionIndex, 
  * Given an option string and the match type, find the argument in the to be consumed list.
  * If not found, return success.
  * If found, consume it, verify the memory value.
- * 
+ *
  * @return OPTION_OK if option is found and consumed or option not present, OPTION_MALFORMED  if the option was malformed, OPTION_OVERFLOW if the option overflowed.
  * @note value stored at address is invalid if failure returned
  * @note optionIndex contains position of argument on command line if success returned, else -1
  */
 static IDATA
-option_set_to_opt_integer(J9JavaVM* vm, const char* option, IDATA* optionIndex, IDATA match, UDATA* address)
+option_set_to_opt_integer_args(J9JavaVM* vm, const char* option, IDATA* optionIndex, IDATA match, UDATA* address, J9VMInitArgs* args)
 {
-	IDATA element;
 	IDATA returnCode = OPTION_OK;
-	IDATA value;
+	IDATA value = 0;
 
-	element = FIND_AND_CONSUME_ARG2(match, option, NULL);
+	IDATA element = FIND_AND_CONSUME_ARG2(args, match, option, NULL);
 	*optionIndex = element;
 
 	if (element >= 0) {
-		returnCode = GET_INTEGER_VALUE(element, option, value);
+		returnCode = GET_INTEGER_VALUE_ARGS(args, element, option, value);
 		if (OPTION_OK == returnCode) {
 			*address = value;
 		}
-	} 
+	}
+	return returnCode;
+}
+
+/**
+ * option_set_to_opt_integer_args wrapper that uses vmArgsArray for parsing.
+ */
+static IDATA
+option_set_to_opt_integer(J9JavaVM* vm, const char* option, IDATA* optionIndex, IDATA match, UDATA* address)
+{
+	return option_set_to_opt_integer_args(vm, option, optionIndex, match, address, vm->vmArgsArray);
+}
+
+/**
+ * Find, consume and record an option from the argument list.
+ * Given an option string and the match type, find the argument in the to be consumed list.
+ * If not found, return success.
+ * If found, consume it, verify the memory value.
+ *
+ * @return OPTION_OK if option is found and consumed or option not present, OPTION_MALFORMED if the option was malformed, OPTION_OVERFLOW if the option overflowed.
+ * @note value stored at address is invalid if failure returned
+ * @note optionIndex contains position of argument on command line if success returned, else -1
+ */
+static IDATA
+option_set_to_opt_double_args(J9JavaVM* vm, const char* option, IDATA* optionIndex, IDATA match, double* address, J9VMInitArgs* args)
+{
+	IDATA returnCode = OPTION_OK;
+	double value = 0.0;
+
+	IDATA element = FIND_AND_CONSUME_ARG2(args, match, option, NULL);
+	*optionIndex = element;
+
+	if (element >= 0) {
+		returnCode = GET_DOUBLE_VALUE_ARGS(args, element, option, value);
+		if (OPTION_OK == returnCode) {
+			*address = value;
+		}
+	}
 	return returnCode;
 }
 
@@ -266,7 +327,7 @@ option_set_to_opt_integer(J9JavaVM* vm, const char* option, IDATA* optionIndex, 
  * Given an option string and the match type, find the argument in the to be consumed list.
  * If not found, return success.
  * If found, consume it, verify the memory value.
- * 
+ *
  * @return OPTION_OK if option is found and consumed or option not present, OPTION_MALFORMED if the option was malformed, OPTION_OVERFLOW if the option overflowed.
  * @note value stored at address is invalid if failure returned
  * @note optionIndex contains position of argument on command line if success returned, else -1
@@ -274,11 +335,10 @@ option_set_to_opt_integer(J9JavaVM* vm, const char* option, IDATA* optionIndex, 
 static IDATA
 option_set_to_opt_double(J9JavaVM* vm, const char* option, IDATA* optionIndex, IDATA match, double* address)
 {
-	IDATA element = -1;
 	IDATA returnCode = OPTION_OK;
 	double value = 0.0;
 
-	element = FIND_AND_CONSUME_ARG2(match, option, NULL);
+	IDATA element = FIND_AND_CONSUME_VMARG2(match, option, NULL);
 	*optionIndex = element;
 
 	if (element >= 0) {
@@ -286,7 +346,7 @@ option_set_to_opt_double(J9JavaVM* vm, const char* option, IDATA* optionIndex, I
 		if (OPTION_OK == returnCode) {
 			*address = value;
 		}
-	} 
+	}
 	return returnCode;
 }
 
@@ -312,7 +372,7 @@ option_set_pair(J9JavaVM *vm, const char *option1, const char *option2, IDATA *o
 		*optionPairIndex = 1;
 		return index2;
 	}
-	
+
 	*optionPairIndex = -1;
 	return -1;
 }
@@ -362,12 +422,12 @@ xlpSubOptionsParser(J9JavaVM *vm, IDATA xlpIndex, XlpError *xlpError, UDATA *req
 
 	/* start parsing with option */
 	parsingStates parsingState = PARSING_FIRST_OPTION;
-	UDATA optionNumber = 1;
 	char *previousOption = NULL;
 	char *errorString = NULL;
 
 	UDATA pageSizeHowMany = 0;
-#if	defined(J9ZOS390)
+#if defined(J9ZOS390)
+	UDATA optionNumber = 1;
 	UDATA pageableHowMany = 0;
 	UDATA pageableOptionNumber = 0;
 	UDATA nonPageableHowMany = 0;
@@ -411,8 +471,10 @@ xlpSubOptionsParser(J9JavaVM *vm, IDATA xlpIndex, XlpError *xlpError, UDATA *req
 			case PARSING_COMMA:
 				/* expecting for comma here, next should be an option*/
 				parsingState = PARSING_OPTION;
+#if defined(J9ZOS390)
 				/* next option number */
 				optionNumber += 1;
+#endif /* defined(J9ZOS390) */
 				break;
 			case PARSING_ERROR:
 			default:
@@ -482,13 +544,13 @@ xlpSubOptionsParser(J9JavaVM *vm, IDATA xlpIndex, XlpError *xlpError, UDATA *req
 
 			parsingState = PARSING_COMMA;
 		} else if (try_scan(&optionsString, "pageable")) {
-#if	defined(J9ZOS390)
+#if defined(J9ZOS390)
 			pageableHowMany += 1;
 			pageableOptionNumber = optionNumber;
 #endif /* defined(J9ZOS390) */
 			parsingState = PARSING_COMMA;
 		} else if (try_scan(&optionsString, "nonpageable")) {
-#if	defined(J9ZOS390)
+#if defined(J9ZOS390)
 			nonPageableHowMany += 1;
 			nonPageableOptionNumber = optionNumber;
 #endif /* defined(J9ZOS390) */
@@ -585,7 +647,7 @@ gcParseXlpOption(J9JavaVM *vm)
 	UDATA requestedPageFlags = J9PORT_VMEM_PAGE_FLAG_NOT_USED;
 	PORT_ACCESS_FROM_JAVAVM(vm);
 
-	/* Parse -Xlp option. 
+	/* Parse -Xlp option.
 	 * -Xlp option enables large pages with the default large page size, but will not
 	 * override any -Xlp<size> or -Xlp:objectheap:pagesize=<size> option.
 	 */
@@ -607,7 +669,7 @@ gcParseXlpOption(J9JavaVM *vm)
 	}
 
 	/* Parse -Xlp<size> option. It overrides -Xlp option. */
-	xlpMemIndex = FIND_AND_CONSUME_ARG(EXACT_MEMORY_MATCH, "-Xlp", NULL);
+	xlpMemIndex = FIND_AND_CONSUME_VMARG(EXACT_MEMORY_MATCH, "-Xlp", NULL);
 	if (-1 != xlpMemIndex) {
 		/* Reset error state from parsing of previous -Xlp option */
 		xlpErrorState = XLP_NO_ERROR;
@@ -650,7 +712,7 @@ gcParseXlpOption(J9JavaVM *vm)
 	 *		-Xlp:objectheap:pagesize=<size>,pageable or
 	 *		-Xlp:objectheap:pagesize=<size>,nonpageable
 	 */
-	xlpObjectHeapIndex = FIND_AND_CONSUME_ARG(STARTSWITH_MATCH, "-Xlp:objectheap:", NULL);
+	xlpObjectHeapIndex = FIND_AND_CONSUME_VMARG(STARTSWITH_MATCH, "-Xlp:objectheap:", NULL);
 
 	/* so if -Xlp:objectheap: is specified */
 	if ((-1 != xlpObjectHeapIndex) && (xlpObjectHeapIndex > xlpMemIndex)) {
@@ -722,7 +784,7 @@ gcParseXlpOption(J9JavaVM *vm)
 	/*
 	 * Check for -Xlp:gc: and handle it if necessary
 	 */
-	xlpGCIndex = FIND_AND_CONSUME_ARG(STARTSWITH_MATCH, "-Xlp:gcmetadata:", NULL);
+	xlpGCIndex = FIND_AND_CONSUME_VMARG(STARTSWITH_MATCH, "-Xlp:gcmetadata:", NULL);
 
 	if (-1 != xlpGCIndex) {
 		UDATA gcmetadataPageSize = 0;
@@ -947,46 +1009,6 @@ gcParseSovereignArguments(J9JavaVM *vm)
 		extensions->heapContractionGCRatioThreshold._wasSpecified = true;
 	}
 
-
-	if(-1 != FIND_ARG_IN_VMARGS(EXACT_MEMORY_MATCH, VMOPT_XGCTHREADS, NULL)) {
-		result = option_set_to_opt_integer(vm, VMOPT_XGCTHREADS, &index, EXACT_MEMORY_MATCH, &extensions->gcThreadCount);
-		if (OPTION_OK != result) {
-			if (OPTION_MALFORMED == result) {
-				j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_MUST_BE_NUMBER, VMOPT_XGCTHREADS);
-			} else {
-				j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_VALUE_OVERFLOWED, VMOPT_XGCTHREADS);
-			}
-			goto _error;
-		}
-
-		if(0 == extensions->gcThreadCount) {
-			j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_VALUE_MUST_BE_ABOVE, VMOPT_XGCTHREADS, (UDATA)0);
-			goto _error;
-		}
-
-		extensions->gcThreadCountForced = true;
-	}
-
-	/* Handling VMOPT_XGCMAXTHREADS is equivalent to VMOPT_XGCTHREADS (above), except it sets gcThreadCountForced to false rather than true. */
-	if (-1 != FIND_ARG_IN_VMARGS(EXACT_MEMORY_MATCH, VMOPT_XGCMAXTHREADS, NULL)) {
-		result = option_set_to_opt_integer(vm, VMOPT_XGCMAXTHREADS, &index, EXACT_MEMORY_MATCH, &extensions->gcThreadCount);
-		if (OPTION_OK != result) {
-			if (OPTION_MALFORMED == result) {
-				j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_MUST_BE_NUMBER, VMOPT_XGCMAXTHREADS);
-			} else {
-				j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_VALUE_OVERFLOWED, VMOPT_XGCMAXTHREADS);
-			}
-			goto _error;
-		}
-
-		if (0 == extensions->gcThreadCount) {
-			j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_VALUE_MUST_BE_ABOVE, VMOPT_XGCMAXTHREADS, (UDATA)0);
-			goto _error;
-		}
-
-		extensions->gcThreadCountForced = false;
-	}
-
 	if(-1 != FIND_ARG_IN_VMARGS(EXACT_MEMORY_MATCH, "-Xgcworkpackets", NULL)) {
 		result = option_set_to_opt_integer(vm, "-Xgcworkpackets", &index, EXACT_MEMORY_MATCH, &extensions->workpacketCount);
 		if (OPTION_OK != result) {
@@ -1035,7 +1057,7 @@ gcParseSovereignArguments(J9JavaVM *vm)
 		}
 		goto _error;
 	}
-	
+
 	result = option_set_to_opt_integer(vm, "-Xconcurrentlevel", &index, EXACT_MEMORY_MATCH, &extensions->concurrentLevel);
 	if (OPTION_OK != result) {
 		if (OPTION_MALFORMED == result) {
@@ -1070,7 +1092,7 @@ gcParseSovereignArguments(J9JavaVM *vm)
 		extensions->configurationOptions._forceOptionLargeObjectArea = true;
 		extensions->largeObjectArea = (1 == index);
 	}
-	
+
 	if(-1 != FIND_ARG_IN_VMARGS(EXACT_MEMORY_MATCH, "-Xloainitial", NULL)) {
 		result = option_set_to_opt_percent(vm, "-Xloainitial", &index, EXACT_MEMORY_MATCH, &inputValue);
 		if (OPTION_OK != result) {
@@ -1081,13 +1103,13 @@ gcParseSovereignArguments(J9JavaVM *vm)
 			}
 			goto _error;
 		}
-		if (inputValue >  95) { 
+		if (inputValue >  95) {
 			j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_PERCENT_OUT_OF_RANGE, "-Xloainitial", 0.0, 0.95);
 			goto _error;
-		}	
+		}
 		extensions->largeObjectAreaInitialRatio = (double)inputValue / (double)100;
-	} 
-	
+	}
+
 	if(-1 != FIND_ARG_IN_VMARGS(EXACT_MEMORY_MATCH, "-Xloamaximum", NULL)) {
 		result = option_set_to_opt_percent(vm, "-Xloamaximum", &index, EXACT_MEMORY_MATCH, &inputValue);
 		if (OPTION_OK != result) {
@@ -1098,18 +1120,18 @@ gcParseSovereignArguments(J9JavaVM *vm)
 			}
 			goto _error;
 		}
-		if (inputValue >  95) { 
+		if (inputValue >  95) {
 			j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_PERCENT_OUT_OF_RANGE, "-Xloamaximum", 0.0, 0.95);
 			goto _error;
-		}	
+		}
 		extensions->largeObjectAreaMaximumRatio = (double)inputValue / (double)100;
 		if(0 == extensions->largeObjectAreaMaximumRatio) {
 			/* Implies -Xnoloa */
 			extensions->configurationOptions._forceOptionLargeObjectArea = true;
 			extensions->largeObjectArea = false;
 		}
-	} 
-	
+	}
+
 	if(-1 != FIND_ARG_IN_VMARGS(EXACT_MEMORY_MATCH, "-Xloaminimum", NULL)) {
 		result = option_set_to_opt_percent(vm, "-Xloaminimum", &index, EXACT_MEMORY_MATCH, &inputValue);
 		if (OPTION_OK != result) {
@@ -1120,17 +1142,17 @@ gcParseSovereignArguments(J9JavaVM *vm)
 			}
 			goto _error;
 		}
-		if (inputValue >  95) { 
+		if (inputValue >  95) {
 			j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_PERCENT_OUT_OF_RANGE, "-Xloaminimum", 0.0, 0.95);
 			goto _error;
-		}	
+		}
 		extensions->largeObjectAreaMinimumRatio = (double)inputValue / (double)100;
 		if(-1 == FIND_ARG_IN_VMARGS(EXACT_MEMORY_MATCH, "-Xloainitial", NULL)) {
 			/* -Xloainitial wasn't specified, so we need to override it to match the -Xloaminimum we've just set */
 			extensions->largeObjectAreaInitialRatio = extensions->largeObjectAreaMinimumRatio;
 		}
-	} 
-	
+	}
+
 	indexMeter = option_set_group(vm, optionGroupConMeter, &groupIndex);
 	if (-1 != indexMeter) {
 		switch(groupIndex) {
@@ -1147,15 +1169,15 @@ gcParseSovereignArguments(J9JavaVM *vm)
 				break;
 		}
 	}
-	
+
 	/* Try to match SOV alternative syntax of -Xconmeter(0|1|2) */
 	if(-1 != FIND_ARG_IN_VMARGS(EXACT_MEMORY_MATCH, "-Xconmeter", NULL)) {
 		result = option_set_to_opt_integer(vm, "-Xconmeter", &index, EXACT_MEMORY_MATCH, &inputValue);
 		if (OPTION_OK != result) {
 			j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_MUST_BE_NUMBER, "-Xconmeter");
 			goto _error;
-		} 
-		
+		}
+
 		switch(inputValue) {
 		case 0:
 			extensions->concurrentMetering = MM_GCExtensions::METER_BY_SOA;
@@ -1166,25 +1188,25 @@ gcParseSovereignArguments(J9JavaVM *vm)
 		case 2:
 			extensions->concurrentMetering = MM_GCExtensions::METER_DYNAMIC;
 			break;
-		default: 
+		default:
 			j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_INTEGER_OUT_OF_RANGE, "-Xconmeter", (UDATA)0, (UDATA)2);
 			goto _error;
 			break;
-		}	
+		}
 	}
-	
+
 #endif /* J9VM_GC_LARGE_OBJECT_AREA) */
 
-	/* If user has specified any of the following SOV options  then we just silently ignore them 
-	 * 
+	/* If user has specified any of the following SOV options  then we just silently ignore them
+	 *
 	 * -Xparroot
-	 * -XloratioN 
-	 * -XloincrN  
-	 * -XlorsrvN 
-	 * All these options (except -Xparoot) take a float value between 0 and 1.0.  
-	 * 
+	 * -XloratioN
+	 * -XloincrN
+	 * -XlorsrvN
+	 * All these options (except -Xparoot) take a float value between 0 and 1.0.
+	 *
 	 */
-	option_set(vm, "-Xparroot", EXACT_MATCH); 
+	option_set(vm, "-Xparroot", EXACT_MATCH);
 	option_set_to_opt_percent(vm, "-Xloratio", &index, EXACT_MEMORY_MATCH, &inputValue);
 	option_set_to_opt_percent(vm, "-Xloincr", &index, EXACT_MEMORY_MATCH, &inputValue);
 	option_set_to_opt_percent(vm, "-Xlorsrv", &index, EXACT_MEMORY_MATCH, &inputValue);
@@ -1200,9 +1222,9 @@ gcParseSovereignArguments(J9JavaVM *vm)
 	} else {
 		if((-1 != FIND_ARG_IN_VMARGS(EXACT_MEMORY_MATCH, "-Xsoftrefthreshold", NULL))) {
 			optionFound = "-Xsoftrefthreshold";
-		}	
-	}		
-		
+		}
+	}
+
 	if (NULL != optionFound) {
 		result = option_set_to_opt_integer(vm, optionFound, &index, EXACT_MEMORY_MATCH, &extensions->maxSoftReferenceAge);
 		if (OPTION_OK != result) {
@@ -1213,12 +1235,12 @@ gcParseSovereignArguments(J9JavaVM *vm)
 			}
 			goto _error;
 		}
-		
+
 		if ((IDATA)extensions->maxSoftReferenceAge < 0) {
 			j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_VALUE_OVERFLOWED, optionFound);
 			goto _error;
 		}
-	}	
+	}
 
 	if(-1 != FIND_ARG_IN_VMARGS(EXACT_MEMORY_MATCH, "-XX:stringTableListToTreeThreshold=", NULL)) {
 		UDATA threshold = 0;
@@ -1239,11 +1261,147 @@ gcParseSovereignArguments(J9JavaVM *vm)
 		}
 	}
 
+	if (!gcParseReconfigurableSoverignArguments(vm, vm->vmArgsArray)) {
+		goto _error;
+	}
+
 	return 1;
 
 _error:
 	return 0;
 
+}
+
+/**
+ * Parse Sovereign arguments used both for initialization and CRIU
+ *
+ * @return true if parsing was successful, false otherwise.
+ */
+bool
+gcParseReconfigurableSoverignArguments(J9JavaVM* vm, J9VMInitArgs* args)
+{
+	MM_GCExtensions *extensions = MM_GCExtensions::getExtensions(vm);
+	IDATA index = -1;
+	IDATA result = 0;
+	IDATA gcthread_index = -1;
+
+	PORT_ACCESS_FROM_JAVAVM(vm);
+
+	if (-1 != FIND_ARG_IN_ARGS(args, EXACT_MEMORY_MATCH, VMOPT_XGCTHREADS, NULL)) {
+		result = option_set_to_opt_integer_args(vm, VMOPT_XGCTHREADS, &index, EXACT_MEMORY_MATCH, &extensions->gcThreadCount, args);
+		gcthread_index = index;
+		if (OPTION_OK != result) {
+			if (OPTION_MALFORMED == result) {
+				j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_MUST_BE_NUMBER, VMOPT_XGCTHREADS);
+			} else {
+				j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_VALUE_OVERFLOWED, VMOPT_XGCTHREADS);
+			}
+			goto _error;
+		}
+
+		if (0 == extensions->gcThreadCount) {
+			j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_VALUE_MUST_BE_ABOVE, VMOPT_XGCTHREADS, (UDATA)0);
+			goto _error;
+		}
+
+		extensions->gcThreadCountSpecified = true;
+		extensions->gcThreadCountForced = true;
+	}
+
+	/* Handling VMOPT_XGCMAXTHREADS is equivalent to VMOPT_XGCTHREADS (above), except it sets gcThreadCountForced to false rather than true. */
+	if (-1 != FIND_ARG_IN_ARGS(args, EXACT_MEMORY_MATCH, VMOPT_XGCMAXTHREADS, NULL)) {
+		UDATA gcThreadCount = 0;
+		IDATA gcmaxthread_index = -1;
+
+		result = option_set_to_opt_integer_args(vm, VMOPT_XGCMAXTHREADS, &gcmaxthread_index, EXACT_MEMORY_MATCH, &gcThreadCount, args);
+		if (OPTION_OK != result) {
+			if (OPTION_MALFORMED == result) {
+				j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_MUST_BE_NUMBER, VMOPT_XGCMAXTHREADS);
+			} else {
+				j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_VALUE_OVERFLOWED, VMOPT_XGCMAXTHREADS);
+			}
+			goto _error;
+		}
+
+		if (0 == gcThreadCount) {
+			j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_VALUE_MUST_BE_ABOVE, VMOPT_XGCMAXTHREADS, (UDATA)0);
+			goto _error;
+		}
+
+		if (gcmaxthread_index > gcthread_index) {
+			extensions->gcThreadCount = gcThreadCount;
+			extensions->gcThreadCountSpecified = true;
+			extensions->gcThreadCountForced = false;
+		}
+	}
+
+	return true;
+
+_error:
+	return false;
+}
+/**
+ * Parse command line arguments used ONLY for CRIU restore. Note the arguments
+ * are now passed in through an option file.
+ *
+ * @return true if parsing was successful, false otherwise.
+ */
+bool
+gcParseReconfigurableCommandLine(J9JavaVM* vm, J9VMInitArgs* args)
+{
+	MM_GCExtensions *extensions = MM_GCExtensions::getExtensions(vm);
+	IDATA index = -1;
+	IDATA result = 0;
+	PORT_ACCESS_FROM_JAVAVM(vm);
+	if (-1 != FIND_ARG_IN_ARGS(args, EXACT_MEMORY_MATCH, OPT_SOFTMX, NULL)) {
+		uintptr_t softmx = 0;
+		result = option_set_to_opt_args(vm, OPT_SOFTMX, &index, EXACT_MEMORY_MATCH, &softmx, args);
+		if (OPTION_OK != result) {
+			if (OPTION_MALFORMED == result) {
+				j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_MUST_BE_NUMBER, OPT_SOFTMX);
+			}
+			goto _error;
+		}
+		softmx = MM_Math::roundToFloor(extensions->heapAlignment, softmx);
+		softmx = MM_Math::roundToFloor(extensions->regionSize, softmx);
+		if (softmx > extensions->memoryMax) {
+			j9nls_printf(PORTLIB,J9NLS_ERROR,J9NLS_GC_SUBSPACE_TOO_LARGE_FOR_HEAP, OPT_SOFTMX);
+			goto _error;
+		}
+
+		if (softmx < extensions->initialMemorySize) {
+			UDATA minimumSizeValue = extensions->initialMemorySize;
+			const char *qualifier = NULL;
+			qualifiedSize(&minimumSizeValue, &qualifier);
+			j9nls_printf(PORTLIB,J9NLS_ERROR,J9NLS_GC_SUBSPACE_TOO_SMALL_FOR_VALUE, OPT_SOFTMX, minimumSizeValue, qualifier);
+			goto _error;
+		}
+		extensions->softMx = softmx;
+	}
+
+	if (-1 != FIND_ARG_IN_ARGS(args, EXACT_MEMORY_MATCH, "-XXgc:fvtest_testRAMSizePercentage=", NULL)) {
+		double localRAMSizePercent = 0.0;
+		result = option_set_to_opt_double_args(vm, "-XXgc:fvtest_testRAMSizePercentage=", &index, EXACT_MEMORY_MATCH, &localRAMSizePercent, args);
+		if (OPTION_OK != result) {
+			if (OPTION_MALFORMED == result) {
+				j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_MUST_BE_NUMBER, "XXgc:fvtest_testRAMSizePercentage");
+			}
+			goto _error;
+		}
+		if ((0.0 > localRAMSizePercent) || (500.0 < localRAMSizePercent)) {
+			j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_INTEGER_OUT_OF_RANGE, "fvtest_testRAMSizePercentage=", (UDATA)0, (UDATA)500);
+			goto _error;
+		}
+		extensions->testRAMSizePercentage = localRAMSizePercent;
+	}
+
+	if (!gcParseReconfigurableSoverignArguments(vm, args)) {
+		goto _error;
+	}
+	return true;
+
+_error:
+	return false;
 }
 
 static UDATA
@@ -1252,8 +1410,8 @@ gcParseXXArguments(J9JavaVM *vm)
 	MM_GCExtensions *extensions = MM_GCExtensions::getExtensions(vm);
 
 	{
-		IDATA heapManagementMXBeanCompatibilityIndex = FIND_ARG_IN_VMARGS(EXACT_MATCH, "-XX:+HeapManagementMXBeanCompatibility", NULL);
-		IDATA noHheapManagementMXBeanCompatibilityIndex = FIND_ARG_IN_VMARGS(EXACT_MATCH, "-XX:-HeapManagementMXBeanCompatibility", NULL);
+		IDATA heapManagementMXBeanCompatibilityIndex = FIND_AND_CONSUME_VMARG(EXACT_MATCH, "-XX:+HeapManagementMXBeanCompatibility", NULL);
+		IDATA noHheapManagementMXBeanCompatibilityIndex = FIND_AND_CONSUME_VMARG(EXACT_MATCH, "-XX:-HeapManagementMXBeanCompatibility", NULL);
 		if (heapManagementMXBeanCompatibilityIndex != noHheapManagementMXBeanCompatibilityIndex) {
 			/* At least one option is set. Find the right most one. */
 			if (heapManagementMXBeanCompatibilityIndex > noHheapManagementMXBeanCompatibilityIndex) {
@@ -1265,8 +1423,8 @@ gcParseXXArguments(J9JavaVM *vm)
 	}
 
 	{
-		IDATA useGCStartupHintsIndex = FIND_ARG_IN_VMARGS(EXACT_MATCH, "-XX:+UseGCStartupHints", NULL);
-		IDATA noUseGCStartupHintsIndex = FIND_ARG_IN_VMARGS(EXACT_MATCH, "-XX:-UseGCStartupHints", NULL);
+		IDATA useGCStartupHintsIndex = FIND_AND_CONSUME_VMARG(EXACT_MATCH, "-XX:+UseGCStartupHints", NULL);
+		IDATA noUseGCStartupHintsIndex = FIND_AND_CONSUME_VMARG(EXACT_MATCH, "-XX:-UseGCStartupHints", NULL);
 		if (useGCStartupHintsIndex != noUseGCStartupHintsIndex) {
 			/* At least one option is set. Find the right most one. */
 			if (useGCStartupHintsIndex > noUseGCStartupHintsIndex) {
@@ -1278,8 +1436,8 @@ gcParseXXArguments(J9JavaVM *vm)
 	}
 
 	{
-		IDATA alwaysPreTouchIndex = FIND_ARG_IN_VMARGS(EXACT_MATCH, "-XX:+AlwaysPreTouch", NULL);
-		IDATA notAlwaysPreTouchIndex = FIND_ARG_IN_VMARGS(EXACT_MATCH, "-XX:-AlwaysPreTouch", NULL);
+		IDATA alwaysPreTouchIndex = FIND_AND_CONSUME_VMARG(EXACT_MATCH, "-XX:+AlwaysPreTouch", NULL);
+		IDATA notAlwaysPreTouchIndex = FIND_AND_CONSUME_VMARG(EXACT_MATCH, "-XX:-AlwaysPreTouch", NULL);
 		if (alwaysPreTouchIndex != notAlwaysPreTouchIndex) {
 			/* At least one option is set. Find the right most one. */
 			if (alwaysPreTouchIndex > notAlwaysPreTouchIndex) {
@@ -1291,8 +1449,8 @@ gcParseXXArguments(J9JavaVM *vm)
 	}
 
 	{
-		IDATA adaptiveGCThreadingIndex = FIND_ARG_IN_VMARGS(EXACT_MATCH, "-XX:+AdaptiveGCThreading", NULL);
-		IDATA noAdaptiveGCThreadingIndex = FIND_ARG_IN_VMARGS(EXACT_MATCH, "-XX:-AdaptiveGCThreading", NULL);
+		IDATA adaptiveGCThreadingIndex = FIND_AND_CONSUME_VMARG(EXACT_MATCH, "-XX:+AdaptiveGCThreading", NULL);
+		IDATA noAdaptiveGCThreadingIndex = FIND_AND_CONSUME_VMARG(EXACT_MATCH, "-XX:-AdaptiveGCThreading", NULL);
 		if (adaptiveGCThreadingIndex != noAdaptiveGCThreadingIndex) {
 			/* At least one option is set. Find the right most one. */
 			if (adaptiveGCThreadingIndex > noAdaptiveGCThreadingIndex) {
@@ -1302,8 +1460,52 @@ gcParseXXArguments(J9JavaVM *vm)
 			}
 		}
 	}
+	{
+		IDATA dynamicHeapAdjustmentForRestoreIndex = FIND_AND_CONSUME_VMARG(EXACT_MATCH, "-XX:+dynamicHeapAdjustmentForRestore", NULL);
+		IDATA noDynamicHeapAdjustmentForRestoreIndex = FIND_AND_CONSUME_VMARG(EXACT_MATCH, "-XX:-dynamicHeapAdjustmentForRestore", NULL);
+		if (dynamicHeapAdjustmentForRestoreIndex != noDynamicHeapAdjustmentForRestoreIndex) {
+			/* At least one option is set. Find the right most one. */
+			if (dynamicHeapAdjustmentForRestoreIndex > noDynamicHeapAdjustmentForRestoreIndex) {
+				extensions->dynamicHeapAdjustmentForRestore = true;
+			} else {
+				extensions->dynamicHeapAdjustmentForRestore = false;
+			}
+		}
+	}
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+	{
+		IDATA index = -1;
+		IDATA result = 0;
+
+		PORT_ACCESS_FROM_JAVAVM(vm);
+
+		if (-1 != FIND_ARG_IN_VMARGS(EXACT_MEMORY_MATCH, "-XX:CheckpointGCThreads=", NULL)) {
+			result = option_set_to_opt_integer(vm, "-XX:CheckpointGCThreads=", &index, EXACT_MEMORY_MATCH, &extensions->userSpecifiedParameters._checkpointGCThreads._valueSpecified);
+			if (OPTION_OK != result) {
+				if (OPTION_MALFORMED == result) {
+					j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_MUST_BE_NUMBER, "-XX:CheckpointGCThreads=");
+				} else {
+					j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_VALUE_OVERFLOWED, "-XX:CheckpointGCThreads=");
+				}
+				goto _error;
+			}
+
+			if (0 == extensions->userSpecifiedParameters._checkpointGCThreads._valueSpecified) {
+				j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_VALUE_MUST_BE_ABOVE, "-XX:CheckpointGCThreads=", (UDATA)0);
+				goto _error;
+			}
+			extensions->userSpecifiedParameters._checkpointGCThreads._wasSpecified = true;
+			extensions->checkpointGCthreadCount = extensions->userSpecifiedParameters._checkpointGCThreads._valueSpecified;
+		}
+	}
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
 
 	return 1;
+
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+_error:
+	return 0;
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
 }
 
 /**
@@ -1325,7 +1527,7 @@ scan_udata_helper(J9JavaVM *javaVM, char **cursor, UDATA *value, const char *arg
 		} else {
 			j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_VALUE_OVERFLOWED, argName);
 		}
-		return false;			
+		return false;
 	}
 
 	// TODO: should we add a delimiter check here?
@@ -1462,7 +1664,7 @@ scan_u64_memory_size_helper(J9JavaVM *javaVM, char **cursor, uint64_t *value, co
  * parameters were specified by the user.
  * @param memoryParameters pointer to the array of parameters to be set
  */
-jint 
+jint
 gcParseCommandLineAndInitializeWithValues(J9JavaVM *vm, IDATA *memoryParameters)
 {
 	MM_GCExtensions *extensions = MM_GCExtensions::getExtensions(vm);
@@ -1479,7 +1681,7 @@ gcParseCommandLineAndInitializeWithValues(J9JavaVM *vm, IDATA *memoryParameters)
 
 	PORT_ACCESS_FROM_JAVAVM(vm);
 
-	/* Parse the command line 
+	/* Parse the command line
 	 * Order is important for parameters that match as substrings (-Xmrx/-Xmr)
 	 */
 	{
@@ -1487,14 +1689,20 @@ gcParseCommandLineAndInitializeWithValues(J9JavaVM *vm, IDATA *memoryParameters)
 		/* only parse VMOPT_XXENABLEORIGINALJDK8HEAPSIZECOMPATIBILITY option for Java 8 and below */
 		if (J2SE_18 >= J2SE_VERSION(vm)) {
 
-			IDATA enabled = FIND_AND_CONSUME_ARG(EXACT_MATCH, VMOPT_XXENABLEORIGINALJDK8HEAPSIZECOMPATIBILITY, NULL);
-			IDATA disabled = FIND_AND_CONSUME_ARG(EXACT_MATCH, VMOPT_XXDISABLEORIGINALJDK8HEAPSIZECOMPATIBILITY, NULL);
+			IDATA enabled = FIND_AND_CONSUME_VMARG(EXACT_MATCH, VMOPT_XXENABLEORIGINALJDK8HEAPSIZECOMPATIBILITY, NULL);
+			IDATA disabled = FIND_AND_CONSUME_VMARG(EXACT_MATCH, VMOPT_XXDISABLEORIGINALJDK8HEAPSIZECOMPATIBILITY, NULL);
 			if (enabled > disabled) {
 				enableOriginalJDK8HeapSizeCompatibilityOption = true;
 			}
 		}
+		IDATA testContainerMemLimitEnabled = FIND_AND_CONSUME_VMARG(EXACT_MATCH, "-XX:+fvtest_testContainerMemLimit", NULL);
+		IDATA testContainerMemLimitDisabled = FIND_AND_CONSUME_VMARG(EXACT_MATCH, "-XX:-fvtest_testContainerMemLimit", NULL);
+		if (testContainerMemLimitEnabled > testContainerMemLimitDisabled) {
+			extensions->testContainerMemLimit = true;
+		}
 		/* set default max heap for Java */
-		extensions->computeDefaultMaxHeapForJava(enableOriginalJDK8HeapSizeCompatibilityOption);
+		extensions->memoryMax = extensions->computeDefaultMaxHeapForJava(enableOriginalJDK8HeapSizeCompatibilityOption);
+		extensions->maxSizeDefaultMemorySpace = extensions->memoryMax;
 	}
 	result = option_set_to_opt(vm, OPT_XMCA, &index, EXACT_MEMORY_MATCH, &vm->ramClassAllocationIncrement);
 	if (OPTION_OK != result) {
@@ -1532,12 +1740,15 @@ gcParseCommandLineAndInitializeWithValues(J9JavaVM *vm, IDATA *memoryParameters)
 
 	memoryParameters[opt_Xmcrs] = index;
 
-	result = option_set_to_opt(vm, OPT_XMX, &index, EXACT_MEMORY_MATCH, &extensions->memoryMax);
+	result = option_set_to_opt(vm, OPT_XMX, &index, EXACT_MEMORY_MATCH, &extensions->userSpecifiedParameters._Xmx._valueSpecified);
 	if (OPTION_OK != result) {
 		goto _error;
 	}
 	memoryParameters[opt_Xmx] = index;
-
+	if (-1 != memoryParameters[opt_Xmx]) {
+		extensions->userSpecifiedParameters._Xmx._wasSpecified = true;
+		extensions->memoryMax = extensions->userSpecifiedParameters._Xmx._valueSpecified;
+	}
 	result = option_set_to_opt(vm, OPT_SOFTMX, &index, EXACT_MEMORY_MATCH, &extensions->softMx);
 	if (OPTION_OK != result) {
 		goto _error;
@@ -1636,7 +1847,7 @@ gcParseCommandLineAndInitializeWithValues(J9JavaVM *vm, IDATA *memoryParameters)
 		extensions->minNewSpaceSize = userNewSpaceSize;
 		extensions->newSpaceSize = userNewSpaceSize;
 		extensions->maxNewSpaceSize = userNewSpaceSize;
-		
+
 		/* Hack table to appear that -Xmns and -Xmnx _were_ specified */
 		memoryParameters[opt_Xmns] = memoryParameters[opt_Xmn];
 		memoryParameters[opt_Xmnx] = memoryParameters[opt_Xmn];
@@ -1657,12 +1868,12 @@ gcParseCommandLineAndInitializeWithValues(J9JavaVM *vm, IDATA *memoryParameters)
 			j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_EXCLUSIVE, OPT_XMO, OPT_XMOS);
 			return JNI_EINVAL;
 		}
-		
+
 		extensions->minOldSpaceSize = userOldSpaceSize;
 		extensions->oldSpaceSize = userOldSpaceSize;
 		extensions->maxOldSpaceSize = userOldSpaceSize;
 
-		/* Hack table to appear that -Xmos and -Xmox _were_ specified */		
+		/* Hack table to appear that -Xmos and -Xmox _were_ specified */
 		memoryParameters[opt_Xmos] = memoryParameters[opt_Xmo];
 		memoryParameters[opt_Xmox] = memoryParameters[opt_Xmo];
 	}
@@ -1700,7 +1911,7 @@ gcParseCommandLineAndInitializeWithValues(J9JavaVM *vm, IDATA *memoryParameters)
 #if defined(J9VM_GC_VLHGC) || defined(J9VM_GC_GENERATIONAL)
 		/* this is currently the same behaviour as our internal -Xgc:nonuma option */
 		extensions->_numaManager.shouldEnablePhysicalNUMA(false);
-		extensions->numaForced = true;		
+		extensions->numaForced = true;
 #endif /* defined(J9VM_GC_VLHGC) || defined(J9VM_GC_GENERATIONAL) */
 	}
 	/* Since the user is not specifying a value, ensure that -Xmdx is set to the same value
@@ -1726,7 +1937,7 @@ gcParseCommandLineAndInitializeWithValues(J9JavaVM *vm, IDATA *memoryParameters)
 	while (xxGCColonIndex >= 0) {
 		CONSUME_ARG(vmArgs, xxGCColonIndex);
 		GET_OPTION_VALUE( xxGCColonIndex, ':', &xxGCOptions);
-	
+
 		/* Parse xxGCOptions arguments (if any) */
 		if (NULL != xxGCOptions) {
 			jint retCode;
@@ -1735,23 +1946,23 @@ gcParseCommandLineAndInitializeWithValues(J9JavaVM *vm, IDATA *memoryParameters)
 		    }
 		}
 		xxGCColonIndex = FIND_NEXT_ARG_IN_VMARGS_FORWARD( STARTSWITH_MATCH, OPT_XXGC_COLON, NULL, xxGCColonIndex);
-	}		
+	}
 
 	xGCColonIndex = FIND_ARG_IN_VMARGS_FORWARD( STARTSWITH_MATCH, OPT_XGC_COLON, NULL );
 	while (xGCColonIndex >= 0) {
 		CONSUME_ARG(vmArgs, xGCColonIndex);
 		GET_OPTION_VALUE( xGCColonIndex, ':', &xGCOptions);
-	
+
 		/* Parse xGCOptions arguments (if any) */
 		if (xGCOptions != NULL) {
 			jint retCode;
 		    if (JNI_OK != (retCode = gcParseXgcArguments(vm, xGCOptions))) {
 				return retCode;
-		    }			
+		    }
 		} else {
 			return JNI_OK;
 		}
-		
+
         xGCColonIndex = FIND_NEXT_ARG_IN_VMARGS_FORWARD(STARTSWITH_MATCH, OPT_XGC_COLON, NULL, xGCColonIndex);
 	}
 
@@ -1790,16 +2001,16 @@ _error:
 		scan_failed(PORTLIB, "GC", errorString);
 		break;
 	}
-	
+
 	return JNI_EINVAL;
 }
 
-bool 
+bool
 gcParseTGCCommandLine(J9JavaVM *vm)
 {
 	bool parseSuccess = true;
 	MM_GCExtensions *extensions = MM_GCExtensions::getExtensions(vm);
-	
+
 	/* note that realtime currently doesn't support TGC so only standard and VLHGC should try to consume TGC arguments */
 	if (extensions->isStandardGC() || extensions->isVLHGC() || extensions->isSegregatedHeap()) {
 #if defined(J9VM_GC_MODRON_TRACE)
@@ -1810,7 +2021,7 @@ gcParseTGCCommandLine(J9JavaVM *vm)
 			char* xTgcOptions = NULL;
 			CONSUME_ARG(vmArgs, xTgcColonIndex);
 			GET_OPTION_VALUE( xTgcColonIndex, ':', &xTgcOptions);
-	
+
 			/* Parse xTgcOptions arguments (if any) */
 			if (NULL != xTgcOptions) {
 				if (!tgcParseArgs(vm, xTgcOptions) || !tgcInitializeRequestedOptions(vm)) {

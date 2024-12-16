@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2021, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2021
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,17 +15,18 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "j9.h"
 #include "j9protos.h"
 #include "ut_j9scar.h"
 #include "rommeth.h"
+#include "vmhook.h"
 
-#if defined(LINUX) && defined(J9VM_ARCH_X86) && defined(J9VM_ENV_DATA64)
+#if defined(LINUX) && (defined(J9VM_ARCH_X86) || defined(J9VM_ARCH_POWER) || defined(J9VM_ARCH_S390)) && defined(J9VM_ENV_DATA64)
 #include <ucontext.h>
 #define ASGCT_SUPPORTED
 #endif /* defined(LINUX) && defined(J9VM_ARCH_X86) && defined(J9VM_ENV_DATA64) */
@@ -38,15 +39,15 @@ enum {
 ticks_no_Java_frame         =  0, // new thread
 ticks_no_class_load         = -1, // jmethodIds are not available
 ticks_GC_active             = -2, // GC action
-ticks_unknown_not_Java      = -3, // ¯\_(ツ)_/¯
-ticks_not_walkable_not_Java = -4, // ¯\_(ツ)_/¯
-ticks_unknown_Java          = -5, // ¯\_(ツ)_/¯
-ticks_not_walkable_Java     = -6, // ¯\_(ツ)_/¯
-ticks_unknown_state         = -7, // ¯\_(ツ)_/¯
+ticks_unknown_not_Java      = -3,
+ticks_not_walkable_not_Java = -4,
+ticks_unknown_Java          = -5,
+ticks_not_walkable_Java     = -6,
+ticks_unknown_state         = -7,
 ticks_thread_exit           = -8, // dying thread
 ticks_deopt                 = -9, // mid-deopting code
-ticks_safepoint             = -10 // ¯\_(ツ)_/¯
-}; 
+ticks_safepoint             = -10
+};
 
 typedef struct {
 	jint lineno;
@@ -60,6 +61,21 @@ typedef struct {
 } ASGCT_CallTrace;
 
 #if defined(ASGCT_SUPPORTED)
+
+#if defined(J9VM_ARCH_X86)
+#define J9VM_GET_PC(ucontext) ((ucontext_t*)(ucontext))->uc_mcontext.gregs[REG_RIP]
+#define J9VM_GET_SP(ucontext) ((ucontext_t*)(ucontext))->uc_mcontext.gregs[REG_RSP]
+#define REGISTER greg_t
+#elif defined(J9VM_ARCH_POWER) /* defined(J9VM_ARCH_X86) */
+#define J9VM_GET_PC(ucontext) ((ucontext_t*)(ucontext))->uc_mcontext.gp_regs[PT_NIP]
+#define J9VM_GET_SP(ucontext) ((ucontext_t*)(ucontext))->uc_mcontext.gp_regs[PT_R1]
+#define REGISTER elf_greg_t
+#elif defined(J9VM_ARCH_S390)
+#define J9VM_GET_PC(ucontext) ((ucontext_t*)(ucontext))->uc_mcontext.psw.addr
+#define J9VM_GET_SP(ucontext) ((ucontext_t*)(ucontext))->uc_mcontext.gregs[15]
+#define REGISTER greg_t
+#endif /* defined(J9VM_ARCH_S390) */
+
 
 extern J9JavaVM *BFUjavaVM;
 
@@ -75,7 +91,7 @@ asyncFrameIterator(J9VMThread * currentThread, J9StackWalkState * walkState)
 	UDATA methodIndex = getMethodIndexUnchecked(method);
 	/* If any of the following are true, trigger a SEGV which will
 	 * be caught in the caller.
-	 * 
+	 *
 	 * - method index is invalid (i.e. method was invalid)
 	 * - method IDs for the class not pre-initialized
 	 * - method ID for the method not pre-initialized
@@ -103,6 +119,7 @@ asyncFrameIterator(J9VMThread * currentThread, J9StackWalkState * walkState)
 		frame->lineno = (jint)walkState->bytecodePCOffset;
 	}
 	walkState->userData1 = (void*)(frame + 1);
+	declaringClass->classLoader->asyncGetCallTraceUsed = 1;
 	return J9_STACKWALK_KEEP_ITERATING;
 }
 
@@ -130,65 +147,66 @@ static UDATA
 protectedASGCT(J9PortLibrary *portLib, void *arg)
 {
 	ASGCT_parms *parms = (ASGCT_parms*)arg;
+	J9VMThread *targetThread = (J9VMThread*)parms->trace->env_id;
+	Assert_SC_true(NULL != targetThread);
 	J9VMThread *currentThread = BFUjavaVM->internalVMFunctions->currentVMThread(BFUjavaVM);
-	if (NULL != currentThread) {
-		J9SFJITResolveFrame resolveFrame = {0};
-		parms->currentThread = currentThread;
-		/* Back up the J9VMThread root values for restoration in the caller */
-		parms->pc = currentThread->pc;
-		parms->sp = currentThread->sp;
-		parms->arg0EA = currentThread->arg0EA;
-		parms->literals = currentThread->literals;
-		parms->num_frames = ticks_not_walkable_Java;
-		parms->jitArtifactSearchCache = currentThread->jitArtifactSearchCache;
-		parms->privateFlags2 = currentThread->privateFlags2;
-		/* Disable the JIT metadata cache. The cache may be in an inconsistent state, and may
-		 * need to allocate memory (which is undesireable in a signal handler).
-		 */
-		currentThread->jitArtifactSearchCache = (void*)((UDATA)currentThread->jitArtifactSearchCache | J9_STACKWALK_NO_JIT_CACHE);
-		/* Disable trace and assertions. The current thread may be in the process of updating the trace
-		 * buffers when it was interrupted. Assertions during ASGCT are also undesireable, better to let
-		 * the thread continue on to crash, which is handled.
-		 */
-		currentThread->privateFlags2 |= J9_PRIVATE_FLAGS2_ASYNC_GET_CALL_TRACE;
-		J9JITConfig *jitConfig = BFUjavaVM->jitConfig;
-		if (NULL != jitConfig) {
-			void *ucontext = parms->ucontext;
-			if (NULL != ucontext) {
-				greg_t *regs = ((ucontext_t*)ucontext)->uc_mcontext.gregs;
-				greg_t rip = regs[REG_RIP];
-				J9JITExceptionTable *metaData = jitConfig->jitGetExceptionTableFromPC(currentThread, rip);
-				if (NULL != metaData) {
-					greg_t rsp = regs[REG_RSP];
-					/* Build a JIT resolve frame on the C stack to avoid writing to the java
-					 * stack in the signal handler. Update the J9VMThread roots to point to
-					 * the resolve frame (will be restored in the caller).
-					 */
-					resolveFrame.savedJITException = NULL;
-					resolveFrame.specialFrameFlags = J9_SSF_JIT_RESOLVE;
-					resolveFrame.parmCount = 0;
-					resolveFrame.returnAddress = (U_8*)rip;
-					resolveFrame.taggedRegularReturnSP = (UDATA*)(((U_8 *)rsp) + J9SF_A0_INVISIBLE_TAG);
-					currentThread->pc = (U_8*)J9SF_FRAME_TYPE_JIT_RESOLVE;
-					currentThread->arg0EA = (UDATA*)&(resolveFrame.taggedRegularReturnSP);
-					currentThread->literals = NULL;
-					currentThread->sp = (UDATA*)&resolveFrame;
-				}
+	/* ASGCT is only callable with the JNIEnv of the current thread */
+	Assert_SC_true(targetThread == currentThread);
+	J9SFJITResolveFrame resolveFrame = {0};
+	parms->currentThread = currentThread;
+	/* Back up the J9VMThread root values for restoration in the caller */
+	parms->pc = currentThread->pc;
+	parms->sp = currentThread->sp;
+	parms->arg0EA = currentThread->arg0EA;
+	parms->literals = currentThread->literals;
+	parms->num_frames = ticks_not_walkable_Java;
+	parms->jitArtifactSearchCache = currentThread->jitArtifactSearchCache;
+	parms->privateFlags2 = currentThread->privateFlags2;
+	/* Disable the JIT metadata cache. The cache may be in an inconsistent state, and may
+	 * need to allocate memory (which is undesireable in a signal handler).
+	 */
+	currentThread->jitArtifactSearchCache = (void*)((UDATA)currentThread->jitArtifactSearchCache | J9_STACKWALK_NO_JIT_CACHE);
+	/* Disable trace and assertions. The current thread may be in the process of updating the trace
+	 * buffers when it was interrupted. Assertions during ASGCT are also undesireable, better to let
+	 * the thread continue on to crash, which is handled.
+	 */
+	currentThread->privateFlags2 |= J9_PRIVATE_FLAGS2_ASYNC_GET_CALL_TRACE;
+	J9JITConfig *jitConfig = BFUjavaVM->jitConfig;
+	if (NULL != jitConfig) {
+		void *ucontext = parms->ucontext;
+		if (NULL != ucontext) {
+			REGISTER pc = J9VM_GET_PC(ucontext);
+			J9JITExceptionTable *metaData = jitConfig->jitGetExceptionTableFromPC(currentThread, pc);
+			if (NULL != metaData) {
+				REGISTER sp = J9VM_GET_SP(ucontext);
+				/* Build a JIT resolve frame on the C stack to avoid writing to the java
+				 * stack in the signal handler. Update the J9VMThread roots to point to
+				 * the resolve frame (will be restored in the caller).
+				 */
+				resolveFrame.savedJITException = NULL;
+				resolveFrame.specialFrameFlags = J9_SSF_JIT_RESOLVE;
+				resolveFrame.parmCount = 0;
+				resolveFrame.returnAddress = (U_8*)pc;
+				resolveFrame.taggedRegularReturnSP = (UDATA*)(((U_8 *)sp) + J9SF_A0_INVISIBLE_TAG);
+				currentThread->pc = (U_8*)J9SF_FRAME_TYPE_JIT_RESOLVE;
+				currentThread->arg0EA = (UDATA*)&(resolveFrame.taggedRegularReturnSP);
+				currentThread->literals = NULL;
+				currentThread->sp = (UDATA*)&resolveFrame;
 			}
 		}
-		J9StackWalkState walkState = {0};
-		walkState.walkThread = currentThread;
-		walkState.skipCount = 0;
-		walkState.maxFrames = parms->depth;
-		walkState.flags = J9_STACKWALK_INCLUDE_NATIVES | J9_STACKWALK_VISIBLE_ONLY
-			| J9_STACKWALK_RECORD_BYTECODE_PC_OFFSET | J9_STACKWALK_COUNT_SPECIFIED
-			| J9_STACKWALK_ITERATE_FRAMES | J9_STACKWALK_NO_ERROR_REPORT;
-		walkState.userData1 = (void*)parms->trace->frames;
-		walkState.frameWalkFunction = asyncFrameIterator;
-		UDATA result = BFUjavaVM->walkStackFrames(currentThread, &walkState);
-		if (J9_STACKWALK_RC_NONE == result) {
-			parms->num_frames = (jint)walkState.framesWalked;
-		}
+	}
+	J9StackWalkState walkState = {0};
+	walkState.walkThread = currentThread;
+	walkState.skipCount = 0;
+	walkState.maxFrames = parms->depth;
+	walkState.flags = J9_STACKWALK_INCLUDE_NATIVES | J9_STACKWALK_VISIBLE_ONLY
+		| J9_STACKWALK_RECORD_BYTECODE_PC_OFFSET | J9_STACKWALK_COUNT_SPECIFIED
+		| J9_STACKWALK_ITERATE_FRAMES | J9_STACKWALK_NO_ERROR_REPORT;
+	walkState.userData1 = (void*)parms->trace->frames;
+	walkState.frameWalkFunction = asyncFrameIterator;
+	UDATA result = BFUjavaVM->walkStackFrames(currentThread, &walkState);
+	if (J9_STACKWALK_RC_NONE == result) {
+		parms->num_frames = (jint)walkState.framesWalked;
 	}
 	return 0;
 }
@@ -201,13 +219,19 @@ void AsyncGetCallTrace(ASGCT_CallTrace *trace, jint depth, void *ucontext)
 	jint num_frames = ticks_unknown_not_Java;
 #if defined(ASGCT_SUPPORTED)
 	if (NULL != BFUjavaVM) {
+		/* ASGCT requires that the JVMTI ClassLoad event be hooked (in order to pre-create the method IDs) */
+		Assert_SC_true(J9_EVENT_IS_HOOKED(BFUjavaVM->hookInterface, J9HOOK_VM_CLASS_LOAD));
+		/* ASGCT is not supported when running with -Xrs because the stack may be in an inconsistent state
+		 * which will result in a crash during the stack walk.
+		 */
+		Assert_SC_true(J9_ARE_NO_BITS_SET(BFUjavaVM->sigFlags, J9_SIG_XRS_SYNC));
 		PORT_ACCESS_FROM_JAVAVM(BFUjavaVM);
 		ASGCT_parms parms = { trace, depth, ucontext, currentThread, num_frames, NULL, NULL, NULL, NULL, NULL, 0 };
 		UDATA result = 0;
 		j9sig_protect(
-				protectedASGCT, (void*)&parms, 
+				protectedASGCT, (void*)&parms,
 				emptySignalHandler, NULL,
-				J9PORT_SIG_FLAG_SIGALLSYNC | J9PORT_SIG_FLAG_MAY_RETURN, 
+				J9PORT_SIG_FLAG_SIGALLSYNC | J9PORT_SIG_FLAG_MAY_RETURN,
 				&result);
 		num_frames = parms.num_frames;
 		currentThread = parms.currentThread;
@@ -222,7 +246,6 @@ void AsyncGetCallTrace(ASGCT_CallTrace *trace, jint depth, void *ucontext)
 		}
 	}
 #endif /* ASGCT_SUPPORTED */
-	trace->env_id = (JNIEnv*)currentThread;
 	trace->num_frames = num_frames;
 }
 

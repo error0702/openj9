@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2017, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2017
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,12 +15,15 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 import groovy.json.JsonSlurper;
 import groovy.json.JsonOutput;
+import java.util.regex.Matcher
+import java.util.regex.Pattern
+
 pipelineFunctions = load 'buildenv/jenkins/common/pipeline-functions.groovy'
 
 def get_source() {
@@ -52,6 +55,21 @@ def get_source() {
 def get_sources_with_authentication() {
     sshagent(credentials:["${USER_CREDENTIALS_ID}"]) {
         get_sources()
+    }
+}
+
+def get_source_call(gskit_cred="") {
+    sh "bash get_source.sh ${EXTRA_GETSOURCE_OPTIONS} ${gskit_cred} ${OPENJ9_REPO_OPTION} ${OPENJ9_BRANCH_OPTION} ${OPENJ9_SHA_OPTION} ${OPENJ9_REFERENCE} ${OMR_REPO_OPTION} ${OMR_BRANCH_OPTION} ${OMR_SHA_OPTION} ${OMR_REFERENCE}"
+}
+
+def get_source_call_optional_gskit() {
+    if (EXTRA_GETSOURCE_OPTIONS.contains("-gskit-bin") || (EXTRA_CONFIGURE_OPTIONS.contains("-gskit-sdk-bin"))) {
+        gskitCredentialID = variableFile.get_user_credentials_id('gskit')
+        withCredentials([usernamePassword(credentialsId: "${gskitCredentialID}", passwordVariable: 'GSKIT_PASSWORD', usernameVariable: 'GSKIT_USERNAME')]) {
+            get_source_call("-gskit-credential=\$GSKIT_USERNAME:\$GSKIT_PASSWORD")
+        }
+    } else {
+        get_source_call()
     }
 }
 
@@ -104,7 +122,7 @@ def get_sources() {
         // Look for dependent changes and checkout PR(s)
         checkout_pullrequest()
     } else {
-        sh "bash get_source.sh ${EXTRA_GETSOURCE_OPTIONS} ${OPENJ9_REPO_OPTION} ${OPENJ9_BRANCH_OPTION} ${OPENJ9_SHA_OPTION} ${OPENJ9_REFERENCE} ${OMR_REPO_OPTION} ${OMR_BRANCH_OPTION} ${OMR_SHA_OPTION} ${OMR_REFERENCE}"
+        get_source_call_optional_gskit()
     }
 }
 
@@ -155,8 +173,21 @@ def checkout_pullrequest() {
 
         // Setup PR_IDs for dependent changes
         for (DEPEND in DEPENDS_ARRAY) {
-            String REPO = DEPEND.substring(DEPEND.indexOf("/") + 1, DEPEND.indexOf("#"));
-            String PR_ID = DEPEND.substring(DEPEND.indexOf("#") + 1, DEPEND.length());
+            String REPO = ''
+            String PR_ID = ''
+            switch (DEPEND) {
+                case ~/https:\/\/github\.(ibm\.)?com\/[^\s\/]+\/[^\s\/]+\/pull\/[0-9]+/:
+                    def urlList = DEPEND.tokenize('/')
+                    REPO = urlList[3]
+                    PR_ID = urlList[5]
+                    break
+                case ~/[^\s\/#]+\/[^\s\/#]+#[^\s\/#]+/:
+                    REPO = DEPEND.substring(DEPEND.indexOf("/") + 1, DEPEND.indexOf("#"));
+                    PR_ID = DEPEND.substring(DEPEND.indexOf("#") + 1, DEPEND.length());
+                    break
+                default:
+                    error "Cannot parse dependent change: '${DEPEND}'"
+            }
             switch (REPO) {
                 case "omr":
                 case "openj9-omr":
@@ -211,7 +242,7 @@ def checkout_pullrequest() {
         checkout_pullrequest(OPENJDK_PR, "ibmruntimes/openj9-openjdk-jdk${JDK_REPO_SUFFIX}")
     }
 
-    sh "bash get_source.sh ${EXTRA_GETSOURCE_OPTIONS} ${OPENJ9_REPO_OPTION} ${OPENJ9_BRANCH_OPTION} ${OPENJ9_SHA_OPTION} ${OPENJ9_REFERENCE} ${OMR_REPO_OPTION} ${OMR_BRANCH_OPTION} ${OMR_SHA_OPTION} ${OMR_REFERENCE}"
+    get_source_call_optional_gskit()
 
     // Checkout dependent PRs, if any were specified
     if (openj9_bool) {
@@ -223,9 +254,9 @@ def checkout_pullrequest() {
     if (omr_bool) {
         dir ('omr') {
             if (omr_upstream) {
-                sh "git config remote.origin.url https://github.com/eclipse/omr.git"
+                sh "git config remote.origin.url https://github.com/eclipse-omr/omr.git"
             }
-            checkout_pullrequest(OMR_PR, 'eclipse/omr')
+            checkout_pullrequest(OMR_PR, 'eclipse-omr/omr')
         }
     }
 }
@@ -271,26 +302,42 @@ def checkoutRef (REF) {
 
 def build() {
     stage('Compile') {
-        def make_target = 'all'
+        def freemarker_option = FREEMARKER ? "--with-freemarker-jar=${FREEMARKER}" : ""
         OPENJDK_CLONE_DIR = "${env.WORKSPACE}/${OPENJDK_CLONE_DIR}"
 
         withEnv(BUILD_ENV_VARS_LIST) {
             dir(OPENJDK_CLONE_DIR) {
                 try {
-                    def freemarker_option = FREEMARKER ? "--with-freemarker-jar=${FREEMARKER}" : ""
-                    sh "${BUILD_ENV_CMD} bash configure ${freemarker_option} --with-boot-jdk=${BOOT_JDK} ${EXTRA_CONFIGURE_OPTIONS} && make ${EXTRA_MAKE_OPTIONS} ${make_target}"
-                } catch (e) {
-                    archive_diagnostics()
-                    throw e
+                    sh "${BUILD_ENV_CMD} bash configure ${freemarker_option} --with-boot-jdk=${BOOT_JDK} ${EXTRA_CONFIGURE_OPTIONS} && ${get_compile_command()}"
+                } catch (Exception e) {
+                    // last 5000 console output lines
+                    LOG_MAX_LINES = params.LOG_MAX_LINES ? params.LOG_MAX_LINES.toInteger() : 5000
+                    LOG_LINES = currentBuild.getRawBuild().getLog(LOG_MAX_LINES)
+                    if (match_fail_pattern(LOG_LINES)) {
+                        recompile()
+                    } else {
+                        archive_diagnostics()
+                        throw e
+                    }
                 }
             }
         }
     }
     stage('Java Version') {
         dir(OPENJDK_CLONE_DIR) {
-            sh "build/$RELEASE/images/$JDK_FOLDER/bin/java -Xjit -version"
+            def jdkImageDir = "build/${RELEASE}/images/${JDK_FOLDER}"
+            try {
+                sh "${jdkImageDir}/bin/java -Xjit -version"
+            } catch (e) {
+                archive_diagnostics(jdkImageDir)
+                throw e
+            }
         }
     }
+}
+
+def get_compile_command() {
+    return "make ${EXTRA_MAKE_OPTIONS} all"
 }
 
 def archive_sdk() {
@@ -298,6 +345,7 @@ def archive_sdk() {
         def buildDir = "build/${RELEASE}/images/"
         def debugImageDir = "${buildDir}debug-image/"
         def testDir = "test"
+        def makeDir = "make"
 
         dir(OPENJDK_CLONE_DIR) {
             // Code coverage files archive for report
@@ -379,6 +427,15 @@ def archive_sdk() {
                                 "target": "${ARTIFACTORY_CONFIG['uploadDir']}",
                                 "props": "build.buildIdentifier=${BUILD_IDENTIFIER}"]
                 specs.add(debugImageSpec)
+                // Extract obfuscation change log files to Artifactory
+                def findZelixOut = sh(script: "find ${makeDir} -name 'ObfuscateLog*.txt' -type f", returnStdout: true).trim()
+                def zelixFiles = findZelixOut.tokenize('\n');
+                for (String zelixFile in zelixFiles) {
+                    def zelixSpec = ["pattern": "${zelixFile}",
+                                     "target": "${ARTIFACTORY_CONFIG['uploadDir']}",
+                                     "props": "build.buildIdentifier=${BUILD_IDENTIFIER}"]
+                    specs.add(zelixSpec)
+                }
                 if (params.ARCHIVE_JAVADOC) {
                     def javadocSpec = ["pattern": "${OPENJDK_CLONE_DIR}/${JAVADOC_FILENAME}",
                                        "target": "${ARTIFACTORY_CONFIG['uploadDir']}",
@@ -404,13 +461,18 @@ def archive_sdk() {
                 env.CUSTOMIZED_SDK_URL = "${ARTIFACTORY_CONFIG[ARTIFACTORY_CONFIG['defaultGeo']]['url']}/${ARTIFACTORY_CONFIG['uploadDir']}${SDK_FILENAME}"
                 currentBuild.description += "<br><a href=${CUSTOMIZED_SDK_URL}>${SDK_FILENAME}</a>"
 
+                for (String zelixFile in zelixFiles) {
+                    def zelixFileStripped = zelixFile.substring(zelixFile.lastIndexOf("/") + 1)
+                    ZELIX_URL = "${ARTIFACTORY_CONFIG[ARTIFACTORY_CONFIG['defaultGeo']]['url']}/${ARTIFACTORY_CONFIG['uploadDir']}${zelixFileStripped}"
+                    currentBuild.description += "<br><a href=${ZELIX_URL}>${zelixFileStripped}</a>"
+                }
                 if (fileExists("${TEST_FILENAME}")) {
                     TEST_LIB_URL = "${ARTIFACTORY_CONFIG[ARTIFACTORY_CONFIG['defaultGeo']]['url']}/${ARTIFACTORY_CONFIG['uploadDir']}${TEST_FILENAME}"
                     currentBuild.description += "<br><a href=${TEST_LIB_URL}>${TEST_FILENAME}</a>"
                     env.CUSTOMIZED_SDK_URL += " " + TEST_LIB_URL
                 }
                 if (fileExists("${DEBUG_IMAGE_FILENAME}")) {
-                    DEBUG_IMAGE_LIB_URL = "${ARTIFACTORY_CONFIG[ARTIFACTORY_CONFIG['defaultGeo']]['url']}/${ARTIFACTORY_CONFIG['uploadDir']}/${DEBUG_IMAGE_FILENAME}"
+                    DEBUG_IMAGE_LIB_URL = "${ARTIFACTORY_CONFIG[ARTIFACTORY_CONFIG['defaultGeo']]['url']}/${ARTIFACTORY_CONFIG['uploadDir']}${DEBUG_IMAGE_FILENAME}"
                     currentBuild.description += "<br><a href=${DEBUG_IMAGE_LIB_URL}>${DEBUG_IMAGE_FILENAME}</a>"
                 }
                 if (params.ARCHIVE_JAVADOC) {
@@ -469,10 +531,25 @@ def fetchFile(src, dest) {
     sh "tso DELETE ${fileToMove}"
 }
 
-def archive_diagnostics() {
+def archive_diagnostics(javaVersionJdkImageDir = null) {
     def datestamp = variableFile.get_date()
     def diagnosticsFilename = "${JOB_NAME}-${BUILD_NUMBER}-${datestamp}-diagnostics.tar.gz"
-    if (SPEC.contains('zos')) {
+
+    def archiveCmd = "tar -zcvf ${diagnosticsFilename} -T -"
+
+    def findCrashDataCmd = "find ."
+    findCrashDataCmd += " -name 'core.*.dmp'"
+    findCrashDataCmd += " -o -name 'javacore.*.txt'"
+    findCrashDataCmd += " -o -name 'jitdump.*.dmp'"
+    findCrashDataCmd += " -o -name 'Snap.*.trc'"
+
+    if (SPEC.contains('linux')) {
+        // collect *.debuginfo files to help diagnose omr_ddrgen failures
+        findCrashDataCmd += " -o -name '*.debuginfo'"
+    } else if (SPEC.contains('win')) {
+        // collect *.pdb files to help diagnose omr_ddrgen failures
+        findCrashDataCmd += " -o -name '*.pdb'"
+    } else if (SPEC.contains('zos')) {
         def logContent = currentBuild.rawBuild.getLog()
         // search for each occurrence of IEATDUMP success for DSN=
         def matches = logContent =~ /IEATDUMP success for DSN=.*/
@@ -501,10 +578,59 @@ def archive_diagnostics() {
             }
         }
         // Note: to preserve the files ACLs set _OS390_USTAR=Y env variable (see variable files)
-        sh "find . -name 'core.*.dmp' -o -name 'javacore.*.txt' -o -name 'Snap.*.trc' -o -name 'jitdump.*.dmp' | sed 's#^./##' | pax -wzf ${diagnosticsFilename}"
-    } else {
-        sh "find . -name 'core.*.dmp' -o -name 'javacore.*.txt' -o -name 'Snap.*.trc' -o -name 'jitdump.*.dmp' -o -name ddr_info -o -name j9ddr.dat -o -name superset.dat -o -name '*.annt.h' -o -name '*.stub.h' -o -name '*.dSYM' -o -path '*/make-support/failure-logs/*' | sed 's#^./##' | tar -zcvf ${diagnosticsFilename} -T -"
+        archiveCmd = "pax -wzf ${diagnosticsFilename}"
     }
+
+    def tgt = "./build/${RELEASE}"
+
+    def findDiagnosticsCmd = findCrashDataCmd
+    findDiagnosticsCmd += " -o -type d -name ddr_info -prune"
+    findDiagnosticsCmd += " -o -type d -path '${tgt}/make-support/failure-logs' -prune"
+
+    // If the JVM crashed while building, then include the binaries we may have
+    // been running and any separate debug info in the diagnostics archive to
+    // help debug.
+    if (sh(returnStatus: true, script: "${findCrashDataCmd} | grep -q .") == 0) {
+        def j2reImage = "${tgt}/images/j2re-image"
+        if (sh(returnStatus: true, script: "test -d '${j2reImage}'") == 0) {
+            // Java 8. The build does not run anything from jdk/ (and it seems
+            // that the binaries there can't be run from that location). But it
+            // does run images/j2re-image/bin/java -version, so instead of jdk/
+            // get images/j2re-image/.
+            findDiagnosticsCmd += " -o -type d -path '${j2reImage}' -prune"
+        } else {
+            // Java 11+. The build runs binaries from jdk/.
+            findDiagnosticsCmd += " -o -type d -path '${tgt}/jdk' -prune"
+
+            // The jdk/ directory may contain relative symlinks pointing into
+            // support/modules_libs/ for files required to run the JVM, and
+            // also for separate debug info.
+            findDiagnosticsCmd += " -o -type d -path '${tgt}/support/modules_libs' -prune"
+        }
+
+        if (javaVersionJdkImageDir != null) {
+            // Crashed while running $javaVersionJdkImageDir/bin/java -version.
+            // Make sure to pick up the binaries from there as well.
+            //
+            // In Java 8, this should be images/j2sdk-image/. Usually we only
+            // get images/j2re-image/.
+            //
+            // In Java 11+, it should be images/jdk/. Usually we only get jdk/
+            // (i.e. outside of images/).
+            //
+            // Make sure this path starts with ./ so that it's possible for
+            // -path to match when running find . [...].
+            //
+            if (!javaVersionJdkImageDir.startsWith("./")) {
+                javaVersionJdkImageDir = "./${javaVersionJdkImageDir}";
+            }
+
+            findDiagnosticsCmd += " -o -type d -path '${javaVersionJdkImageDir}' -prune"
+        }
+    }
+
+    sh "${findDiagnosticsCmd} | sed 's#^./##' | ${archiveCmd}"
+
     if (ARTIFACTORY_CONFIG) {
         def uploadSpec = """{
             "files":[
@@ -562,11 +688,16 @@ def upload_artifactory_core(geo, uploadSpec) {
     // Add BUILD_IDENTIFIER to the buildInfo. The UploadSpec adds it to the Artifact info
     buildInfo.env.filter.addInclude("BUILD_IDENTIFIER")
     buildInfo.env.capture = true
+    if (ARTIFACTORY_CONFIG[geo]['buildNamePrefix'] != '') {
+        buildInfo.name = ARTIFACTORY_CONFIG[geo]['buildNamePrefix'] + '/' + JOB_NAME
+    }
+    println "buildInfo.name:$buildInfo.name"
 
     //Retry uploading to Artifactory if errors occur
+    // Do not upload buildInfo if Server is behind a VPN as the Controller will not be able to talk to it.
     pipelineFunctions.retry_and_delay({
         server.upload spec: uploadSpec, buildInfo: buildInfo;
-        if (!ARTIFACTORY_CONFIG[geo]['vpn']) { server.publishBuildInfo buildInfo } },
+        server.publishBuildInfo buildInfo},
         3, 300)
 
     ARTIFACTORY_CONFIG[geo]['url'] = server.getUrl()
@@ -621,6 +752,16 @@ def cleanWorkspace (KEEP_WORKSPACE) {
     }
 }
 
+def getDockerRegistry(String name) {
+    def i = name.indexOf('/')
+    def defaultDomain = ''
+
+    if (i == -1 || (!name[0..<i].contains('.') && !name[0..<i].contains(':') && name[0..<i] != 'localhost')){
+        return  defaultDomain
+    }
+    return 'https://' + name[0..<i]
+}
+
 def clean_docker_containers() {
     println("Listing docker containers to attempt removal")
     sh "docker ps -a"
@@ -640,8 +781,9 @@ def prepare_docker_environment() {
     // if there is no id found then attempt to pull it
     if (!DOCKER_IMAGE_ID) {
         echo "${DOCKER_IMAGE} not found locally, attempting to pull from dockerhub"
-        dockerCredentialID = variableFile.get_user_credentials_id('dockerhub')
-        docker.withRegistry("", "${dockerCredentialID}") {
+        dockerRegistry = getDockerRegistry(DOCKER_IMAGE)
+        dockerCredentialID = variableFile.get_user_credentials_id(dockerRegistry.replaceAll('https://','') ?: 'dockerhub')
+        docker.withRegistry(dockerRegistry, "${dockerCredentialID}") {
             sh "docker pull ${DOCKER_IMAGE}"
         }
         DOCKER_IMAGE_ID = get_docker_image_id(DOCKER_IMAGE)
@@ -672,14 +814,48 @@ def _build_all() {
     }
 }
 
+// TODO: remove this workaround when https://github.com/adoptium/infrastructure/issues/3597 resolved. related: infra 9292
+def create_docker_image_locally()
+{
+    new_image_name = DOCKER_IMAGE.split(':')[0] + '_cuda'
+    // check and return if image is already exists on node
+    CUDA_DOCKER_IMAGE_ID = get_docker_image_id(new_image_name)
+    if (CUDA_DOCKER_IMAGE_ID) {
+        DOCKER_IMAGE = new_image_name
+        return
+    }
+    sh '''
+        echo 'ARG image
+            ARG cuda_ver=12.2.0
+            ARG cuda_distro=ubi8
+            FROM nvcr.io/nvidia/cuda:${cuda_ver}-devel-${cuda_distro} as cuda
+            FROM $image
+            RUN mkdir -p /usr/local/cuda/nvvm
+            COPY --from=cuda /usr/local/cuda/include         /usr/local/cuda/include
+            COPY --from=cuda /usr/local/cuda/nvvm/include    /usr/local/cuda/nvvm/include
+            ENV CUDA_HOME="/usr/local/cuda"' > dockerFile
+    '''
+    println "Preparing Docker image ${new_image_name} locally ..."
+    dockerRegistry = getDockerRegistry(DOCKER_IMAGE)
+    dockerCredentialID = variableFile.get_user_credentials_id(dockerRegistry.replaceAll('https://','') ?: 'dockerhub')
+    docker.withRegistry(dockerRegistry, "${dockerCredentialID}") {
+            docker.build(new_image_name, "--build-arg image=${DOCKER_IMAGE} -f dockerFile .")
+    }
+    DOCKER_IMAGE = new_image_name
+}
+
 def build_all() {
     stage ('Queue') {
         timeout(time: 10, unit: 'HOURS') {
             node("${NODE}") {
                 timeout(time: 5, unit: 'HOURS') {
                     if ("${DOCKER_IMAGE}") {
+                        // TODO: Remove this workaround when https://github.com/adoptium/infrastructure/issues/3597 is resolved. Related: infra 9292.
+                        if ((PLATFORM ==~ /ppc64le_linux.*/) || (PLATFORM ==~ /x86-64_linux.*/)) {
+                            create_docker_image_locally()
+                        }
                         prepare_docker_environment()
-                        docker.image(DOCKER_IMAGE_ID).inside("-v /home/jenkins/openjdk_cache:/home/jenkins/openjdk_cache:rw,z") {
+                        docker.image(DOCKER_IMAGE_ID).inside("-v /home/jenkins/openjdk_cache:/home/jenkins/openjdk_cache:rw,z -v /home/jenkins/.ssh:/home/jenkins/.ssh:rw,z") {
                             _build_all()
                         }
                     } else {
@@ -688,6 +864,58 @@ def build_all() {
                 }
             }
             upload_artifactory_post()
+        }
+    }
+}
+
+def match_fail_pattern(outputLines) {
+    if (!FAIL_PATTERN) {
+        return false
+    }
+
+    println("Build failure, searching fail pattern in the last ${outputLines.size()} output lines")
+
+    for (failPattern in FAIL_PATTERN.tokenize('|')) {
+        Pattern pattern = Pattern.compile(failPattern)
+        for (line in outputLines) {
+            Matcher matcher = pattern.matcher(line)
+            if (matcher.find()) {
+                println("Found ${failPattern} fail pattern!")
+                return true
+            }
+        }
+    }
+
+    println("Fail pattern not found!")
+    return false
+}
+
+def recompile() {
+    def maxRetry = 3
+    def retryCounter = 0
+    def doRetry = true
+
+    while ((maxRetry > retryCounter) && doRetry) {
+        retryCounter++
+        println("Attempt to recompile, retry: ${retryCounter}")
+
+        try {
+            sh "make clean && ${get_compile_command()}"
+            doRetry = false
+        } catch (Exception f) {
+            // crop console output, search only new output
+            def newLines = currentBuild.getRawBuild().getLog(LOG_MAX_LINES).minus(LOG_LINES)
+            // cache log
+            LOG_LINES.addAll(newLines)
+
+            if (!match_fail_pattern(newLines)) {
+                // different error
+                archive_diagnostics()
+                throw f
+            }
+            if (retryCounter >= maxRetry) {
+                throw f
+            }
         }
     }
 }

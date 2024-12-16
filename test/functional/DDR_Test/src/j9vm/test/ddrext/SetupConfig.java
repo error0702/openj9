@@ -1,5 +1,5 @@
-/*******************************************************************************
- * Copyright (c) 2001, 2018 IBM Corp. and others
+/*
+ * Copyright IBM Corp. and others 2001
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,10 +15,10 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
 package j9vm.test.ddrext;
 
 import j9vm.test.ddrext.util.CoreDumpGenerator;
@@ -68,6 +68,12 @@ public class SetupConfig {
 		if (ddrInstance == null) {
 			if (coreFile != null) {
 				try {
+					/*
+					 * In modular VMs, the static initializer of ImageFactory
+					 * exports the packages to which we need access.
+					 */
+					Class.forName("com.ibm.dtfj.image.j9.ImageFactory");
+
 					DDROutputStream ps = getPrintStream();
 					ddrInstance = new DDRInteractive(coreFile, ps);
 					log.info("Created new DDR Interactive instance using core file : "

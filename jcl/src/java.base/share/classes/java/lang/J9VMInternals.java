@@ -1,6 +1,6 @@
 /*[INCLUDE-IF JAVA_SPEC_VERSION >= 8]*/
-/*******************************************************************************
- * Copyright (c) 1998, 2022 IBM Corp. and others
+/*
+ * Copyright IBM Corp. and others 1998
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,10 +16,10 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
 package java.lang;
 
 import com.ibm.oti.vm.J9UnmodifiableClass;
@@ -35,17 +35,21 @@ import java.util.WeakHashMap;
 import java.security.AccessControlContext;
 import java.security.CodeSource;
 import java.security.ProtectionDomain;
+import java.io.FileDescriptor;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.PrintStream;
 import java.net.URL;
-/*[IF Sidecar19-SE]*/
+import java.nio.charset.Charset;
+
+/*[IF JAVA_SPEC_VERSION >= 9]*/
 import jdk.internal.ref.CleanerShutdown;
 import jdk.internal.ref.CleanerImpl;
+import jdk.internal.misc.InnocuousThread;
 import jdk.internal.misc.Unsafe;
-/*[ELSE]*/
+/*[ELSE] JAVA_SPEC_VERSION >= 9 */
 import sun.misc.Unsafe;
-/*[ENDIF]*/
+/*[ENDIF] JAVA_SPEC_VERSION >= 9 */
 import com.ibm.oti.util.Msg;
 
 @J9UnmodifiableClass
@@ -78,8 +82,33 @@ final class J9VMInternals {
 	static boolean initialized;
 	private static Unsafe unsafe;
 
+	/*[IF INLINE-TYPES]*/
+	static boolean positiveOnlyHashcodes = positiveOnlyHashcodes();
+	static Method valueObjectHashCode;
+	/*[ENDIF] INLINE-TYPES */
+
 	/* Ensure this class cannot be instantiated */
 	private J9VMInternals() {
+	}
+
+	/*
+	 * Called after everything else is initialized.
+	 */
+	static void threadCompleteInitialization() {
+		/*[PR CMVC 99755] Implement -Djava.system.class.loader option */
+		Thread.currentThread().internalSetContextClassLoader(ClassLoader.getSystemClassLoader());
+		/*[IF JAVA_SPEC_VERSION > 8]*/
+		jdk.internal.misc.VM.initLevel(4);
+		/*[ELSE] JAVA_SPEC_VERSION > 8 */
+		sun.misc.VM.booted();
+		/*[ENDIF] JAVA_SPEC_VERSION > 8 */
+		/*[IF Sidecar18-SE-OpenJ9 | (JAVA_SPEC_VERSION > 8)]*/
+		System.startSNMPAgent();
+		/*[ENDIF] Sidecar18-SE-OpenJ9 | (JAVA_SPEC_VERSION > 8) */
+
+		/*[IF JAVA_SPEC_VERSION >= 11]*/
+		System.finalizeConsoleEncoding();
+		/*[ENDIF] JAVA_SPEC_VERSION >= 11 */
 	}
 
 	/*
@@ -90,56 +119,70 @@ final class J9VMInternals {
 		exceptions = new WeakHashMap();
 
 		ClassLoader.completeInitialization();
-		Thread.currentThread().completeInitialization();
+		threadCompleteInitialization();
 
-		/*[IF Sidecar19-SE]*/
+		/*[IF JAVA_SPEC_VERSION >= 9]*/
 		System.initGPUAssist();
 
 		if (Boolean.getBoolean("ibm.java9.forceCommonCleanerShutdown")) { //$NON-NLS-1$
 			Runnable runnable = () -> {
+				Thread[] threads;
+				/*[IF JAVA_SPEC_VERSION < 19]*/
+				ThreadGroup threadGroup;
+				try {
+					Field innocuousThreadGroupField = InnocuousThread.class.getDeclaredField("INNOCUOUSTHREADGROUP"); //$NON-NLS-1$
+					innocuousThreadGroupField.setAccessible(true);
+					threadGroup = (ThreadGroup)innocuousThreadGroupField.get(null);
+				} catch (IllegalAccessException | NoSuchFieldException e) {
+					throw new InternalError(e);
+				}
+
+				threads = new Thread[threadGroup.numThreads];
+				threadGroup.enumerate(threads, false);
+				/*[ELSE] JAVA_SPEC_VERSION < 19 */
+				threads = Thread.getAllThreads();
+				/*[ENDIF] JAVA_SPEC_VERSION < 19 */
+
 				CleanerShutdown.shutdownCleaner();
-				ThreadGroup threadGroup = Thread.currentThread().group; // the system ThreadGroup
-				/*[IF OJDKTHREAD_SUPPORT]*/
-				ThreadGroup threadGroups[] = new ThreadGroup[threadGroup.ngroups];
-				/*[ELSE] OJDKTHREAD_SUPPORT
-				ThreadGroup threadGroups[] = new ThreadGroup[threadGroup.numGroups];
-				/*[ENDIF] OJDKTHREAD_SUPPORT */
-				threadGroup.enumerate(threadGroups, false); /* non-recursive enumeration */
-				for (ThreadGroup tg : threadGroups) {
-					if ("InnocuousThreadGroup".equals(tg.getName())) { //$NON-NLS-1$
-						/*[IF OJDKTHREAD_SUPPORT]*/
-						Thread threads[] = new Thread[tg.nthreads];
-						/*[ELSE] OJDKTHREAD_SUPPORT
-						Thread threads[] = new Thread[tg.numThreads];
-						/*[ENDIF] OJDKTHREAD_SUPPORT */
-						tg.enumerate(threads, false);
-						for (Thread t : threads) {
-							if (t.getName().equals("Common-Cleaner")) { //$NON-NLS-1$
-								t.interrupt();
-								try {
-									/* Need to wait for the Common-Cleaner thread to die before
-									 * continuing. If not this will result in a race condition where
-									 * the VM might attempt to shutdown before Common-Cleaner has a
-									 * chance to stop properly. This will result in an unsuccessful
-									 * shutdown and we will not release vm resources.
-									 */
-									t.join(3000);
-									/* giving this a 3sec timeout. If it works it should work fairly
-									 * quickly, 3 seconds should be more than enough time. If it doesn't
-									 * work it may block indefinitely. Turning on -verbose:shutdown will
-									 * let us know if it worked or not
-									 */
-								} catch (Throwable e) {
-									/* empty block */
-								}
-							}
+
+				for (Thread t : threads) {
+					if (t.getName().equals("Common-Cleaner")) { //$NON-NLS-1$
+						t.interrupt();
+						try {
+							/* Need to wait for the Common-Cleaner thread to die before
+							 * continuing. If not this will result in a race condition where
+							 * the VM might attempt to shutdown before Common-Cleaner has a
+							 * chance to stop properly. This will result in an unsuccessful
+							 * shutdown and we will not release vm resources.
+							 */
+							t.join(3000);
+							/* giving this a 3sec timeout. If it works it should work fairly
+							 * quickly, 3 seconds should be more than enough time. If it doesn't
+							 * work it may block indefinitely. Turning on -verbose:shutdown will
+							 * let us know if it worked or not
+							 */
+						} catch (Throwable e) {
+							/* empty block */
 						}
+						break;
 					}
 				}
 			};
 			Runtime.getRuntime().addShutdownHook(new Thread(runnable, "CommonCleanerShutdown", true, false, false, null)); //$NON-NLS-1$
 		}
-		/*[ENDIF] Sidecar19-SE */
+		/*[ENDIF] JAVA_SPEC_VERSION >= 9 */
+/*[IF CRAC_SUPPORT]*/
+		if (openj9.internal.criu.InternalCRIUSupport.isCRaCSupportEnabled()) {
+			// export java.base/jdk.crac unconditionally
+			J9VMInternals.class.getModule().implAddExports("jdk.crac"); //$NON-NLS-1$
+
+			// export jdk.management/jdk.crac.management unconditionally
+			java.util.Optional<Module> om = ModuleLayer.boot().findModule("jdk.management"); //$NON-NLS-1$
+			if (om.isPresent()) {
+				om.get().implAddExports("jdk.crac.management"); //$NON-NLS-1$
+			}
+		}
+/*[ENDIF] CRAC_SUPPORT */
 	}
 
 	/**
@@ -193,6 +236,12 @@ final class J9VMInternals {
 			if (exceptions == null)
 				exceptions = new WeakHashMap();
 			synchronized(exceptions) {
+/*[IF JAVA_SPEC_VERSION >= 18]*/
+				if (!(err instanceof Error)) {
+					err = new ExceptionInInitializerError(err);
+				}
+				exceptions.put(clazz, new SoftReference(copyThrowable(err)));
+/*[ELSE] JAVA_SPEC_VERSION >= 18*/
 				Throwable cause = err;
 				if (err instanceof ExceptionInInitializerError) {
 					cause = ((ExceptionInInitializerError)err).getException();
@@ -202,6 +251,7 @@ final class J9VMInternals {
 					}
 				}
 				exceptions.put(clazz, new SoftReference(copyThrowable(cause)));
+/*[ENDIF] JAVA_SPEC_VERSION >= 18*/
 			}
 		}
 		ensureError(err);
@@ -305,7 +355,11 @@ final class J9VMInternals {
 	}
 
 	/**
-	 * Private method to be called by the VM after a Threads dies and throws ThreadDeath
+/*[IF JAVA_SPEC_VERSION < 20]
+	 * Private method to be called by the VM after a Threads dies and throws ThreadDeath.
+/*[ELSE]
+	 * Private method to be called by the VM after a Threads dies.
+/*[ENDIF]
 	 * It has to <code>notifyAll()</code> so that <code>join</code> can work properly.
 	 * However, it has to be done when the Thread is "thought of" as being dead by other
 	 * observer Threads (<code>isAlive()</code> has to return false for the Thread
@@ -319,23 +373,21 @@ final class J9VMInternals {
 		/*[PR 106323] -- remove might throw an exception, so make sure we finish the cleanup*/
 		try {
 			// Leave the ThreadGroup. This is why remove can't be private
-			/*[IF OJDKTHREAD_SUPPORT]*/
-			thread.group.threadTerminated(thread);
-			/*[ELSE] OJDKTHREAD_SUPPORT*/
+			/*[IF JAVA_SPEC_VERSION < 19]*/
 			thread.group.remove(thread);
-			/*[ENDIF] OJDKTHREAD_SUPPORT */
-		}
-		finally {
-			thread.cleanup();
+			/*[ENDIF] JAVA_SPEC_VERSION < 19 */
+		} finally {
+			thread.exit();
 
-			synchronized(thread) {
+			synchronized (thread) {
 				thread.notifyAll();
 			}
 		}
 	}
 
 	/*[PR CVMC 124584] checkPackageAccess(), not defineClassImpl(), should use ProtectionDomain */
-	private static void checkPackageAccess(final Class clazz, ProtectionDomain pd) {
+	private static void checkPackageAccess(final Class<?> clazz, ProtectionDomain pd) {
+		/*[IF JAVA_SPEC_VERSION < 24]*/
 		@SuppressWarnings("removal")
 		final SecurityManager sm = System.getSecurityManager();
 		if (sm != null) {
@@ -356,6 +408,7 @@ final class J9VMInternals {
 				}
 			}, new AccessControlContext(pdArray));
 		}
+		/*[ENDIF] JAVA_SPEC_VERSION < 24 */
 	}
 
 	/*[PR CMVC 104341] Exceptions in Object.finalize() not ignored */
@@ -438,21 +491,20 @@ final class J9VMInternals {
 		if (null == h) {
 			return identityHashCode(anObject); /* use early returns to make the JIT code faster */
 		}
+		if (h.isArray(anObject)) {
+			return identityHashCode(anObject); /* use early returns to make the JIT code faster */
+		}
 		if (h.is32Bit()) {
 			int ptr = h.getIntFromObject(anObject, 0L);
 			if ((ptr & com.ibm.oti.vm.VM.OBJECT_HEADER_HAS_BEEN_MOVED_IN_CLASS) != 0) {
-				if (!h.isArray(anObject)) {
-					int j9class = ptr & com.ibm.oti.vm.VM.J9_JAVA_CLASS_MASK;
-					return h.getIntFromObject(anObject, h.getBackfillOffsetFromJ9Class32(j9class));
-				}
+				int j9class = ptr & com.ibm.oti.vm.VM.J9_JAVA_CLASS_MASK;
+				return h.getIntFromObject(anObject, h.getBackfillOffsetFromJ9Class32(j9class));
 			}
 		} else {
 			long ptr = (com.ibm.oti.vm.VM.FJ9OBJECT_SIZE == 4) ? Integer.toUnsignedLong(h.getIntFromObject(anObject, 0L)) : h.getLongFromObject(anObject, 0L);
 			if ((ptr & com.ibm.oti.vm.VM.OBJECT_HEADER_HAS_BEEN_MOVED_IN_CLASS) != 0) {
-				if (!h.isArray(anObject)) {
-					long j9class = ptr & com.ibm.oti.vm.VM.J9_JAVA_CLASS_MASK;
-					return h.getIntFromObject(anObject, h.getBackfillOffsetFromJ9Class64(j9class));
-				}
+				long j9class = ptr & com.ibm.oti.vm.VM.J9_JAVA_CLASS_MASK;
+				return h.getIntFromObject(anObject, h.getBackfillOffsetFromJ9Class64(j9class));
 			}
 		}
 		return identityHashCode(anObject);
@@ -472,6 +524,56 @@ final class J9VMInternals {
 	 * @see			java.lang.Object#hashCode
 	 */
 	static native int identityHashCode(Object anObject);
+
+	/*[IF INLINE-TYPES]*/
+	/**
+	 * Answers an integer hash code for the parameter.
+	 * The caller must ensure that the parameter is a value type.
+	 * The hash code returned is the same one that would
+	 * be returned by java.lang.Object.hashCode(), assuming
+	 * the object's class has not overridden hashCode() and
+	 * that the parameter is a value type.
+	 *
+	 * @param		anObject	the object
+	 * @return		the hash code for the object
+	 * @throws		InternalError if the object is not a value type
+	 *
+	 * @see			java.lang.Object#hashCode
+	 */
+	static int valueHashCode(Object anObject) {
+		int hashcode;
+
+		if (null == valueObjectHashCode) {
+			try {
+				Class<?> valueObjectMethods = Class.forName("java.lang.runtime.ValueObjectMethods");
+				valueObjectHashCode = valueObjectMethods.getDeclaredMethod("valueObjectHashCode", Object.class);
+				valueObjectHashCode.setAccessible(true);
+			} catch (ClassNotFoundException | NoSuchMethodException e) {
+				throw new InternalError(e);
+			}
+		}
+
+		try {
+			hashcode = (Integer)valueObjectHashCode.invoke(null, anObject);
+		} catch (IllegalAccessException | InvocationTargetException e) {
+			throw new InternalError(e);
+		}
+
+		if (positiveOnlyHashcodes) {
+			hashcode &= 0x7FFF_FFFF;
+		}
+
+		return hashcode;
+	}
+
+	/**
+	 * Returns true if hash codes are positive only,
+	 * false otherwise.
+	 *
+	 * @return		A boolean indicating whether hash codes are all positive
+	 */
+	static native boolean positiveOnlyHashcodes();
+	/*[ENDIF] INLINE-TYPES */
 
 	/**
 	 * Primitive implementation of Object.clone().
@@ -501,7 +603,6 @@ final class J9VMInternals {
 	 *					the String to display
 	 */
 	public static native void dumpString(String str);
-
 
 	private static String[] getClassInfoStrings(final Class<?> clazz, String classPath){
 		String classLoaderStr = "<Bootstrap Loader>"; //$NON-NLS-1$
@@ -568,7 +669,6 @@ final class J9VMInternals {
 					"{0} (loaded from {1} by {2}) called from {3} (loaded from {4} by {5}).",	//$NON-NLS-1$
 					args);
 		} catch (Exception | VirtualMachineError e) {
-			// don't catch ThreadDeath
 			if ((null == callingClassInfo) || (null == calledClassInfo)) {
 				return methodSig;
 			}
@@ -577,7 +677,6 @@ final class J9VMInternals {
 				return methodSig + "(loaded from " + callingClassInfo[0] + " by " + callingClassInfo[1] + ") called from " + clazz2.toString() +
 						" (loaded from " + calledClassInfo[0] + " by " + calledClassInfo[1] + ")";
 			} catch (Exception | VirtualMachineError e2) {
-				// don't catch ThreadDeath
 				/* if something fails, fall back to old message */
 				return methodSig;
 			}

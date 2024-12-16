@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2001
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 /*
@@ -281,10 +281,6 @@ public:
 	void markClassAsUsedByMultiANewArray(U_16 classCfrCPIndex) { mark(classCfrCPIndex, MULTI_ANEW_ARRAY); }
 	void markClassAsUsedByANewArray(U_16 classCfrCPIndex)      { mark(classCfrCPIndex, ANEW_ARRAY); }
 	void markClassAsUsedByNew(U_16 classCfrCPIndex)            { mark(classCfrCPIndex, NEW); }
-#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
-	void markClassAsUsedByDefaultValue(U_16 classCfrCPIndex)    { mark(classCfrCPIndex, DEFAULT_VALUE); }
-	void markFieldRefAsUsedByWithField(U_16 fieldRefCfrCPIndex) { mark(fieldRefCfrCPIndex, WITH_FIELD); }
-#endif
 
 	void markFieldRefAsUsedByGetStatic(U_16 fieldRefCfrCPIndex) { mark(fieldRefCfrCPIndex, GET_STATIC); }
 	void markFieldRefAsUsedByPutStatic(U_16 fieldRefCfrCPIndex) { mark(fieldRefCfrCPIndex, PUT_STATIC); }
@@ -389,10 +385,6 @@ public:
 		GET_STATIC = SPLIT1,
 		PUT_FIELD = SPLIT1,
 		GET_FIELD = SPLIT1,
-#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
-		DEFAULT_VALUE = SPLIT1,
-		WITH_FIELD = SPLIT1,
-#endif /* defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */
 		NEW = SPLIT1,
 		INVOKE_HANDLEGENERIC = SPLIT5,
 		INVOKE_HANDLEEXACT = SPLIT5,

@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright (c) 2017, 2021 IBM Corp. and others
+* Copyright IBM Corp. and others 2017
 *
 * This program and the accompanying materials are made available under
 * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
 * OpenJDK Assembly Exception [2].
 *
 * [1] https://www.gnu.org/software/classpath/license.html
-* [2] http://openjdk.java.net/legal/assembly-exception.html
+* [2] https://openjdk.org/legal/assembly-exception.html
 *
-* SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+* SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
 *******************************************************************************/
 
 #ifndef J9RECOGNIZEDCALLTRANSFORMER_INCL
@@ -85,6 +85,42 @@ class RecognizedCallTransformer : public OMR::RecognizedCallTransformer
     *     \endcode
     */
    void process_java_lang_Class_IsAssignableFrom(TR::TreeTop* treetop, TR::Node* node);
+
+   /** \brief
+    *     Transforms java/lang/Class.cast(Ljava/lang/Object;)Ljava/lang/Object;
+    *     into a checkcast node.
+    *
+    *  \param treetop
+    *     The treetop which anchors the call node.
+    *
+    *  \param node
+    *     The call node for java/lang/Class.cast(Ljava/lang/Object;)Ljava/lang/Object;
+    *     which has the following shape:
+    *
+    *     \code
+    *     acall java/lang/Class.cast(Ljava/lang/Object;)Ljava/lang/Object;
+    *       <cast class object>
+    *       <instance to be checked>
+    *     \endcode
+    */
+   void process_java_lang_Class_cast(TR::TreeTop* treetop, TR::Node* node);
+
+   /** \brief
+    *     Transforms java/lang/StringCoding.encodeASCII(B[B)[B into a compiler intrinsic for codegen acceleration (i.e encodeASCII symbol).
+    *
+    *  \param treetop
+    *     The treetop which anchors the call node.
+    *
+    *  \param node
+    *     The call node representing a call to java/lang/StringCoding.encodeASCII(B[B)[B which has the following shape:
+    *
+    *     \code
+    *     acall <java/lang/StringCoding.encodeASCII(B[B)[B>
+    *       <coder>
+    *       <val>
+    *     \endcode
+    */
+   void process_java_lang_StringCoding_encodeASCII(TR::TreeTop* treetop, TR::Node* node);
    /** \brief
     *     Transforms java/lang/StringUTF16.toBytes([CII)[B into a fast allocate and arraycopy sequence with equivalent
     *     semantics.
@@ -103,6 +139,88 @@ class RecognizedCallTransformer : public OMR::RecognizedCallTransformer
     *     \endcode
     */
    void process_java_lang_StringUTF16_toBytes(TR::TreeTop* treetop, TR::Node* node);
+   /** \brief
+    *     Transforms jdk/internal/util/ArraysSupport.vectorizedMismatch(Ljava/lang/Object;JLjava/lang/Object;JII)I
+    *     into an arraycmplen, bit manipulation and iselect sequence with equivalent semantics.
+    *
+    *  \param treetop
+    *     The treetop which anchors the call node.
+    *
+    *  \param node
+    *     The call node representing a call to jdk/internal/util/ArraysSupport.vectorizedMismatch(Ljava/lang/Object;JLjava/lang/Object;JII)I
+    *     which has the following shape:
+    *
+    *     \code
+    *     icall  <jdk/internal/util/ArraysSupport.vectorizedMismatch(Ljava/lang/Object;JLjava/lang/Object;JII)I>
+    *       <a>
+    *       <aOffset>
+    *       <b>
+    *       <bOffset>
+    *       <length>
+    *       <log2ArrayIndexScale>
+    *     \endcode
+    *
+    *  \details
+    *     The call node is transformed to the following shape:
+    *
+    *     \code
+    *     iselect ()
+    *       lcmpeq
+    *         arraycmplen
+    *           aladd
+    *             <a>
+    *             <aOffset>
+    *           aladd
+    *             <b>
+    *             <bOffset>
+    *           land
+    *             lshl
+    *               i2l
+    *                 <length>
+    *               <log2ArrayIndexScale>
+    *             lxor
+    *               lor
+    *                 lshl
+    *                   ==>i2l
+    *                   iconst 1
+    *                 lconst 3
+    *               lconst -1
+    *         ==>land
+    *       ixor
+    *         l2i
+    *           lshr
+    *             land
+    *               ==>lshl
+    *               ==>lor
+    *             <log2ArrayIndexScale>
+    *         iconst -1
+    *       l2i
+    *         lshr
+    *           ==>arraycmplen
+    *           <log2ArrayIndexScale>
+    *     \endcode
+    *
+    *     This transformation is valid because vectorizedMismatch is functionally equivalent to the following pseudocode
+    *
+    *     \code
+    *     vectorizedMismatch(a, aOffset, b, bOffset, length, log2ArrayIndexScale) {
+    *         lengthInBytes = length << log2ArrayIndexScale
+    *
+    *         // the following mask calculation is equivalent to 'mask = (log2ArrayIndexScale<2) ? 3 : 7', assuming log2ArrayIndexScale <= 3
+    *         // the original java implementation checks multiple of 8B at a time, but for elements smaller than 4B it also checks another 4B at the end
+    *         // this mask serves to round down to nearest multiple of 8B (or 4B if the element is smaller than 4B) and get remainder
+    *         mask = (log2ArrayIndexScale<<1) | 3
+    *
+    *         lengthToCompare = lengthInBytes & ~(mask)                          // round down to nearest multiple of 8 (or 4)
+    *         mismatchIndex = arrayCmpLen(a+aOffset, b+bOffset, lengthToCompare)
+    *         if (mismatchIndex == lengthToCompare)                              // no mismatch found
+    *             return ~((lengthInBytes & mask) >> log2ArrayIndexScale)        // inverted remainder, converted from byte-wise index to element-wise index
+    *         else                                                               // mismatch found
+    *             return mismatchIndex >> log2ArrayIndexScale                    // convert byte-wise index to element-wise index
+    *     }
+    *     \endcode
+    */
+   void process_jdk_internal_util_ArraysSupport_vectorizedMismatch(TR::TreeTop* treetop, TR::Node* node);
    /** \brief
     *     Transforms java/lang/StrictMath.sqrt(D)D and java/lang/Math.sqrt(D)D into a CodeGen inlined function with equivalent semantics.
     *
@@ -168,11 +286,8 @@ class RecognizedCallTransformer : public OMR::RecognizedCallTransformer
     *     Transforms java/lang/MethodHandle.linkToVirtual when the MemberName object (last arg) is not a known object.
     *     linkToVirtual is a VM INL call that would construct the call frame for the target virtual method invocation.
     *     This would be the case even if the method to be invoked is compiled, resulting in j2i and i2j transitions.
-    *     This transformation creates an alternate conditional paths for such invocations to avoid j2i transitions. In most
-    *     cases, the JITHelper method dispatchVirtual will be used to dispatch to the vtable entry for the method directly.
-    *     For private virtual methods (vtable index 0), dispatchVirtual cannot be used as there are no vtable entries for those
-    *     methods, so instead the call will be treated as a linkToStatic call, as the target method can be obtained from the
-    *     MemberName object.
+    *     The JITHelper method dispatchVirtual will be used to dispatch to the vtable entry for the method directly
+    *     and thereby avoid the transitions.
     *
     *  \param treetop
     *     the TreeTop anchoring the call node
@@ -181,6 +296,47 @@ class RecognizedCallTransformer : public OMR::RecognizedCallTransformer
     *     the call node representing the linkToVirtual call
     */
    void process_java_lang_invoke_MethodHandle_linkToVirtual(TR::TreeTop * treetop, TR::Node * node);
+
+   /** \brief
+    *     Transforms java/lang/MethodHandle.linkToInterface when the MemberName object (last arg) is not a known object.
+    *
+    *     linkToInterface is a VM INL call that would construct the call frame for the target method invocation.
+    *     This would be the case even if the method to be invoked is compiled, resulting in j2i and i2j transitions.
+    *     This transformation creates an interface dispatch to find the vtable offset and then uses it to do a computed
+    *     virtual call (represented by JITHelpers.dispatchVirtual).
+    *
+    *     linkToInterface only needs to handle regular interface dispatch. Directly-dispatched methods (e.g. private
+    *     interface instance methods, final methods of Object) will be handled by linkToSpecial(). Non-interface
+    *     virtual methods (e.g. non-final methods of Object) will be handled by linkToVirtual().
+    *
+    *  \param treetop
+    *     the TreeTop anchoring the call node
+    *
+    *  \param node
+    *     the call node representing the linkToInterface call
+    */
+   void process_java_lang_invoke_MethodHandle_linkToInterface(TR::TreeTop * treetop, TR::Node * node);
+
+   /** \brief
+    *     Transforms \p node into a call to \c JITHelpers.dispatchVirtual(), calling the method whose (interpreter)
+    *     vTable offset is the result \p vftOffset.
+    *
+    *  Additional parameters beyond \p node and \p vftOffset are not strictly necessary, but callers have already
+    *  either identified or created nodes to compute them anyway.
+    *
+    *  \param node
+    *     the linkToVirtual() or linkToInterface() call node to modify
+    *
+    *  \param vftOffset
+    *     the (interpreter) VFT offset to use for the call
+    *
+    *  \param vftNode
+    *     the vTable of the receiver
+    *
+    *  \param memberNameNode
+    *     the MemberName (last argument)
+    */
+   void makeIntoDispatchVirtualCall(TR::Node *node, TR::Node *vftOffset, TR::Node *vftNode, TR::Node *memberNameNode);
 #endif
 
    private:

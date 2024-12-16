@@ -1,6 +1,6 @@
 /*[INCLUDE-IF Sidecar17 & !OPENJDK_METHODHANDLES]*/
-/*******************************************************************************
- * Copyright (c) 2011, 2020 IBM Corp. and others
+/*
+ * Copyright IBM Corp. and others 2011
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,30 +16,30 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
 package java.lang.invoke;
 
 @VMCONSTANTPOOL_CLASS
 final class MutableCallSiteDynamicInvokerHandle extends DynamicInvokerHandle {
-	/* mutableSite and the parent's site fields will always be sync.  This is 
+	/* mutableSite and the parent's site fields will always be sync.  This is
 	 * a redefinition as a MCS to enable the thunkArchetype to inline without
 	 * a guard
 	 */
 	final MutableCallSite mutableSite;
-	
+
 	MutableCallSiteDynamicInvokerHandle(MutableCallSite site) {
 		super(site);
 		this.mutableSite = site;
 	}
-	
+
 	MutableCallSiteDynamicInvokerHandle(MutableCallSiteDynamicInvokerHandle originalHandle, MethodType newType) {
 		super(originalHandle, newType);
 		this.mutableSite = originalHandle.mutableSite;
 	}
-	
+
 	@Override
 	MethodHandle cloneWithNewType(MethodType newType) {
 		return new MutableCallSiteDynamicInvokerHandle(this, newType);
@@ -67,4 +67,3 @@ final class MutableCallSiteDynamicInvokerHandle extends DynamicInvokerHandle {
 
 	// }}} JIT support
 }
-

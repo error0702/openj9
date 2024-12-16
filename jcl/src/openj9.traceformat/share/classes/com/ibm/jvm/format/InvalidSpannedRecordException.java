@@ -1,6 +1,6 @@
 /*[INCLUDE-IF Sidecar18-SE]*/
-/*******************************************************************************
- * Copyright (c) 2000, 2016 IBM Corp. and others
+/*
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,15 +16,15 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
 package com.ibm.jvm.format;
 
 import java.io.IOException;
 
-/** 
+/**
  * This exception is thrown when the beginning of a buffer (including spanned
  * record if any) is not the start of a record.
  * <p> An InvalidSpannedRecordException is thrown whenever an invalid spanned
@@ -35,11 +35,11 @@ import java.io.IOException;
  */
 public class InvalidSpannedRecordException extends IOException
 {
-    public InvalidSpannedRecordException() {
-        super();
-    }
+	public InvalidSpannedRecordException() {
+		super();
+	}
 
-    public InvalidSpannedRecordException(String s) {
-        super(s);
-    }
+	public InvalidSpannedRecordException(String s) {
+		super(s);
+	}
 }

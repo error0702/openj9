@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2018
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 // #10071 This is a Jenkins class
 import hudson.slaves.OfflineCause
@@ -169,7 +169,7 @@ timeout(time: TIMEOUT_TIME.toInteger(), unit: TIMEOUT_UNITS) {
                                     sh "rm -fr ${cleanDirsStr}"
 
                                     // Cleanup OSX shared memory and content in /cores
-                                    if (nodeLabels.contains('sw.os.osx')) {
+                                    if (nodeLabels.contains('sw.os.mac')) {
                                         retry(2) {
                                             sh """
                                                 ipcs -ma
@@ -182,11 +182,13 @@ timeout(time: TIMEOUT_TIME.toInteger(), unit: TIMEOUT_UNITS) {
                                         }
                                     }
 
-                                    // Cleanup zOS datasets 
+                                    // Cleanup zOS datasets
                                     if (nodeLabels.contains('sw.os.zos')) {
-                                        listcat = sh(script: "tso listcat | grep '${env.USER}' | cut -d. -f 2-", returnStdout: true).trim()
-                                        listcat.split('\n').each {
-                                            sh "tso delete ${it}"
+                                        def listcat = sh(script: "tso listcat | grep '${env.USER}' | grep 'JVM' | cut -d. -f 2-", returnStdout: true).trim()
+                                        if (!listcat.isEmpty()) {
+                                            listcat.split('\n').each {
+                                                sh "tso delete ${it}"
+                                            }
                                         }
                                     }
 

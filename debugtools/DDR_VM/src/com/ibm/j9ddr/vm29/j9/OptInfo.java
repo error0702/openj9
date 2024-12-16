@@ -1,5 +1,5 @@
-/*******************************************************************************
- * Copyright (c) 2009, 2021 IBM Corp. and others
+/*
+ * Copyright IBM Corp. and others 2009
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,10 +15,10 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
 package com.ibm.j9ddr.vm29.j9;
 
 import static com.ibm.j9ddr.vm29.j9.ROMHelp.J9_BYTECODE_SIZE_FROM_ROM_METHOD;
@@ -26,6 +26,8 @@ import static com.ibm.j9ddr.vm29.j9.ROMHelp.J9_ROM_METHOD_FROM_RAM_METHOD;
 import static com.ibm.j9ddr.vm29.structure.J9NonbuilderConstants.J9_ROMCLASS_OPTINFO_CLASS_ANNOTATION_INFO;
 import static com.ibm.j9ddr.vm29.structure.J9NonbuilderConstants.J9_ROMCLASS_OPTINFO_ENCLOSING_METHOD;
 import static com.ibm.j9ddr.vm29.structure.J9NonbuilderConstants.J9_ROMCLASS_OPTINFO_GENERIC_SIGNATURE;
+import static com.ibm.j9ddr.vm29.structure.J9NonbuilderConstants.J9_ROMCLASS_OPTINFO_IMPLICITCREATION_ATTRIBUTE;
+import static com.ibm.j9ddr.vm29.structure.J9NonbuilderConstants.J9_ROMCLASS_OPTINFO_LOADABLEDESCRIPTORS_ATTRIBUTE;
 import static com.ibm.j9ddr.vm29.structure.J9NonbuilderConstants.J9_ROMCLASS_OPTINFO_PERMITTEDSUBCLASSES_ATTRIBUTE;
 import static com.ibm.j9ddr.vm29.structure.J9NonbuilderConstants.J9_ROMCLASS_OPTINFO_SIMPLE_NAME;
 import static com.ibm.j9ddr.vm29.structure.J9NonbuilderConstants.J9_ROMCLASS_OPTINFO_SOURCE_DEBUG_EXTENSION;
@@ -266,4 +268,40 @@ public class OptInfo {
 		return J9UTF8Pointer.NULL;
 	}
 
+	public static int getLoadableDescriptorsCount(J9ROMClassPointer romClass) throws CorruptDataException {
+		U32Pointer loadableDescriptorsInfoPointer = getLoadableDescriptorsInfoPointer(romClass);
+		if (loadableDescriptorsInfoPointer.notNull()) {
+			return loadableDescriptorsInfoPointer.at(0).intValue();
+		}
+		return 0;
+	}
+
+	private static U32Pointer getLoadableDescriptorsInfoPointer(J9ROMClassPointer romClass) throws CorruptDataException {
+		SelfRelativePointer srpPtr = getSRPPtr(J9ROMClassHelper.optionalInfo(romClass), romClass.optionalFlags(),
+			J9_ROMCLASS_OPTINFO_LOADABLEDESCRIPTORS_ATTRIBUTE);
+		if (srpPtr.notNull()) {
+			return U32Pointer.cast(srpPtr.get());
+		}
+		return U32Pointer.NULL;
+	}
+
+	public static J9UTF8Pointer getLoadableDescriptorAtIndex(J9ROMClassPointer romClass, int index) throws CorruptDataException {
+		U32Pointer loadableDescriptorsInfoPointer = getLoadableDescriptorsInfoPointer(romClass);
+		if (loadableDescriptorsInfoPointer.notNull()) {
+			/* extra 1 is to move past the descriptors count */
+			SelfRelativePointer nameSrp = SelfRelativePointer.cast(loadableDescriptorsInfoPointer.add(index + 1));
+			return J9UTF8Pointer.cast(nameSrp.get());
+		}
+		return J9UTF8Pointer.NULL;
+	}
+
+	public static U32 getImplicitCreationFlags(J9ROMClassPointer romClass) throws CorruptDataException {
+		SelfRelativePointer srpPtr = getSRPPtr(J9ROMClassHelper.optionalInfo(romClass), romClass.optionalFlags(),
+			J9_ROMCLASS_OPTINFO_IMPLICITCREATION_ATTRIBUTE);
+		if (srpPtr.notNull()) {
+			U32Pointer u32Ptr = U32Pointer.cast(srpPtr.get());
+			return u32Ptr.at(0);
+		}
+		return U32.MIN;
+	}
 }

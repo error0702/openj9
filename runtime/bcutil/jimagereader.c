@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2015, 2017 IBM Corp. and others
+ * Copyright IBM Corp. and others 2015
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "bcutil_api.h"
@@ -117,6 +117,7 @@ j9bcutil_loadJImage(J9PortLibrary *portlib, const char *fileName, J9JImage **pji
 	UDATA fileNameLen = strlen(fileName);
 	IDATA bytesRead = 0;
 	UDATA byteAmount = 0;
+	U_32 mmapflag = OMRPORT_MMAP_FLAG_READ;
 	I_32 rc = J9JIMAGE_NO_ERROR;
 
 	PORT_ACCESS_FROM_PORT(portlib);
@@ -179,8 +180,13 @@ j9bcutil_loadJImage(J9PortLibrary *portlib, const char *fileName, J9JImage **pji
 	if (0 != pageSize) {
 		mapSize = ROUND_UP_TO(pageSize, mapSize);
 	}
-
-	jimage->jimageMmap = j9mmap_map_file(jimagefd, 0, mapSize, fileName, J9PORT_MMAP_FLAG_READ, J9MEM_CATEGORY_CLASSES);
+#if defined(J9ZOS390)
+	/*
+	 * With OMRPORT_MMAP_FLAG_ZOS_READ_MAPFILE, j9mmap_map_file() has the old bahaviour that reads the file content into allocated private memory.
+	 */
+	mmapflag = OMRPORT_MMAP_FLAG_ZOS_READ_MAPFILE;
+#endif /* defined(J9ZOS390) */
+	jimage->jimageMmap = j9mmap_map_file(jimagefd, 0, mapSize, fileName, mmapflag, J9MEM_CATEGORY_CLASSES);
 	if (NULL == jimage->jimageMmap) {
 		I_32 portlibErrCode = j9error_last_error_number();
 		const char *portlibErrMsg = j9error_last_error_message();

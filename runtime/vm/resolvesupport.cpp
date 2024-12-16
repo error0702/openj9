@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "j2sever.h"
@@ -129,13 +129,18 @@ isMethodHandleINL(U_8 *methodName, U_16 methodNameLength)
 		}
 		break;
 	case 12:
-		if (J9UTF8_LITERAL_EQUALS(methodName, methodNameLength, "linkToStatic")) {
+		if (J9UTF8_LITERAL_EQUALS(methodName, methodNameLength, "linkToStatic")
+#if JAVA_SPEC_VERSION >= 22
+			|| J9UTF8_LITERAL_EQUALS(methodName, methodNameLength, "linkToNative")
+#endif /* JAVA_SPEC_VERSION >= 22 */
+		) {
 			isMethodHandle = TRUE;
 		}
 		break;
 	case 13:
 		if (J9UTF8_LITERAL_EQUALS(methodName, methodNameLength, "linkToSpecial")
-		||  J9UTF8_LITERAL_EQUALS(methodName, methodNameLength, "linkToVirtual")) {
+			|| J9UTF8_LITERAL_EQUALS(methodName, methodNameLength, "linkToVirtual")
+		) {
 			isMethodHandle = TRUE;
 		}
 		break;
@@ -245,7 +250,7 @@ findFieldSignatureClass(J9VMThread *vmStruct, J9ConstantPool *ramCP, UDATA field
 	if ('[' == J9UTF8_DATA(signature)[0]) {
 		resolvedClass = internalFindClassUTF8(vmStruct, J9UTF8_DATA(signature), J9UTF8_LENGTH(signature), classLoader, J9_FINDCLASS_FLAG_THROW_ON_FAIL);
 	} else {
-		Assert_VM_true('L' == J9UTF8_DATA(signature)[0]);
+		Assert_VM_true(IS_CLASS_SIGNATURE(J9UTF8_DATA(signature)[0]));
 		/* skip fieldSignature's L and ; to have only CLASSNAME required for internalFindClassUTF8 */
 		resolvedClass = internalFindClassUTF8(vmStruct, &J9UTF8_DATA(signature)[1], J9UTF8_LENGTH(signature)-2, classLoader, J9_FINDCLASS_FLAG_THROW_ON_FAIL);
 	}
@@ -330,16 +335,6 @@ tryAgain:
 		}
 		goto done;
 	}
-
-#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
-	if ((';' == *(char *)(classNameData + (classNameLength - 1)))
-		&& ('Q' == *(char *)classNameData)
-	) {
-		/* we are dealing with signature envelope, extract the name from it */
-		classNameData += 1;
-		classNameLength -= 2;
-	}
-#endif /* defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */
 
 	resolvedClass = internalFindClassUTF8(vmStruct, classNameData, classNameLength,
 			classLoader, findClassFlags);
@@ -815,7 +810,7 @@ illegalAccess:
 				}
 				if (cl1 != cl2) {
 					J9UTF8 *fieldSignature = J9ROMFIELDSHAPE_SIGNATURE(field);
-					if (j9bcv_checkClassLoadingConstraintsForSignature(vmStruct, cl1, cl2, signature, fieldSignature) != 0) {
+					if (0 != j9bcv_checkClassLoadingConstraintsForSignature(vmStruct, cl1, cl2, signature, fieldSignature, FALSE)) {
 						if (throwException) {
 							setCurrentException(vmStruct, J9VMCONSTANTPOOL_JAVALANGVERIFYERROR, NULL);
 						}
@@ -832,13 +827,31 @@ illegalAccess:
 
 			if ((NULL != ramCPEntry) && J9_ARE_NO_BITS_SET(resolveFlags, J9_RESOLVE_FLAG_NO_CP_UPDATE)) {
 				UDATA localClassAndFlagsData = (UDATA)localClassAndFlags;
-				/* Add bits to the class for base type and double wide field. */
-				if ((modifiers & J9FieldFlagObject) != J9FieldFlagObject) {
-					localClassAndFlagsData |= J9StaticFieldRefBaseType;
-					if ((modifiers & J9FieldSizeDouble) == J9FieldSizeDouble) {
-						localClassAndFlagsData |= J9StaticFieldRefDouble;
-					} else if (J9FieldTypeBoolean == (modifiers & J9FieldTypeMask)) {
-						localClassAndFlagsData |= J9StaticFieldRefBoolean;
+				/* Add bits to the class for the field type */
+				if ((modifiers & J9FieldFlagObject) == J9FieldFlagObject) {
+					localClassAndFlagsData |= J9StaticFieldRefTypeObject;
+				} else {
+					switch(modifiers & J9FieldTypeMask) {
+					case J9FieldTypeBoolean:
+						localClassAndFlagsData |= J9StaticFieldRefTypeBoolean;
+						break;
+					case J9FieldTypeByte:
+						localClassAndFlagsData |= J9StaticFieldRefTypeByte;
+						break;
+					case J9FieldTypeChar:
+						localClassAndFlagsData |= J9StaticFieldRefTypeChar;
+						break;
+					case J9FieldTypeShort:
+						localClassAndFlagsData |= J9StaticFieldRefTypeShort;
+						break;
+					case J9FieldTypeInt:
+					case J9FieldTypeFloat:
+						localClassAndFlagsData |= J9StaticFieldRefTypeIntFloat;
+						break;
+					case J9FieldTypeLong:
+					case J9FieldTypeDouble:
+						localClassAndFlagsData |= J9StaticFieldRefTypeLongDouble;
+						break;
 					}
 				}
 				/* Set the volatile, final and setter bits in the flags as needed */
@@ -851,6 +864,11 @@ illegalAccess:
 				if (0 != (resolveFlags & J9_RESOLVE_FLAG_FIELD_SETTER)) {
 					localClassAndFlagsData |= J9StaticFieldRefPutResolved;
 				}
+#if defined(J9VM_OPT_VALHALLA_FLATTENABLE_VALUE_TYPES)
+				if (J9_ARE_ALL_BITS_SET(modifiers, J9FieldFlagIsNullRestricted)) {
+					localClassAndFlagsData |= J9StaticFieldIsNullRestricted;
+				}
+#endif /* defined(J9VM_OPT_VALHALLA_FLATTENABLE_VALUE_TYPES) */
 				/* Swap the class address bits and the flag bits. */
 				ramCPEntry->flagsAndClass = J9FLAGSANDCLASS_FROM_CLASSANDFLAGS(localClassAndFlagsData);
 				/* Set the high bit in valueOffset to ensure that a resolved static field ref is always interpreted as an unresolved instance fieldref. */
@@ -933,13 +951,12 @@ resolveInstanceFieldRefInto(J9VMThread *vmStruct, J9Method *method, J9ConstantPo
 		J9Class *targetClass = NULL;
 		UDATA modifiers = 0;
 		char *nlsStr = NULL;
-#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+#if defined(J9VM_OPT_VALHALLA_FLATTENABLE_VALUE_TYPES)
 		UDATA fieldIndex = 0;
 		bool fccEntryFieldNotSet = true;
 		J9Class *flattenableClass = NULL;
 		J9FlattenedClassCache *flattenedClassCache = NULL;
-#endif		
-		bool isWithField = false;
+#endif /* J9VM_OPT_VALHALLA_FLATTENABLE_VALUE_TYPES */
 		J9Class *currentTargetClass = NULL;
 		J9Class *currentSenderClass = NULL;
 
@@ -957,8 +974,6 @@ resolveInstanceFieldRefInto(J9VMThread *vmStruct, J9Method *method, J9ConstantPo
 		nameAndSig = J9ROMFIELDREF_NAMEANDSIGNATURE(romFieldRef);
 		name = J9ROMNAMEANDSIGNATURE_NAME(nameAndSig);
 		signature = J9ROMNAMEANDSIGNATURE_SIGNATURE(nameAndSig);
-#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
-		isWithField = J9_ARE_ANY_BITS_SET(resolveFlags, J9_RESOLVE_FLAG_WITH_FIELD);
 		/**
 		 * This is an optimization that searches for a field offset in the FCC. 
 		 * If the offset is found there is no need to repeat the process. 
@@ -966,11 +981,11 @@ resolveInstanceFieldRefInto(J9VMThread *vmStruct, J9Method *method, J9ConstantPo
 		 * the resolvedClass will always be the class that owns the field, 
 		 * since ValueType superclasses can not have fields.
 		 */
+#if defined(J9VM_OPT_VALHALLA_FLATTENABLE_VALUE_TYPES)
 		if (J9_IS_J9CLASS_VALUETYPE(resolvedClass)) {
-			if ('Q' == J9UTF8_DATA(signature)[0]) {
-				flattenedClassCache = resolvedClass->flattenedClassCache;
-				fieldIndex = findIndexInFlattenedClassCache(flattenedClassCache, nameAndSig);
-				Assert_VM_false(UDATA_MAX == fieldIndex);
+			flattenedClassCache = resolvedClass->flattenedClassCache;
+			fieldIndex = findIndexInFlattenedClassCache(flattenedClassCache, nameAndSig);
+			if (UDATA_MAX != fieldIndex) {
 				J9FlattenedClassCacheEntry * flattenedClassCacheEntry = J9_VM_FCC_ENTRY_FROM_FCC(flattenedClassCache, fieldIndex);
 				fieldOffset = flattenedClassCacheEntry->offset;
 				if (-1 != fieldOffset) {
@@ -982,7 +997,7 @@ resolveInstanceFieldRefInto(J9VMThread *vmStruct, J9Method *method, J9ConstantPo
 			}
 		}
 		if (fccEntryFieldNotSet) 
-#endif
+#endif /* defined(J9VM_OPT_VALHALLA_FLATTENABLE_VALUE_TYPES) */
 		{
 			fieldOffset = instanceFieldOffsetWithSourceClass(vmStruct, resolvedClass, J9UTF8_DATA(name), J9UTF8_LENGTH(name), J9UTF8_DATA(signature), J9UTF8_LENGTH(signature), &definingClass, (UDATA *)&field, lookupOptions, classFromCP);
 		}
@@ -1009,12 +1024,8 @@ resolveInstanceFieldRefInto(J9VMThread *vmStruct, J9Method *method, J9ConstantPo
 			}
 
 			if ((modifiers & J9AccFinal) != 0) {
-				if (J9_ARE_ANY_BITS_SET(resolveFlags, J9_RESOLVE_FLAG_FIELD_SETTER)
-#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
-					|| isWithField
-#endif /* defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */
-				) {
-					checkResult = checkVisibility(vmStruct, classFromCP, definingClass, J9AccPrivate, isWithField ? lookupOptions : (lookupOptions | J9_LOOK_NO_NESTMATES));
+				if (J9_ARE_ANY_BITS_SET(resolveFlags, J9_RESOLVE_FLAG_FIELD_SETTER)) {
+					checkResult = checkVisibility(vmStruct, classFromCP, definingClass, J9AccPrivate, lookupOptions | J9_LOOK_NO_NESTMATES);
 					if (checkResult < J9_VISIBILITY_ALLOWED) {
 						badMemberModifier = J9AccPrivate;
 						targetClass = definingClass;
@@ -1032,15 +1043,7 @@ illegalAccess:
 						}
 						goto done;
 					}
-					if (
-#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
-							/* The withfield bytecode is allowed to set a final field. However, the invoker of withfield must have private access
-							 * to the field (similar to a constructor setting a final field). The private access check is done above, so if we get
-							 * to this point we can skip the finalFieldSetAllowed() if we know its a withfield */
-							!isWithField &&
-#endif
-							!finalFieldSetAllowed(vmStruct, false, method, definingClass, classFromCP, field, canRunJavaCode)
-					) {
+					if (!finalFieldSetAllowed(vmStruct, false, method, definingClass, classFromCP, field, canRunJavaCode)) {
 						fieldOffset = -1;
 						goto done;
 					}
@@ -1057,7 +1060,7 @@ illegalAccess:
 				}
 				if (cl1 != cl2) {
 					J9UTF8 *fieldSignature = J9ROMFIELDSHAPE_SIGNATURE(field);
-					if (j9bcv_checkClassLoadingConstraintsForSignature(vmStruct, cl1, cl2, signature, fieldSignature) != 0) {
+					if (0 != j9bcv_checkClassLoadingConstraintsForSignature(vmStruct, cl1, cl2, signature, fieldSignature, FALSE)) {
 						if (throwException) {
 							setCurrentException(vmStruct, J9VMCONSTANTPOOL_JAVALANGVERIFYERROR, NULL);
 						}
@@ -1069,8 +1072,8 @@ illegalAccess:
 		
 			if ((NULL != ramCPEntry) && J9_ARE_NO_BITS_SET(resolveFlags, J9_RESOLVE_FLAG_NO_CP_UPDATE)) {
 				UDATA valueOffset = fieldOffset;
-#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
-				if ('Q' == J9UTF8_DATA(signature)[0]) {
+#if defined(J9VM_OPT_VALHALLA_FLATTENABLE_VALUE_TYPES)
+				if (J9ROMFIELD_IS_NULL_RESTRICTED(field)) {
 					if (fccEntryFieldNotSet) {
 						flattenedClassCache = definingClass->flattenedClassCache;
 						fieldIndex = findIndexInFlattenedClassCache(flattenedClassCache, nameAndSig);
@@ -1086,7 +1089,7 @@ illegalAccess:
 						issueWriteBarrier();
 					}
 				}
-#endif
+#endif /* J9VM_OPT_VALHALLA_FLATTENABLE_VALUE_TYPES */
 				/* Sign extend the resolved constant to make sure that it is always larger than valueOffset field */
 				modifiers |= (UDATA)(IDATA)(I_32) J9FieldFlagResolved;
 				if (0 != (resolveFlags & J9_RESOLVE_FLAG_FIELD_SETTER)) {
@@ -1301,7 +1304,7 @@ resolveSpecialMethodRefInto(J9VMThread *vmStruct, J9ConstantPool *ramCP, UDATA c
 	 * Special invocations (defender supersends) will not look at the receiver's vtable, but instead invoke the result of javaLookupMethod.
 	 * Default method conflicts must therefore be handled by the lookup code.
 	 */
-	lookupOptions |= (J9_LOOK_VIRTUAL | J9_LOOK_ALLOW_FWD | J9_LOOK_HANDLE_DEFAULT_METHOD_CONFLICTS);
+	lookupOptions |= (J9_LOOK_VIRTUAL | J9_LOOK_HANDLE_DEFAULT_METHOD_CONFLICTS);
 
 	if ((resolveFlags & J9_RESOLVE_FLAG_JCL_CONSTANT_POOL) != J9_RESOLVE_FLAG_JCL_CONSTANT_POOL) {
 		lookupOptions |= J9_LOOK_CLCONSTRAINTS;
@@ -2231,24 +2234,23 @@ resolveInvokeDynamic(J9VMThread *vmThread, J9ConstantPool *ramCP, UDATA callSite
 		/* Check if an exception is already pending */
 		if (vmThread->currentException != NULL) {
 			/* Already a pending exception */
-			result = vmThread->currentException;
+			result = NULL;
 		} else if (NULL == result) {
 			setCurrentExceptionUTF(vmThread, J9VMCONSTANTPOOL_JAVALANGNULLPOINTEREXCEPTION, NULL);
-			result = vmThread->currentException;
-		}
-
-		/* The result can be an array or exception. Ensure that the result and its elements are
-		 * written/published before the result reference is stored.
-		 */
-		VM_AtomicSupport::writeBarrier();
-
-		J9MemoryManagerFunctions *gcFuncs = vmThread->javaVM->memoryManagerFunctions;
-		J9Class *j9class = J9_CLASS_FROM_CP(ramCP);
-		if (0 == gcFuncs->j9gc_objaccess_staticCompareAndSwapObject(vmThread, j9class, callSite, NULL, result)) {
-			/* Another thread beat this thread to updating the call site, ensure both threads
-			 * return the same method handle.
+		} else {
+			/* The result is an array. Ensure that the result and its elements are
+			 * written/published before the result reference is stored.
 			 */
-			result = *callSite;
+			VM_AtomicSupport::writeBarrier();
+
+			J9MemoryManagerFunctions *gcFuncs = vmThread->javaVM->memoryManagerFunctions;
+			J9Class *j9class = J9_CLASS_FROM_CP(ramCP);
+			if (0 == gcFuncs->j9gc_objaccess_staticCompareAndSwapObject(vmThread, j9class, callSite, NULL, result)) {
+				/* Another thread beat this thread to updating the call site, ensure both threads
+				 * return the same method handle.
+				 */
+				result = *callSite;
+			}
 		}
 #else /* defined(J9VM_OPT_OPENJDK_METHODHANDLE) */
 		/* Check if an exception is already pending */
@@ -2280,3 +2282,32 @@ resolveInvokeDynamic(J9VMThread *vmThread, J9ConstantPool *ramCP, UDATA callSite
 	Trc_VM_resolveInvokeDynamic_Exit(vmThread, result);
 	return result;
 }
+
+#if JAVA_SPEC_VERSION >= 16
+/**
+ * @brief The function calls into the interpreter via sendResolveFfiCallInvokeHandle()
+ * to fetch the MemberName object plus appendix intended for the downcall/upcall method.
+ *
+ * @param vmThread the pointer to J9VMThread
+ * @param handle the downcall/upcall MethodHandle object
+ * @return the cache array that stores MemberName and appendix
+ */
+j9object_t
+resolveFfiCallInvokeHandle(J9VMThread *vmThread, j9object_t handle)
+{
+	j9object_t invokeCache = NULL;
+	Trc_VM_resolveFfiCallInvokeHandle_Entry(vmThread);
+
+	sendResolveFfiCallInvokeHandle(vmThread, handle);
+	invokeCache = (j9object_t)vmThread->returnValue;
+	if (VM_VMHelpers::exceptionPending(vmThread)) {
+		/* Already a pending exception */
+		invokeCache = NULL;
+	} else if (NULL == invokeCache) {
+		setCurrentExceptionUTF(vmThread, J9VMCONSTANTPOOL_JAVALANGNULLPOINTEREXCEPTION, NULL);
+	}
+
+	Trc_VM_resolveFfiCallInvokeHandle_Exit(vmThread, invokeCache);
+	return invokeCache;
+}
+#endif /* JAVA_SPEC_VERSION >= 16 */

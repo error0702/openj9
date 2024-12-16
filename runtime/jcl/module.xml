@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-Copyright (c) 2006, 2022 IBM Corp. and others
+Copyright IBM Corp. and others 2006
 
 This program and the accompanying materials are made available under
 the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,9 +16,9 @@ Exception [1] and GNU General Public License, version 2 with the
 OpenJDK Assembly Exception [2].
 
 [1] https://www.gnu.org/software/classpath/license.html
-[2] http://openjdk.java.net/legal/assembly-exception.html
+[2] https://openjdk.org/legal/assembly-exception.html
 
-SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
 -->
 <module xmlns:xi="http://www.w3.org/2001/XInclude">
 	<xi:include href="uma/java_lang_invoke_MethodHandleNatives_exports.xml"></xi:include>
@@ -28,6 +28,8 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 	<xi:include href="uma/se6_vm-side_natives_exports.xml"></xi:include>
 	<xi:include href="uma/se6_vm-side_lifecycle_exports.xml"></xi:include>
 	<xi:include href="uma/attach_exports.xml"></xi:include>
+	<xi:include href="uma/crac_exports.xml"></xi:include>
+	<xi:include href="uma/criu_exports.xml"></xi:include>
 	<xi:include href="uma/se7_exports.xml"></xi:include>
 	<xi:include href="uma/se626_orb_ludcl_exports.xml"></xi:include>
 	<xi:include href="uma/jithelpers_jni_exports.xml"></xi:include>
@@ -39,6 +41,13 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 	<xi:include href="uma/se14_exports.xml"></xi:include>
 	<xi:include href="uma/se15_exports.xml"></xi:include>
 	<xi:include href="uma/se16_exports.xml"></xi:include>
+	<xi:include href="uma/se19only_exports.xml"></xi:include>
+	<xi:include href="uma/se19_exports.xml"></xi:include>
+	<xi:include href="uma/se20_exports.xml"></xi:include>
+	<xi:include href="uma/jfr_jdk11_exports.xml"></xi:include>
+	<xi:include href="uma/jfr_jdk17_exports.xml"></xi:include>
+	<xi:include href="uma/jfr_jdk21_exports.xml"></xi:include>
+	<xi:include href="uma/jfr_jdk23_exports.xml"></xi:include>
 
 	<xi:include href="uma/vendor_jcl_exports.xml">
 		<xi:fallback/>
@@ -50,6 +59,7 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 	<xi:include href="uma/se6_vm-side_natives_objects.xml"></xi:include>
 	<xi:include href="uma/se6_vm-side_lifecycle_objects.xml"></xi:include>
 	<xi:include href="uma/attach_objects.xml"></xi:include>
+	<xi:include href="uma/criu_objects.xml"></xi:include>
 	<xi:include href="uma/se7_objects.xml"></xi:include>
 	<xi:include href="uma/se626_orb_ludcl_objects.xml"></xi:include>
 	<xi:include href="uma/jithelpers_objects.xml"></xi:include>
@@ -57,6 +67,8 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 	<xi:include href="uma/se8only_objects.xml"></xi:include>
 	<xi:include href="uma/se9_objects.xml"></xi:include>
 	<xi:include href="uma/se16_objects.xml"></xi:include>
+	<xi:include href="uma/se19_objects.xml"></xi:include>
+	<xi:include href="uma/jfr_objects.xml"></xi:include>
 
 	<!-- vendor_jcl.xml can contain vendor specific configuration -->
 	<xi:include href="uma/vendor_jcl.xml">
@@ -95,6 +107,12 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 			<group name="attach">
 				<include-if condition="spec.flags.opt_sidecar"/>
 			</group>
+			<group name="crac">
+				<include-if condition="spec.flags.opt_cracSupport"/>
+			</group>
+			<group name="criu">
+				<include-if condition="spec.flags.opt_criuSupport"/>
+			</group>
 			<group name="se7"/>
 			<group name="se626_orb_ludcl"/>
 			<group name="se8"/>
@@ -116,6 +134,35 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 			</group>
 			<group name="se16">
 				<include-if condition="spec.java16"/>
+			</group>
+			<group name="se19only">
+				<include-if condition="spec.java19"/>
+				<exclude-if condition="spec.java20"/>
+			</group>
+			<group name="se19">
+				<include-if condition="spec.java19"/>
+			</group>
+			<group name="se20">
+				<include-if condition="spec.java20"/>
+			</group>
+			<group name="jfr_jdk11">
+				<include-if condition="spec.flags.opt_jfr"/>
+				<include-if condition="spec.java11"/>
+				<exclude-if condition="spec.java12"/>
+			</group>
+			<group name="jfr_jdk17">
+				<include-if condition="spec.flags.opt_jfr"/>
+				<include-if condition="spec.java17"/>
+				<exclude-if condition="spec.java18"/>
+			</group>
+			<group name="jfr_jdk21">
+				<include-if condition="spec.flags.opt_jfr"/>
+				<include-if condition="spec.java21"/>
+				<exclude-if condition="spec.java22"/>
+			</group>
+			<group name="jfr_jdk23">
+				<include-if condition="spec.flags.opt_jfr"/>
+				<include-if condition="spec.java23"/>
 			</group>
 		</exports>
 
@@ -164,6 +211,9 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 			<group name="attach">
 				<include-if condition="spec.flags.opt_sidecar"/>
 			</group>
+			<group name="criu">
+				<include-if condition="spec.flags.opt_criuSupport"/>
+			</group>
 			<group name="se626_orb_ludcl"/>
 			<group name="se7"/>
 			<group name="se8"/>
@@ -181,8 +231,15 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 			<group name="se16">
 				<include-if condition="spec.java16"/>
 			</group>
+			<group name="se19">
+				<include-if condition="spec.java19"/>
+			</group>
 
 			<group name="vendor_jcl"/>
+
+			<group name="jfr">
+				<include-if condition="spec.flags.opt_jfr"/>
+			</group>
 
 			<!-- Groups must be before Objects -->
 			<object name="j9vmconstantpool"/>

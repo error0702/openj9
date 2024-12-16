@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2019, 2020 IBM Corp. and others
+ * Copyright IBM Corp. and others 2019
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 /**
@@ -63,7 +63,7 @@ public:
 	 * This should not be called
 	 */
 	virtual void
-	doSlot(J9Object** slot)
+	doSlot(J9Object **slot)
 	{
 		Assert_MM_unreachable();
 	}
@@ -83,12 +83,12 @@ public:
 	virtual void
 	doMonitorReference(J9ObjectMonitor *objectMonitor, GC_HashTableIterator *monitorReferenceIterator)
 	{
-		J9ThreadAbstractMonitor * monitor = (J9ThreadAbstractMonitor*)objectMonitor->monitor;
-		if(!_markingScheme->isMarked((J9Object *)monitor->userData)) {
+		J9ThreadAbstractMonitor *monitor = (J9ThreadAbstractMonitor*)objectMonitor->monitor;
+		if (!_markingScheme->isMarked((J9Object *)monitor->userData)) {
 			monitorReferenceIterator->removeSlot();
 			/* We must call objectMonitorDestroy (as opposed to omrthread_monitor_destroy) when the
 			 * monitor is not internal to the GC */
-			static_cast<J9JavaVM*>(_omrVM->_language_vm)->internalVMFunctions->objectMonitorDestroy(static_cast<J9JavaVM*>(_omrVM->_language_vm), (J9VMThread *)_env->getLanguageVMThread(), (omrthread_monitor_t)monitor);
+			_javaVM->internalVMFunctions->objectMonitorDestroy(_javaVM, (J9VMThread *)_env->getLanguageVMThread(), (omrthread_monitor_t)monitor);
 		}
 	}
 	
@@ -102,17 +102,17 @@ public:
 		MM_EnvironmentRealtime *env = (MM_EnvironmentRealtime *)envBase;
 		
 		/* @NOTE For SRT and MT to play together this needs to be investigated */
-		if(_singleThread || J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
+		if (_singleThread || J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
 			reportScanningStarted(RootScannerEntity_MonitorReferences);
 		
 			J9ObjectMonitor *objectMonitor = NULL;
-			J9MonitorTableListEntry *monitorTableList = static_cast<J9JavaVM*>(_omrVM->_language_vm)->monitorTableList;
+			J9MonitorTableListEntry *monitorTableList = _javaVM->monitorTableList;
 			while (NULL != monitorTableList) {
 				J9HashTable *table = monitorTableList->monitorTable;
 				if (NULL != table) {
 					GC_HashTableIterator iterator(table);
 					iterator.disableTableGrowth();
-					while (NULL != (objectMonitor = (J9ObjectMonitor*)iterator.nextSlot())) {
+					while (NULL != (objectMonitor = (J9ObjectMonitor *)iterator.nextSlot())) {
 						doMonitorReference(objectMonitor, &iterator);
 						if (shouldYieldFromMonitorScan()) {
 							yield();
@@ -130,7 +130,7 @@ public:
 	virtual CompletePhaseCode scanMonitorReferencesComplete(MM_EnvironmentBase *envBase) {
 		MM_EnvironmentRealtime *env = MM_EnvironmentRealtime::getEnvironment(envBase);
 		reportScanningStarted(RootScannerEntity_MonitorReferenceObjectsComplete);
-		((J9JavaVM *)env->getLanguageVM())->internalVMFunctions->objectMonitorDestroyComplete((J9JavaVM *)env->getLanguageVM(), (J9VMThread *)env->getLanguageVMThread());
+		_javaVM->internalVMFunctions->objectMonitorDestroyComplete(_javaVM, (J9VMThread *)env->getLanguageVMThread());
 		reportScanningEnded(RootScannerEntity_MonitorReferenceObjectsComplete);
 		return complete_phase_OK;
 	}
@@ -241,6 +241,16 @@ public:
 		reportScanningEnded(RootScannerEntity_OwnableSynchronizerObjects);
 	}
 
+	virtual void
+	scanContinuationObjects(MM_EnvironmentBase *envBase)	{
+		MM_EnvironmentRealtime *env = MM_EnvironmentRealtime::getEnvironment(envBase);
+
+		reportScanningStarted(RootScannerEntity_ContinuationObjects);
+		/* allow the marking scheme to handle this */
+		_realtimeGC->getRealtimeDelegate()->scanContinuationObjects(env);
+		reportScanningEnded(RootScannerEntity_ContinuationObjects);
+	}
+
 	/**
 	 * Wraps the MM_RootScanner::scanJNIWeakGlobalReferences method to disable yielding during the scan.
 	 * @see MM_RootScanner::scanJNIWeakGlobalReferences()
@@ -262,7 +272,7 @@ public:
 	doJNIWeakGlobalReference(J9Object **slotPtr)
 	{
 		J9Object *objectPtr = *slotPtr;
-		if(objectPtr && !_markingScheme->isMarked(objectPtr)) {
+		if (objectPtr && !_markingScheme->isMarked(objectPtr)) {
 			*slotPtr = NULL;
 		}
 	}
@@ -275,7 +285,7 @@ public:
 	doJVMTIObjectTagSlot(J9Object **slotPtr, GC_JVMTIObjectTagTableIterator *objectTagTableIterator)
 	{
 		J9Object *objectPtr = *slotPtr;
-		if(objectPtr && !_markingScheme->isMarked(objectPtr)) {
+		if (objectPtr && !_markingScheme->isMarked(objectPtr)) {
 			*slotPtr = NULL;
 		}
 	}

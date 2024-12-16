@@ -1,6 +1,6 @@
 
 /*******************************************************************************
- * Copyright (c) 1991, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,9 +16,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 /**
@@ -42,6 +42,8 @@
 #include "HeapRegionManager.hpp"
 #include "MarkMap.hpp"
 #include "ParallelTask.hpp"
+#include "ContinuationObjectBufferVLHGC.hpp"
+#include "ContinuationObjectList.hpp"
 
 #if defined(J9VM_GC_MODRON_COMPACTION)
 
@@ -201,6 +203,8 @@ private:
 	MMINLINE void preObjectMove(MM_EnvironmentVLHGC* env, J9Object *objectPtr, UDATA *objectSizeAfterMove);
 	MMINLINE void postObjectMove(MM_EnvironmentVLHGC* env, J9Object *newLocation, J9Object *objectPtr);
 	void fixupMixedObject(MM_EnvironmentVLHGC* env, J9Object *objectPtr, J9MM_FixupCache *cache);
+	void fixupContinuationNativeSlots(MM_EnvironmentVLHGC* env, J9Object *objectPtr, J9MM_FixupCache *cache);
+	void fixupContinuationObject(MM_EnvironmentVLHGC* env, J9Object *objectPtr, J9MM_FixupCache *cache);
 	void fixupClassObject(MM_EnvironmentVLHGC* env, J9Object *classObject, J9MM_FixupCache *cache);
 	void fixupClassLoaderObject(MM_EnvironmentVLHGC* env, J9Object *classLoaderObject, J9MM_FixupCache *cache);
 	void fixupPointerArrayObject(MM_EnvironmentVLHGC* env, J9Object *objectPtr, J9MM_FixupCache *cache);
@@ -250,7 +254,7 @@ private:
 	/**
 	 * Fix up the spine pointers of any arraylet leaf regions
 	 */
-	void fixupArrayletLeafRegionSpinePointers();
+	void fixupArrayletLeafRegionSpinePointers(MM_EnvironmentVLHGC *env);
 	
 	/**
 	 * Fix up the data in required arraylet leaf regions, unfinalized lists and ownable synchronizer lists.
@@ -596,12 +600,19 @@ public:
 	 * @param workStackBaseHighPriority[in/out] The "high priority" work stack base.  This reference parameter will be updated before the function returns is region is high priority
 	 */
 	void pushRegionOntoWorkStack(MM_HeapRegionDescriptorVLHGC **workStackBase, MM_HeapRegionDescriptorVLHGC **workStackBaseHighPriority, MM_HeapRegionDescriptorVLHGC *region);
+	void doStackSlot(MM_EnvironmentVLHGC *env, J9Object *fromObject, J9Object** slot);
 
 	friend class MM_WriteOnceCompactFixupRoots;
 	friend class MM_ParallelWriteOnceCompactTask;
 };
 
 #endif /* J9VM_GC_MODRON_COMPACTION */
+
+typedef struct StackIteratorData4WriteOnceCompactor {
+	MM_WriteOnceCompactor *writeOnceCompactor;
+	MM_EnvironmentVLHGC *env;
+	J9Object *fromObject;
+} StackIteratorData4WriteOnceCompactor;
 
 #endif /* COMPACTSCHEMEVLHGC_HPP_ */
 

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "jvminitcommon.h"
@@ -127,23 +127,39 @@ createLoadInfo(J9PortLibrary *portLibrary, J9Pool *aPool, const char *name, U_32
 }
 
 /**
- * This method indicates if the requested jniVersion is valid or not
+ * This method indicates if the requested jniVersion is valid or not.
  * @param jniVersion the version to be checked
  * @returns true if the version is valid
  */
 UDATA
 jniVersionIsValid(UDATA jniVersion)
 {
-	return (jniVersion == JNI_VERSION_1_1)
-		|| (jniVersion == JNI_VERSION_1_2)
-		|| (jniVersion == JNI_VERSION_1_4)
-		|| (jniVersion == JNI_VERSION_1_6)
-		|| (jniVersion == JNI_VERSION_1_8)
+	switch (jniVersion) {
+	case JNI_VERSION_1_1:
+	case JNI_VERSION_1_2:
+	case JNI_VERSION_1_4:
+	case JNI_VERSION_1_6:
+	case JNI_VERSION_1_8:
 #if JAVA_SPEC_VERSION >= 9
-		|| (jniVersion == JNI_VERSION_9)
+	case JNI_VERSION_9:
 #endif /* JAVA_SPEC_VERSION >= 9 */
 #if JAVA_SPEC_VERSION >= 10
-		|| (jniVersion == JNI_VERSION_10)
+	case JNI_VERSION_10:
 #endif /* JAVA_SPEC_VERSION >= 10 */
-		;
+#if JAVA_SPEC_VERSION >= 19
+	case JNI_VERSION_19:
+#endif /* JAVA_SPEC_VERSION >= 19 */
+#if JAVA_SPEC_VERSION >= 20
+	case JNI_VERSION_20:
+#endif /* JAVA_SPEC_VERSION >= 20 */
+#if JAVA_SPEC_VERSION >= 21
+	case JNI_VERSION_21:
+#endif /* JAVA_SPEC_VERSION >= 21 */
+#if JAVA_SPEC_VERSION >= 24
+	case JNI_VERSION_24:
+#endif /* JAVA_SPEC_VERSION >= 24 */
+		return JNI_TRUE;
+	default:
+		return JNI_FALSE;
+	}
 }

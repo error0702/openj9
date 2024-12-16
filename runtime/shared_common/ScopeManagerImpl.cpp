@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2020 IBM Corp. and others
+ * Copyright IBM Corp. and others 2001
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 /**
@@ -87,21 +87,13 @@ SH_ScopeManagerImpl::scHashEqualFn(void* left, void* right, void *userData)
 	HashEntry* rightItem = (HashEntry*)right;
 	const J9UTF8* utf8left = leftItem->_value;
 	const J9UTF8* utf8right = rightItem->_value;
-	UDATA result;
 
 	Trc_SHR_SMI_scHashEqualFn_Entry(utf8left, utf8right);
 
-	/* PERFORMANCE: Compare key size first as this is the most likely cause for exit */
-	if (J9UTF8_LENGTH(utf8left) != J9UTF8_LENGTH(utf8right)) {
-		Trc_SHR_SMI_scHashEqualFn_Exit2();
-		return 0;
-	}
-	if (J9UTF8_DATA(utf8left)==NULL || J9UTF8_DATA(utf8right)==NULL) {
-		Trc_SHR_SMI_scHashEqualFn_Exit1();
-		return 0;
-	}
-	result = J9UTF8_EQUALS(utf8left, utf8right);
+	UDATA result = J9UTF8_EQUALS(utf8left, utf8right);
+
 	Trc_SHR_SMI_scHashEqualFn_Exit3(result);
+
 	return result;
 }
 

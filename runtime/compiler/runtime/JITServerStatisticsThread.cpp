@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2018
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "runtime/JITServerStatisticsThread.hpp"
@@ -82,9 +82,9 @@ static int32_t J9THREAD_PROC statisticsThreadProc(void * entryarg)
 
    persistentInfo->setStartTime(crtTime);
    persistentInfo->setElapsedTime(0);
-   while(!statsThreadObj->getStatisticsThreadExitFlag())
+   while (!statsThreadObj->getStatisticsThreadExitFlag())
       {
-      while(!statsThreadObj->getStatisticsThreadExitFlag() && j9thread_sleep_interruptable((IDATA) samplingPeriod, 0) == 0)
+      while (!statsThreadObj->getStatisticsThreadExitFlag() && j9thread_sleep_interruptable(samplingPeriod, 0) == 0)
          {
          // Read current time but prevent situations where clock goes backwards
          // Maybe we should use a monotonic clock
@@ -93,18 +93,17 @@ static int32_t J9THREAD_PROC statisticsThreadProc(void * entryarg)
             crtTime = t;
          persistentInfo->setElapsedTime(crtTime - persistentInfo->getStartTime());
 
-         // Every 10000 ms look for stale sessions from clients that were inactive
-         // for a long time and purge them
-         if (crtTime - lastPurgeTime >= 10000)
+         // Look for stale sessions from clients that were inactive for a long time and purge them
+         if (crtTime - lastPurgeTime >= TR::Options::_timeBetweenPurges)
             {
             lastPurgeTime = crtTime;
             OMR::CriticalSection compilationMonitorLock(compInfo->getCompilationMonitor());
             compInfo->getClientSessionHT()->purgeOldDataIfNeeded();
-            }     
+            }
 
          // Print operational statistics to vlog if enabled
-         CpuUtilization *cpuUtil = compInfo->getCpuUtil(); 
-         if ((statsThreadObj->getStatisticsFrequency() != 0) && ((crtTime - lastStatsTime) > statsThreadObj->getStatisticsFrequency()))
+         CpuUtilization *cpuUtil = compInfo->getCpuUtil();
+         if ((statsThreadObj->getStatisticsFrequency() != 0) && (crtTime - lastStatsTime > statsThreadObj->getStatisticsFrequency()))
             {
             int32_t cpuUsage = 0, avgCpuUsage = 0, vmCpuUsage = 0;
             if (cpuUtil->isFunctional())
@@ -116,7 +115,7 @@ static int32_t J9THREAD_PROC statisticsThreadProc(void * entryarg)
                vmCpuUsage = cpuUtil->getVmCpuUsage();
                }
             omrstr_ftime_ex(timestamp, sizeof(timestamp), "%b %d %H:%M:%S %Y", crtTime, OMRSTR_FTIME_FLAG_LOCAL);
-            
+
             TR_VerboseLog::CriticalSection vlogLock;
             TR_VerboseLog::writeLine(TR_Vlog_JITServer, "CurrentTime: %s", timestamp);
             TR_VerboseLog::writeLine(TR_Vlog_JITServer, "Compilation Queue Size: %d", compInfo->getMethodQueueSize());
@@ -133,7 +132,7 @@ static int32_t J9THREAD_PROC statisticsThreadProc(void * entryarg)
                }
             lastStatsTime = crtTime;
             }
-            
+
          if (cpuUtil->isFunctional() && TR::Options::isAnyVerboseOptionSet() && ((crtTime - lastCpuUpdate) >= 500))
             {
             lastCpuUpdate = crtTime;

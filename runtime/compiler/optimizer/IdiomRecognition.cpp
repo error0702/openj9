@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "optimizer/IdiomRecognition.hpp"
@@ -133,15 +133,14 @@ TR_CISCNode::initializeMembers(uint32_t opc, uint16_t id, int16_t dagId, uint16_
 bool
 TR_CISCNode::isEqualOpc(TR_CISCNode *t)
    {
-   //TR_ASSERT((int)TR::NumIlOps == TR_variable, "assumption for reducing compilation time");
-   static_assert((int)TR::NumIlOps == TR_variable,
+   static_assert((int)TR::NumAllIlOps == TR_variable,
                  "assumption for reducing compilation time");
 
    int32_t pOpc = _opcode;
    int32_t tOpc = t->_opcode;
 
    if (pOpc == tOpc) return true;
-   else if (pOpc > TR::NumIlOps) // Please see the above assumption
+   else if (pOpc > TR::NumAllIlOps) // Please see the above assumption
       {
       switch(pOpc)
          {
@@ -195,7 +194,7 @@ TR_CISCNode::isEqualOpc(TR_CISCNode *t)
 const char *
 TR_CISCNode::getName(TR_CISCOps op, TR::Compilation * comp)
    {
-   if (op < (TR_CISCOps)TR::NumIlOps)
+   if (op < (TR_CISCOps)TR::NumAllIlOps)
       {
       TR::ILOpCode opCode;
       opCode.setOpCodeValue((enum TR::ILOpCodes)op);
@@ -241,11 +240,11 @@ TR_CISCNode::dump(TR::FILE *pOutFile, TR::Compilation * comp)
    const char *name = getName((TR_CISCOps)_opcode, comp);
    if (isValidOtherInfo())
       {
-      sprintf(buf, "%s %d", name, _otherInfo);
+      snprintf(buf, sizeof(buf), "%s %d", name, _otherInfo);
       }
    else
       {
-      sprintf(buf, "%s", name);
+      snprintf(buf, sizeof(buf), "%s", name);
       }
    traceMsg(comp, "[%p] %3d %2d%c %-11s", this, _id, _dagId, isOutsideOfLoop() ? ' ' : 'L', buf);
    traceMsg(comp, " [");
@@ -346,11 +345,11 @@ TR_CISCNode::printStdout()
    char buf[256];
    if (isValidOtherInfo())
       {
-      sprintf(buf, "%d %d", _opcode, _otherInfo);
+      snprintf(buf, sizeof(buf), "%d %d", _opcode, _otherInfo);
       }
    else
       {
-      sprintf(buf, "%d", _opcode);
+      snprintf(buf, sizeof(buf), "%d", _opcode);
       }
    printf("[%p] %3d %2d%c %-11s", this, _id, _dagId, isOutsideOfLoop() ? ' ' : 'L', buf);
    printf(" [");
@@ -765,7 +764,7 @@ TR_CISCNode::checkParentsNonRec(TR_CISCNode *p, TR_CISCNode *t, int8_t level, TR
 void
 TR_CISCNode::reverseBranchOpCodes()
    {
-   TR_ASSERT(_opcode < TR::NumIlOps && _ilOpCode.isIf(), "error: not isIf");
+   TR_ASSERT(_opcode < TR::NumAllIlOps && _ilOpCode.isIf(), "error: not isIf");
    TR_ASSERT(_numSuccs == 2, "error: _numSuccs != 2");
    TR_CISCNode *swap = _succs[0];
    _succs[0] = _succs[1];
@@ -972,7 +971,7 @@ TR_CISCGraphAspectsWithCounts::setAspectsByOpcode(int opc)
          set(iadd);
          break;
       default:
-         if (opc < TR::NumIlOps)
+         if (opc < TR::NumAllIlOps)
             {
             TR::ILOpCode opCode;
             opCode.setOpCodeValue((enum TR::ILOpCodes)opc);
@@ -1042,181 +1041,193 @@ TR_CISCGraph::makePreparedCISCGraphs(TR::Compilation *c)
    if (c->isOutOfProcessCompilation())
       {
       JITServer::GlobalAllocationRegion globalAllocationRegion(c->fej9()->_compInfoPT);
-#else
-      {
+      initializeGraphs(c);
+      }
+   else
 #endif
-      int32_t num = 0;
-      bool genTRxx = c->cg()->getSupportsArrayTranslateTRxx();
-      bool genSIMD = c->cg()->getSupportsVectorRegisters() && !c->getOption(TR_DisableSIMDArrayTranslate);
-      bool genTRTO255 = c->cg()->getSupportsArrayTranslateTRTO255();
-      bool genTRTO = c->cg()->getSupportsArrayTranslateTRTO();
-      bool genTROTNoBreak = c->cg()->getSupportsArrayTranslateTROTNoBreak();
-      bool genTROT = c->cg()->getSupportsArrayTranslateTROT();
-      bool genTRT =  c->cg()->getSupportsArrayTranslateAndTest();
-      bool genMemcpy = c->cg()->getSupportsReferenceArrayCopy() || c->cg()->getSupportsPrimitiveArrayCopy();
-      bool genMemset = c->cg()->getSupportsArraySet();
-      bool genMemcmp = c->cg()->getSupportsArrayCmp();
-      bool genIDiv2Mul = c->cg()->getSupportsLoweringConstIDiv();
-      bool genLDiv2Mul = c->cg()->getSupportsLoweringConstLDiv();
-      // FIXME: We need getSupportsCountDecimalDigit() like interface
-      // this idiom is only enabled on 390 for the moment
+      {
+      initializeGraphs(c);
+      }
+   }
+
+void
+TR_CISCGraph::initializeGraphs(TR::Compilation *c)
+   {
+   int32_t num = 0;
+   bool genTRxx = c->cg()->getSupportsArrayTranslateTRxx();
+   bool genSIMD = c->cg()->getSupportsVectorRegisters() && !c->getOption(TR_DisableSIMDArrayTranslate);
+   bool genTRTO255 = c->cg()->getSupportsArrayTranslateTRTO255();
+   bool genTRTO = c->cg()->getSupportsArrayTranslateTRTO();
+   bool genTROTNoBreak = c->cg()->getSupportsArrayTranslateTROTNoBreak();
+   bool genTROT = c->cg()->getSupportsArrayTranslateTROT();
+   bool genTRT =  c->cg()->getSupportsArrayTranslateAndTest();
+   bool genMemcpy = c->cg()->getSupportsReferenceArrayCopy() || c->cg()->getSupportsPrimitiveArrayCopy();
+   bool genMemset = c->cg()->getSupportsArraySet();
+   bool genMemcmp = c->cg()->getSupportsArrayCmp();
+   bool genMemcmpidx = c->cg()->getSupportsArrayCmpLen();
+   bool genIDiv2Mul = c->cg()->getSupportsIMulHigh();
+   bool genLDiv2Mul = c->cg()->getSupportsLMulHigh();
+   // FIXME: We need getSupportsCountDecimalDigit() like interface
+   // this idiom is only enabled on 390 for the moment
 
 #if defined(J9VM_OPT_JITSERVER)
-      // Enabling genDecimal generates the TROT instruction on Z which is currently not
-      // relocatable for remote compiles. Thus we disable this option for remote compiles for now.
-      bool genDecimal = c->target().cpu.isZ() && !c->isOutOfProcessCompilation();
+   // Enabling genDecimal generates the TROT instruction on Z which is currently not
+   // relocatable for remote compiles. Thus we disable this option for remote compiles for now.
+   bool genDecimal = c->target().cpu.isZ() && !c->isOutOfProcessCompilation();
 #else
-      bool genDecimal = c->target().cpu.isZ();
+   bool genDecimal = c->target().cpu.isZ();
 #endif /* defined(J9VM_OPT_JITSERVER) */
-      bool genBitOpMem = c->target().cpu.isZ();
-      bool is64Bit = c->target().is64Bit();
-      bool isBig = c->target().cpu.isBigEndian();
-      int32_t ctrl = (is64Bit ? CISCUtilCtl_64Bit : 0) | (isBig ? CISCUtilCtl_BigEndian : 0);
+   bool genBitOpMem = c->target().cpu.isZ();
+   bool is64Bit = c->target().is64Bit();
+   bool isBig = c->target().cpu.isBigEndian();
+   int32_t ctrl = (is64Bit ? CISCUtilCtl_64Bit : 0) | (isBig ? CISCUtilCtl_BigEndian : 0);
 
-      // THESE ARE NOT GUARANTEED OR TESTED TO WORK ON WCODE.
-      // Problems encountered include ahSize=0 on WCode leading to hash collision when adding node for make*CISCGraphs.
-      if (genMemcmp)
+   // THESE ARE NOT GUARANTEED OR TESTED TO WORK ON WCODE.
+   // Problems encountered include ahSize=0 on WCode leading to hash collision when adding node for make*CISCGraphs.
+   if (genMemcmp)
+      {
+      preparedCISCGraphs[num] =  makeMemCmpGraph(c, ctrl);
+      setEssentialNodes(preparedCISCGraphs[num++]);
+      if (genMemcmpidx)
          {
-         preparedCISCGraphs[num] =  makeMemCmpGraph(c, ctrl);
-         setEssentialNodes(preparedCISCGraphs[num++]);
          preparedCISCGraphs[num] =  makeMemCmpIndexOfGraph(c, ctrl);
          setEssentialNodes(preparedCISCGraphs[num++]);
          preparedCISCGraphs[num] =  makeMemCmpSpecialGraph(c, ctrl);
          setEssentialNodes(preparedCISCGraphs[num++]);
          }
-      if (genTRT)
-         {
-         preparedCISCGraphs[num] =  makeTRTGraph(c, ctrl);
-         setEssentialNodes(preparedCISCGraphs[num++]);
-         preparedCISCGraphs[num] =  makeTRTGraph2(c, ctrl);
-         setEssentialNodes(preparedCISCGraphs[num++]);
-         preparedCISCGraphs[num] =  makeTRT4NestedArrayGraph(c, ctrl);
-         setEssentialNodes(preparedCISCGraphs[num++]);
-         //preparedCISCGraphs[num] =  makeTRT4NestedArrayIfGraph(c, ctrl); setEssentialNodes(preparedCISCGraphs[num]); num++;
-         }
-      if (genMemset)
-         {
-         preparedCISCGraphs[num] =  makeMemSetGraph(c, ctrl);
-         setEssentialNodes(preparedCISCGraphs[num++]);
+      }
+   if (genTRT)
+      {
+      preparedCISCGraphs[num] =  makeTRTGraph(c, ctrl);
+      setEssentialNodes(preparedCISCGraphs[num++]);
+      preparedCISCGraphs[num] =  makeTRTGraph2(c, ctrl);
+      setEssentialNodes(preparedCISCGraphs[num++]);
+      preparedCISCGraphs[num] =  makeTRT4NestedArrayGraph(c, ctrl);
+      setEssentialNodes(preparedCISCGraphs[num++]);
+      //preparedCISCGraphs[num] =  makeTRT4NestedArrayIfGraph(c, ctrl); setEssentialNodes(preparedCISCGraphs[num]); num++;
+      }
+   if (genMemset)
+      {
+      preparedCISCGraphs[num] =  makeMemSetGraph(c, ctrl);
+      setEssentialNodes(preparedCISCGraphs[num++]);
 #if STRESS_TEST
-         preparedCISCGraphs[num] =  makeMixedMemSetGraph(c, ctrl);
-         setEssentialNodes(preparedCISCGraphs[num++]);
+      preparedCISCGraphs[num] =  makeMixedMemSetGraph(c, ctrl);
+      setEssentialNodes(preparedCISCGraphs[num++]);
 #endif
-         preparedCISCGraphs[num] = makePtrArraySetGraph(c, ctrl);
-         setEssentialNodes(preparedCISCGraphs[num++]);
-         // Causes perf degradations on Xalan strlen16 opportunities. SRSTU is only better on long strings.
-         //preparedCISCGraphs[num] = makeStrlen16Graph(c, ctrl);
-         //setEssentialNodes(preparedCISCGraphs[num++]);
-         }
-      if (genMemcpy)
-         {
-         preparedCISCGraphs[num] =  makeMemCpyGraph(c, ctrl);
-         setEssentialNodes(preparedCISCGraphs[num++]);
-         preparedCISCGraphs[num] =  makeMemCpyDecGraph(c, ctrl);
-         setEssentialNodes(preparedCISCGraphs[num++]);
-         preparedCISCGraphs[num] =  makeMemCpySpecialGraph(c, ctrl);
-         setEssentialNodes(preparedCISCGraphs[num++]);
-         preparedCISCGraphs[num] =  makeMemCpyByteToCharGraph(c, ctrl);
-         setEssentialNodes(preparedCISCGraphs[num++]);
-         preparedCISCGraphs[num] =  makeMemCpyByteToCharBndchkGraph(c, ctrl);
-         setEssentialNodes(preparedCISCGraphs[num++]);
-         preparedCISCGraphs[num] =  makeMemCpyCharToByteGraph(c, ctrl);
-         setEssentialNodes(preparedCISCGraphs[num++]);
-         preparedCISCGraphs[num] =  makeMEMCPYChar2ByteGraph2(c, ctrl);
-         setEssentialNodes(preparedCISCGraphs[num++]);
-         preparedCISCGraphs[num] =  makeMEMCPYChar2ByteMixedGraph(c, ctrl);
-         setEssentialNodes(preparedCISCGraphs[num++]);
-         // disabled for now
+      preparedCISCGraphs[num] = makePtrArraySetGraph(c, ctrl);
+      setEssentialNodes(preparedCISCGraphs[num++]);
+      // Causes perf degradations on Xalan strlen16 opportunities. SRSTU is only better on long strings.
+      //preparedCISCGraphs[num] = makeStrlen16Graph(c, ctrl);
+      //setEssentialNodes(preparedCISCGraphs[num++]);
+      }
+   if (genMemcpy)
+      {
+      preparedCISCGraphs[num] =  makeMemCpyGraph(c, ctrl);
+      setEssentialNodes(preparedCISCGraphs[num++]);
+      preparedCISCGraphs[num] =  makeMemCpyDecGraph(c, ctrl);
+      setEssentialNodes(preparedCISCGraphs[num++]);
+      preparedCISCGraphs[num] =  makeMemCpySpecialGraph(c, ctrl);
+      setEssentialNodes(preparedCISCGraphs[num++]);
+      preparedCISCGraphs[num] =  makeMemCpyByteToCharGraph(c, ctrl);
+      setEssentialNodes(preparedCISCGraphs[num++]);
+      preparedCISCGraphs[num] =  makeMemCpyByteToCharBndchkGraph(c, ctrl);
+      setEssentialNodes(preparedCISCGraphs[num++]);
+      preparedCISCGraphs[num] =  makeMemCpyCharToByteGraph(c, ctrl);
+      setEssentialNodes(preparedCISCGraphs[num++]);
+      preparedCISCGraphs[num] =  makeMEMCPYChar2ByteGraph2(c, ctrl);
+      setEssentialNodes(preparedCISCGraphs[num++]);
+      preparedCISCGraphs[num] =  makeMEMCPYChar2ByteMixedGraph(c, ctrl);
+      setEssentialNodes(preparedCISCGraphs[num++]);
+      // disabled for now
 #if STRESS_TEST
-         preparedCISCGraphs[num] =  makeMEMCPYByte2IntGraph(c, ctrl); setEssentialNodes(preparedCISCGraphs[num]); num++;
-         preparedCISCGraphs[num] =  makeMEMCPYInt2ByteGraph(c, ctrl); setEssentialNodes(preparedCISCGraphs[num]); num++;
+      preparedCISCGraphs[num] =  makeMEMCPYByte2IntGraph(c, ctrl); setEssentialNodes(preparedCISCGraphs[num]); num++;
+      preparedCISCGraphs[num] =  makeMEMCPYInt2ByteGraph(c, ctrl); setEssentialNodes(preparedCISCGraphs[num]); num++;
 #endif
-         }
+      }
 
-      if (genTRTO255 || genTRTO || genSIMD || genTRxx)
+   if (genTRTO255 || genTRTO || genSIMD || genTRxx)
+      {
+      preparedCISCGraphs[num] =  makeCopyingTRTxGraph(c, ctrl, 0);
+      setEssentialNodes(preparedCISCGraphs[num++]);
+      preparedCISCGraphs[num] =  makeCopyingTRTxGraph(c, ctrl, 1);
+      setEssentialNodes(preparedCISCGraphs[num++]);
+      preparedCISCGraphs[num] =  makeCopyingTRTxGraph(c, ctrl, 2);
+      setEssentialNodes(preparedCISCGraphs[num++]);
+      preparedCISCGraphs[num] =  makeCopyingTRTxThreeIfsGraph(c, ctrl);
+      setEssentialNodes(preparedCISCGraphs[num++]);
+      preparedCISCGraphs[num] =  makeCopyingTRTOInduction1Graph(c, ctrl, 0);
+      setEssentialNodes(preparedCISCGraphs[num++]);
+      preparedCISCGraphs[num] =  makeCopyingTRTOInduction1Graph(c, ctrl, 1);
+      setEssentialNodes(preparedCISCGraphs[num++]);
+      preparedCISCGraphs[num] =  makeCopyingTRTOInduction1Graph(c, ctrl, 2);
+      setEssentialNodes(preparedCISCGraphs[num++]);
+
+      }
+
+   if (genTROTNoBreak || genTROT || genSIMD || genTRxx)
+      {
+      preparedCISCGraphs[num] =  makeCopyingTROxGraph(c, ctrl, 0);
+      setEssentialNodes(preparedCISCGraphs[num++]);
+      preparedCISCGraphs[num] =  makeCopyingTROxGraph(c, ctrl, 1);
+      setEssentialNodes(preparedCISCGraphs[num++]);
+      }
+
+   if (genTRxx)
+      {
+      if (c->getOption(TR_EnableCopyingTROTInduction1Idioms))
          {
-         preparedCISCGraphs[num] =  makeCopyingTRTxGraph(c, ctrl, 0);
+         preparedCISCGraphs[num] =  makeCopyingTROTInduction1Graph(c, ctrl, 0);
          setEssentialNodes(preparedCISCGraphs[num++]);
-         preparedCISCGraphs[num] =  makeCopyingTRTxGraph(c, ctrl, 1);
-         setEssentialNodes(preparedCISCGraphs[num++]);
-         preparedCISCGraphs[num] =  makeCopyingTRTxGraph(c, ctrl, 2);
-         setEssentialNodes(preparedCISCGraphs[num++]);
-         preparedCISCGraphs[num] =  makeCopyingTRTxThreeIfsGraph(c, ctrl);
-         setEssentialNodes(preparedCISCGraphs[num++]);
-         preparedCISCGraphs[num] =  makeCopyingTRTOInduction1Graph(c, ctrl, 0);
-         setEssentialNodes(preparedCISCGraphs[num++]);
-         preparedCISCGraphs[num] =  makeCopyingTRTOInduction1Graph(c, ctrl, 1);
-         setEssentialNodes(preparedCISCGraphs[num++]);
-         preparedCISCGraphs[num] =  makeCopyingTRTOInduction1Graph(c, ctrl, 2);
-         setEssentialNodes(preparedCISCGraphs[num++]);
-
-         }
-
-      if (genTROTNoBreak || genTROT || genSIMD || genTRxx)
-         {
-         preparedCISCGraphs[num] =  makeCopyingTROxGraph(c, ctrl, 0);
-         setEssentialNodes(preparedCISCGraphs[num++]);
-         preparedCISCGraphs[num] =  makeCopyingTROxGraph(c, ctrl, 1);
+         preparedCISCGraphs[num] =  makeCopyingTROTInduction1Graph(c, ctrl, 1);
          setEssentialNodes(preparedCISCGraphs[num++]);
          }
-
-      if (genTRxx)
-         {
-         if (c->getOption(TR_EnableCopyingTROTInduction1Idioms))
-            {
-            preparedCISCGraphs[num] =  makeCopyingTROTInduction1Graph(c, ctrl, 0);
-            setEssentialNodes(preparedCISCGraphs[num++]);
-            preparedCISCGraphs[num] =  makeCopyingTROTInduction1Graph(c, ctrl, 1);
-            setEssentialNodes(preparedCISCGraphs[num++]);
-            }
-         preparedCISCGraphs[num] =  makeCopyingTROOSpecialGraph(c, ctrl);
-         setEssentialNodes(preparedCISCGraphs[num++]);
+      preparedCISCGraphs[num] =  makeCopyingTROOSpecialGraph(c, ctrl);
+      setEssentialNodes(preparedCISCGraphs[num++]);
 #if STRESS_TEST
-         preparedCISCGraphs[num] =  makeCopyingTRTTSpecialGraph(c, ctrl);
-         setEssentialNodes(preparedCISCGraphs[num++]);
+      preparedCISCGraphs[num] =  makeCopyingTRTTSpecialGraph(c, ctrl);
+      setEssentialNodes(preparedCISCGraphs[num++]);
 #endif
-         if (is64Bit)
-            {
-            preparedCISCGraphs[num] =  makeCopyingTRTOGraphSpecial(c, ctrl);
-            setEssentialNodes(preparedCISCGraphs[num++]);
-            }
-         preparedCISCGraphs[num] =  makeTROTArrayGraph(c, ctrl);
-         setEssentialNodes(preparedCISCGraphs[num++]);
-         preparedCISCGraphs[num] =  makeTRTOArrayGraph(c, ctrl);
-         setEssentialNodes(preparedCISCGraphs[num++]);
-         preparedCISCGraphs[num] =  makeTRTOArrayGraphSpecial(c, ctrl);
+      if (is64Bit)
+         {
+         preparedCISCGraphs[num] =  makeCopyingTRTOGraphSpecial(c, ctrl);
          setEssentialNodes(preparedCISCGraphs[num++]);
          }
-      if (genDecimal)
-         {
-         // Needs to be modified
-         preparedCISCGraphs[num] =  makeCountDecimalDigitIntGraph(c, ctrl, genIDiv2Mul);
-         setEssentialNodes(preparedCISCGraphs[num++]);
-         preparedCISCGraphs[num] =  makeIntToStringGraph(c, ctrl, genIDiv2Mul);
-         setEssentialNodes(preparedCISCGraphs[num++]);
-         preparedCISCGraphs[num] =  makeCountDecimalDigitLongGraph(c, ctrl, genLDiv2Mul);
-         setEssentialNodes(preparedCISCGraphs[num++]);
+      preparedCISCGraphs[num] =  makeTROTArrayGraph(c, ctrl);
+      setEssentialNodes(preparedCISCGraphs[num++]);
+      preparedCISCGraphs[num] =  makeTRTOArrayGraph(c, ctrl);
+      setEssentialNodes(preparedCISCGraphs[num++]);
+      preparedCISCGraphs[num] =  makeTRTOArrayGraphSpecial(c, ctrl);
+      setEssentialNodes(preparedCISCGraphs[num++]);
+      }
+   if (genDecimal)
+      {
+      // Needs to be modified
+      preparedCISCGraphs[num] =  makeCountDecimalDigitIntGraph(c, ctrl, genIDiv2Mul);
+      setEssentialNodes(preparedCISCGraphs[num++]);
+      preparedCISCGraphs[num] =  makeIntToStringGraph(c, ctrl, genIDiv2Mul);
+      setEssentialNodes(preparedCISCGraphs[num++]);
+      preparedCISCGraphs[num] =  makeCountDecimalDigitLongGraph(c, ctrl, genLDiv2Mul);
+      setEssentialNodes(preparedCISCGraphs[num++]);
 #if STRESS_TEST
-         preparedCISCGraphs[num] =  makeLongToStringGraph(c, ctrl); setEssentialNodes(preparedCISCGraphs[num]); num++;
+      preparedCISCGraphs[num] =  makeLongToStringGraph(c, ctrl); setEssentialNodes(preparedCISCGraphs[num]); num++;
 #endif
-         }
-      if (genBitOpMem)
-         {
-         preparedCISCGraphs[num] =  makeBitOpMemGraph(c, ctrl);
-         setEssentialNodes(preparedCISCGraphs[num++]);
-         }
+      }
+   if (genBitOpMem)
+      {
+      preparedCISCGraphs[num] =  makeBitOpMemGraph(c, ctrl);
+      setEssentialNodes(preparedCISCGraphs[num++]);
+      }
 
-      TR_ASSERT(num <= MAX_PREPARED_GRAPH, "incorrect number of graphs!");
-      numPreparedCISCGraphs = num;
+   TR_ASSERT(num <= MAX_PREPARED_GRAPH, "incorrect number of graphs!");
+   numPreparedCISCGraphs = num;
 
-      // set minimumHotnessPrepared;
-      minimumHotnessPrepared = scorching;
-      for (;--num >= 0;)
-         {
-         TR_Hotness hotness = preparedCISCGraphs[num]->getHotness();
-         if (minimumHotnessPrepared > hotness)
-            minimumHotnessPrepared = hotness;
-         }
+   // set minimumHotnessPrepared;
+   minimumHotnessPrepared = scorching;
+   for (;--num >= 0;)
+      {
+      TR_Hotness hotness = preparedCISCGraphs[num]->getHotness();
+      if (minimumHotnessPrepared > hotness)
+         minimumHotnessPrepared = hotness;
       }
    }
 
@@ -1520,6 +1531,28 @@ TR_CISCGraph::importUDchains(TR::Compilation *comp, TR_UseDefInfo *useDefInfo, b
          /* set DU-chains to TR_CISCNode._chain */
          TR_ASSERT(n->getTrNodeInfo()->isSingleton(), "direct store must correspond to a single TR node");
          TR::Node *trNode = n->getTrNodeInfo()->getListHead()->getData()->_node;
+
+         if (!trNode->getSymbol()->isAutoOrParm())
+            {
+            TR_ASSERT_FATAL_WITH_NODE(
+               trNode,
+               trNode->getSymbol()->isStatic(),
+               "direct store to non-auto, non-static");
+
+            // Regardless of the uses that we can see within this method (which
+            // may not even appear, since we won't necessarily get use-def
+            // indices for static accesses), it's always possible that the
+            // destination static is used after the loop, but outside of this
+            // method. Recognizing this possibility will prevent the store from
+            // being considered negligible and ultimately incorrectly removed.
+            n->addChain(_exitNode, true);
+
+            // With this use recorded here, any real uses that might happen to
+            // be available are no longer informative. Avoid adding a duplicate
+            // entry for _exitNode.
+            continue;
+            }
+
          int32_t useDefIndex = trNode->getUseDefIndex();
          if (useDefIndex == 0) continue;
          TR_ASSERT(useDefInfo->isDefIndex(useDefIndex), "error!");
@@ -1916,7 +1949,8 @@ TR_CISCTransformer::TR_CISCTransformer(TR::OptimizationManager *manager)
      _bblistSucc(manager->trMemory()),
      _candidatesForRegister(manager->trMemory()),
      _useTreeTopMap(manager->comp(), manager->optimizer()),
-     _BitsKeepAliveList(manager->trMemory())
+     _BitsKeepAliveList(manager->trMemory()),
+     _countFailBuf(manager->trMemory()->currentStackRegion())
    {
    _afterInsertionsIdiom = (ListHeadAndTail<TR::Node> *) trMemory()->allocateHeapMemory(sizeof(ListHeadAndTail<TR::Node>)*2);
    memset(_afterInsertionsIdiom, 0, sizeof(ListHeadAndTail<TR::Node>)*2);
@@ -2755,7 +2789,7 @@ TR_CISCTransformer::renumberDagId(TR_CISCGraph *graph, int32_t tempMaxDagId, int
    //  2L isub        [] [40 41]
    //  2L aiadd       [] [39 42]
    //  0L bconst 1    [] []
-   //  2L ibstore     [] [43 44]
+   //  2L bstorei     [] [43 44]
    //  2L iadd        [] [40 22]
    //  2L istore      [] [46 4]
    //  2L ificmpge    [] [4 6]
@@ -3329,13 +3363,13 @@ TR_CISCTransformer::isBlockInLoopBody(TR::Block *block)
 
 
 void
-TR_CISCTransformer::showEmbeddedData(char *title, uint8_t *data)
+TR_CISCTransformer::showEmbeddedData(const char *title, uint8_t *data)
    {
    int32_t i, j;
-   traceMsg(comp(), "%s\n    ",title);
+   traceMsg(comp(), "%s\n    ", title);
    for (j = 0; j < _numPNodes; j++)
       {
-      traceMsg(comp(), "%3d",j);
+      traceMsg(comp(), "%3d", j);
       }
    traceMsg(comp(), "\n  --");
    for (j = 0; j < _numPNodes; j++)
@@ -3352,7 +3386,7 @@ TR_CISCTransformer::showEmbeddedData(char *title, uint8_t *data)
          if (this_result == _Unknown || this_result == _NotEmbed)
             traceMsg(comp(), "|  ");
          else
-            traceMsg(comp(), "| %X",data[idx(j, i)]);
+            traceMsg(comp(), "| %X", data[idx(j, i)]);
          }
       traceMsg(comp(), "\n");
       }
@@ -5110,7 +5144,7 @@ TR_CISCTransformer::moveCISCNodesInList(List<TR_CISCNode> *l, TR_CISCNode *from,
 // * _T->_orderByData
 //*****************************************************************************
 void
-TR_CISCTransformer::moveCISCNodes(TR_CISCNode *from, TR_CISCNode *to, TR_CISCNode *moveTo, char *debugStr)
+TR_CISCTransformer::moveCISCNodes(TR_CISCNode *from, TR_CISCNode *to, TR_CISCNode *moveTo, const char *debugStr)
    {
    if (showMesssagesStdout())
       {
@@ -6660,8 +6694,8 @@ TR_CISCTransformer::analyzeBoolTable(TR_BitVector **bv, TR::TreeTop **retSameExi
                      ntakenBV -= tmpBV;
                      break;
                   default:
-                     TR_ASSERT(false, "not implemented yet");
                      // not implemented yet
+                     countUnhandledOpcode(__FUNCTION__, n->getOpcode());
                      return false;
                   }
 
@@ -6785,7 +6819,8 @@ TR_CISCTransformer::analyzeByteBoolTable(TR_CISCNode *boolTable, uint8_t *table2
    bv = (TR_BitVector **)trMemory()->allocateMemory(size, stackAlloc);
    memset(bv, 0, size);
 
-   switch((defTargetNode ? defTargetNode : defNode)->getOpcode())
+   uint32_t opcode = (defTargetNode ? defTargetNode : defNode)->getOpcode();
+   switch (opcode)
       {
       case TR::b2i:
          if (defNode->isOptionalNode()) defNode = defNode->getChild(0);
@@ -6797,8 +6832,8 @@ TR_CISCTransformer::analyzeByteBoolTable(TR_CISCNode *boolTable, uint8_t *table2
          defBV.setAll(   0+BYTEBVOFFSET, 255+BYTEBVOFFSET);
          break;
       default:
-         TR_ASSERT(false, "not implemented yet");
          // not implemented yet
+         countUnhandledOpcode(__FUNCTION__, opcode);
          return -1;     // error
       }
 
@@ -6874,7 +6909,8 @@ TR_CISCTransformer::analyzeCharBoolTable(TR_CISCNode *boolTable, uint8_t *table6
    bv = (TR_BitVector **)trMemory()->allocateMemory(size, stackAlloc);
    memset(bv, 0, size);
 
-   switch((defTargetNode ? defTargetNode : defNode)->getOpcode())
+   uint32_t opcode = (defTargetNode ? defTargetNode : defNode)->getOpcode();
+   switch (opcode)
       {
       case TR::su2i:
          if (defNode->isOptionalNode()) defNode = defNode->getChild(0);
@@ -6883,8 +6919,8 @@ TR_CISCTransformer::analyzeCharBoolTable(TR_CISCNode *boolTable, uint8_t *table6
          defBV.setAll(0, 65535);
          break;
       default:
-         TR_ASSERT(false, "not implemented yet");
          // not implemented yet
+         countUnhandledOpcode(__FUNCTION__, opcode);
          return -1;     // error
       }
 
@@ -7133,7 +7169,15 @@ TR_CISCTransformer::analyzeOneArrayIndex(TR_CISCNode *arrayindex, TR::SymbolRefe
          }
       if (!ret) return false;
       }
-   else if (t->getOpcode() != TR_variable)
+   else if (t->getOpcode() == TR_variable)
+      {
+      TR::SymbolReference *symref = t->getHeadOfTrNodeInfo()->_node->getSymbolReference();
+      if (symref != inductionVariableSymRef)
+         {
+         return false;
+         }
+      }
+   else
       {
       return false;
       }
@@ -7613,7 +7657,7 @@ TR_CISCTransformer::computeTopologicalEmbedding(TR_CISCGraph *P, TR_CISCGraph *T
    if (performTransformation(comp(), "%sReducing loop %d to %s\n", OPT_DETAILS, _bblistBody.getListHead()->getData()->getNumber(),
                                          P->getTitle()) && !transformer(this))
       {
-      if (trace()) traceMsg(comp(), "computeTopologicalEmbedding: IL Transformer failed. (step 4)\n\n");
+      dumpOptDetails(comp(), "computeTopologicalEmbedding: IL Transformer failed. (step 4)\n\n");
       registerCandidates();
       _T->restoreListsDuplicator();
       return false;             // The transformation fails
@@ -7621,7 +7665,7 @@ TR_CISCTransformer::computeTopologicalEmbedding(TR_CISCGraph *P, TR_CISCGraph *T
 
    if (trace() || showMesssagesStdout())
       {
-      char *bcinfo = "";
+      char *bcinfo = (char *)"";
 #if SHOW_BCINDICES
       char tmpbuf[256];
       int32_t minIndex, maxIndex;
@@ -7633,7 +7677,7 @@ TR_CISCTransformer::computeTopologicalEmbedding(TR_CISCGraph *P, TR_CISCGraph *T
       bool inlined = getBCIndexMinMax(_candidateRegion, &minIndex, &maxIndex, &minLN, &maxLN, true);
       if (minIndex <= maxIndex)
          {
-         sprintf(tmpbuf, ", bcindex %" OMR_PRIu32 " - %" OMR_PRIu32 " linenumber %" OMR_PRIu32 " - %" OMR_PRIu32 "%s.", minIndex, maxIndex, minLN, maxLN, inlined ? " (inlined)" : "");
+         snprintf(tmpbuf, sizeof(tmpbuf), ", bcindex %" OMR_PRIu32 " - %" OMR_PRIu32 " linenumber %" OMR_PRIu32 " - %" OMR_PRIu32 "%s.", minIndex, maxIndex, minLN, maxLN, inlined ? " (inlined)" : "");
          bcinfo = tmpbuf;
          }
 #endif
@@ -7727,7 +7771,7 @@ TR_CISCTransformer::embeddingHasConflictingBranches()
          uint32_t op = pn->getOpcode();
          bool isIf =
             op == (uint32_t)TR_ifcmpall
-            || (op < (uint32_t)TR::NumIlOps && pn->getIlOpCode().isIf());
+            || (op < (uint32_t)TR::NumAllIlOps && pn->getIlOpCode().isIf());
 
          if (!isIf)
             continue;
@@ -7876,5 +7920,47 @@ TR_CISCTransformer::restoreBitsKeepAliveCalls()
       if (trace())
          traceMsg(comp(), "\t\tInserting KeepAlive call found in block %d [%p] @ Node: %p\n",block->getNumber(), block, tt->getNode());
       prev->insertAfter(tt);
+      }
+   }
+
+void
+TR_CISCTransformer::countFail(const char *fmt, ...)
+   {
+   _countFailBuf.clear();
+
+   va_list args;
+   va_start(args, fmt);
+   _countFailBuf.vappendf(fmt, args);
+   va_end(args);
+
+   // This isn't the best trace message, but it signals that something happened
+   // in the log even when the debug counters aren't enabled, and it avoids
+   // making call sites too cumbersome.
+   if (trace())
+      traceMsg(comp(), "failed: %s\n", _countFailBuf.text());
+
+   TR::DebugCounter::incStaticDebugCounter(
+      comp(),
+      TR::DebugCounter::debugCounterName(
+         comp(),
+         "idiomRecognition.failed/%s/%s/(%s)/%s/loop=%d",
+         _countFailBuf.text(),
+         _P->getTitle(),
+         comp()->signature(),
+         comp()->getHotnessName(comp()->getMethodHotness()),
+         _bblistBody.getListHead()->getData()->getNumber()));
+   }
+
+void
+TR_CISCTransformer::countUnhandledOpcode(const char *where, uint32_t opcode)
+   {
+   if (opcode < TR::NumAllIlOps)
+      {
+      const char *name = TR::ILOpCode((TR::ILOpCodes)opcode).getName();
+      countFail("%s/unhandledOpcode/%s", where, name);
+      }
+   else
+      {
+      countFail("%s/unhandledOpcode/%u", where, opcode);
       }
    }

@@ -1,6 +1,6 @@
 /*[INCLUDE-IF Sidecar18-SE]*/
-/*******************************************************************************
- * Copyright (c) 2004, 2020 IBM Corp. and others
+/*
+ * Copyright IBM Corp. and others 2004
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,10 +16,10 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
 package com.ibm.jvm.j9.dump.indexsupport;
 
 import org.xml.sax.Attributes;
@@ -39,13 +39,13 @@ import com.ibm.dtfj.image.j9.ImageProcess;
  * Module_base_address=96C58000 Symbol=Java_VMBench_GPTests_GPTest_gpWrite
  * Symbol_address=96C5879E
  * &lt;/gpf&gt;
- * 
+ *
  * @author jmdisher
  */
 public class NodeGPF extends NodeAbstract
 {
 	private ImageProcess _process;
-	
+
 	public NodeGPF(ImageProcess process, Attributes attributes)
 	{
 		long faultingNativeID = _longFromString(attributes.getValue("nativeFailingThread"));
@@ -57,36 +57,31 @@ public class NodeGPF extends NodeAbstract
 	{
 		int signalNumber = (int)_longByResolvingRawKey(string, "Signal_Number");
 		if (0 == signalNumber) {
-			// This is not great but there are various occasions when the gpf node only contains 
+			// This is not great but there are various occasions when the gpf node only contains
 			// info on the generic signal.  To reduce the level of confusion we map the generic signal
 			// number to a 'normalised' number at this point.
 			signalNumber = resolveGenericSignal((int)_longByResolvingRawKey(string, "J9Generic_Signal"));
 		}
 		_process.setSignalNumber(signalNumber);
 	}
-	// These flag definitions came from j9port.h
+
+	// These ultimately came from omr/include_core/omrport.h (passed through
+	// runtime/oti/j9port.h). NodeGPF is for processing older core dump
+	// jextract XMLs, so although some of these constants changed with
+	// https://github.com/eclipse-omr/omr/pull/3921, the following should be fixed
+	// in time.
 	private final static int J9PORT_SIG_FLAG_SIGSEGV 	= 4;
 	private final static int J9PORT_SIG_FLAG_SIGBUS 	= 8;
 	private final static int J9PORT_SIG_FLAG_SIGILL 	= 16;
 	private final static int J9PORT_SIG_FLAG_SIGFPE 	= 32;
 	private final static int J9PORT_SIG_FLAG_SIGTRAP 	= 64;
-	//private final static int J9PORT_SIG_FLAG_SIGRESERVED7 = 0x80;
-	//private final static int J9PORT_SIG_FLAG_SIGRESERVED8 = 0x100;
-	//private final static int J9PORT_SIG_FLAG_SIGRESERVED9 = 0x200;
-	//private final static int J9PORT_SIG_FLAG_SIGALLSYNC 	= 124;
 	private final static int J9PORT_SIG_FLAG_SIGQUIT 	= 0x400;
 	private final static int J9PORT_SIG_FLAG_SIGABRT 	= 0x800;
 	private final static int J9PORT_SIG_FLAG_SIGTERM 	= 0x1000;
-	//private final static int J9PORT_SIG_FLAG_SIGRECONFIG 		= 0x2000;
-	//private final static int J9PORT_SIG_FLAG_SIGRESERVED14 	= 0x4000;
-	//private final static int J9PORT_SIG_FLAG_SIGRESERVED15 	= 0x8000;
-	//private final static int J9PORT_SIG_FLAG_SIGRESERVED16 	= 0x10000;
-	//private final static int J9PORT_SIG_FLAG_SIGRESERVED17 	= 0x20000;
-	//private final static int J9PORT_SIG_FLAG_SIGALLASYNC 		= 0x3C00;
 	private final static int J9PORT_SIG_FLAG_SIGFPE_DIV_BY_ZERO 	= 0x40020;
 	private final static int J9PORT_SIG_FLAG_SIGFPE_INT_DIV_BY_ZERO = 0x80020;
 	private final static int J9PORT_SIG_FLAG_SIGFPE_INT_OVERFLOW 	= 0x100020;
-	
+
 	private int resolveGenericSignal(int num) {
 		if ((num & J9PORT_SIG_FLAG_SIGQUIT) != 0) 	return 3;
 		if ((num & J9PORT_SIG_FLAG_SIGILL) != 0) 	return 4;

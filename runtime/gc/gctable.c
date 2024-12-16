@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "gc_internal.h"
@@ -33,6 +33,8 @@ J9MemoryManagerFunctions MemoryManagerFunctions = {
 	J9WriteBarrierBatch,
 	J9WriteBarrierPostClass,
 	J9WriteBarrierClassBatch,
+	preMountContinuation,
+	postUnmountContinuation,
 	allocateMemoryForSublistFragment,
 	j9gc_heap_free_memory,
 	j9gc_heap_total_memory,
@@ -80,6 +82,7 @@ J9MemoryManagerFunctions MemoryManagerFunctions = {
 	j9gc_concurrent_scavenger_enabled,
 	j9gc_software_read_barrier_enabled,
 	j9gc_hot_reference_field_required,
+	j9gc_off_heap_allocation_enabled,
 	j9gc_max_hot_field_list_length,
 #if defined(J9VM_GC_HEAP_CARD_TABLE)
 	j9gc_concurrent_getCardSize,
@@ -140,6 +143,7 @@ J9MemoryManagerFunctions MemoryManagerFunctions = {
 #endif /* !J9VM_ENV_DATA64 */
 	j9gc_objaccess_indexableStoreObject,
 	j9gc_objaccess_indexableStoreAddress,
+	j9gc_objaccess_indexableDataDisplacement,
 	j9gc_objaccess_mixedObjectReadI32,
 	j9gc_objaccess_mixedObjectReadU32,
 	j9gc_objaccess_mixedObjectReadI64,
@@ -228,14 +232,10 @@ J9MemoryManagerFunctions MemoryManagerFunctions = {
 	j9gc_createJavaLangString,
 	j9gc_createJavaLangStringWithUTFCache,
 	j9gc_internString,
-#if defined(J9VM_GC_FINALIZATION)
-	j9gc_runFinalizersOnExit,
-#endif /* J9VM_GC_FINALIZATION */
 	j9gc_objaccess_jniGetPrimitiveArrayCritical,
 	j9gc_objaccess_jniReleasePrimitiveArrayCritical,
 	j9gc_objaccess_jniGetStringCritical,
 	j9gc_objaccess_jniReleaseStringCritical,
-	j9gc_finalizer_completeFinalizersOnExit,
 	j9gc_get_CPU_times,
 	omrgc_walkLWNRLockTracePool,
 #if defined(J9VM_GC_OBJECT_ACCESS_BARRIER)
@@ -251,11 +251,21 @@ J9MemoryManagerFunctions MemoryManagerFunctions = {
 #endif /* !J9VM_ENV_DATA64 */
 #endif /* J9VM_GC_OBJECT_ACCESS_BARRIER */
 	j9gc_get_bytes_allocated_by_thread,
+	j9gc_get_cumulative_bytes_allocated_by_thread,
+	j9gc_get_cumulative_class_unloading_stats,
 	j9mm_iterate_all_ownable_synchronizer_objects,
+	j9mm_iterate_all_continuation_objects,
 	ownableSynchronizerObjectCreated,
+	continuationObjectCreated,
+	continuationObjectStarted,
+	continuationObjectFinished,
 	j9gc_notifyGCOfClassReplacement,
 	j9gc_get_jit_string_dedup_policy,
 	j9gc_stringHashFn,
 	j9gc_stringHashEqualFn,
-	j9gc_ensureLockedSynchronizersIntegrity
+	j9gc_ensureLockedSynchronizersIntegrity,
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+	j9gc_prepare_for_checkpoint,
+	j9gc_reinitialize_for_restore,
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
 };

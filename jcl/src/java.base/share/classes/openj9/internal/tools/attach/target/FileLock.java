@@ -1,6 +1,6 @@
-/*[INCLUDE-IF Sidecar18-SE]*/
-/*******************************************************************************
- * Copyright (c) 2010, 2021 IBM Corp. and others
+/*[INCLUDE-IF JAVA_SPEC_VERSION >= 8]*/
+/*
+ * Copyright IBM Corp. and others 2010
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,10 +16,10 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
 
 package openj9.internal.tools.attach.target;
 
@@ -61,48 +61,53 @@ public final class FileLock {
 	 * locks a file using the J9 port library functions.
 	 * @param blocking if true, the function waits until the it obtains the file lock or times out.
 	 * @param callSite caller info
+	 * @param useWatchdog use FileLockWatchdogTask or not
 	 * @return true is file lock obtained.
 	 * @throws IOException if the file is already locked.
 	 * @note locking and unlocking must be done by the same thread.
 	 */
-	public boolean lockFile(boolean blocking, String callSite) throws IOException {
-		String lockFileMsg = blocking ? "locking file ": "non-blocking locking file "; //$NON-NLS-1$//$NON-NLS-2$
+	public boolean lockFile(boolean blocking, String callSite, boolean useWatchdog) throws IOException {
+		String lockFileMsg = (blocking ? "locking file " : "non-blocking locking file ") //$NON-NLS-1$//$NON-NLS-2$
+				+ (useWatchdog ? "using watchdog" : "NOT using watchdog"); //$NON-NLS-1$//$NON-NLS-2$
 		IPC.logMessage(callSite + " : " + lockFileMsg, lockFilepath); //$NON-NLS-1$
-		
+
 		final int FILE_LOCK_TIMEOUT = 20 * 1000; /* time in milliseconds */
 		if (locked) {
 			/*[MSG "K0574", "file already locked"]*/
 			throw new IOException(com.ibm.oti.util.Msg.getString("K0574")); //$NON-NLS-1$
 		}
-		
+
 		/* lock will usually be uncontended, so don't start a watchdog unless necessary */
 		fileDescriptor = lockFileImpl(lockFilepath, fileMode, false);
 		locked = (0 <= fileDescriptor); /* negative values indicate error, non-negative values (including 0) are valid FDs */
-		
+
 		if (!locked && blocking) { /* try again, this time with a blocking lock and a timeout */
-			FileLockWatchdogTask wdog = new FileLockWatchdogTask();
-			IPC.logMessage("lock failed, trying blocking lock"); //$NON-NLS-1$
-			synchronized (shutdownSync) { /* shutdown is called from a different thread */
-				/*[PR Jazz 30075] inlined createFileLockWatchdogTimer*/
-				if (!terminated && (null == fileLockWatchdogTimer)) {
-					fileLockWatchdogTimer = new FilelockTimer("file lock watchdog"); //$NON-NLS-1$
-				}
-				if (null != fileLockWatchdogTimer) { /* check if the VM is shutting down */
-					/*
-					 * The file lock timeout is to recover from pathological conditions such as a hung process which is holding the file lock.
-					 * Under this condition, the process will break the lock.
-					 * This timeout affects only the operation of the attach API.  It may delay the start of the attach API (but will not affect
-					 * other aspects of the VM or application launch) or delay an attach attempt.  It will not delay the VM or attach API shutdown.
-					 */
-					IPC.logMessage("FileLock.lockFile() FILE_LOCK_TIMEOUT = " + FILE_LOCK_TIMEOUT, new Throwable("")); //$NON-NLS-1$ //$NON-NLS-2$
-					fileLockWatchdogTimer.schedule(wdog, FILE_LOCK_TIMEOUT);
-				}
-				else {
-					IPC.logMessage("FileLock.lockFile() returns false."); //$NON-NLS-1$
-					return false;
+			FileLockWatchdogTask wdog = null;
+			IPC.logMessage("lock failed, trying blocking lock, fileDescriptor = " + fileDescriptor); //$NON-NLS-1$
+			if (useWatchdog) {
+				wdog = new FileLockWatchdogTask();
+				synchronized (shutdownSync) { /* shutdown is called from a different thread */
+					/*[PR Jazz 30075] inlined createFileLockWatchdogTimer*/
+					if (!terminated && (null == fileLockWatchdogTimer)) {
+						fileLockWatchdogTimer = new FilelockTimer("file lock watchdog"); //$NON-NLS-1$
+					}
+					if (null != fileLockWatchdogTimer) { /* check if the VM is shutting down */
+						/*
+						 * The file lock timeout is to recover from pathological conditions such as a hung process which is holding the file lock.
+						 * Under this condition, the process will break the lock.
+						 * This timeout affects only the operation of the attach API.  It may delay the start of the attach API (but will not affect
+						 * other aspects of the VM or application launch) or delay an attach attempt.  It will not delay the VM or attach API shutdown.
+						 */
+						IPC.logMessage("FileLock.lockFile() FILE_LOCK_TIMEOUT = " + FILE_LOCK_TIMEOUT, new Throwable("")); //$NON-NLS-1$ //$NON-NLS-2$
+						fileLockWatchdogTimer.schedule(wdog, FILE_LOCK_TIMEOUT);
+					}
+					else {
+						IPC.logMessage("FileLock.lockFile() returns false."); //$NON-NLS-1$
+						return false;
+					}
 				}
 			}
-			
+
 			/*[PR 199171] native file locking is not interruptible from Java */
 			try {
 				IPC.logMessage("FileLock.lockFile() before RandomAccessFile creation"); //$NON-NLS-1$
@@ -113,32 +118,44 @@ public final class FileLock {
 				IPC.logMessage("FileLock.lockFile() blocking lock succeeded"); //$NON-NLS-1$
 				locked = true;
 			} catch (IOException e) {
-				locked = false;
-				IPC.logMessage("FileLock.lockFile() blocking lock failed with lockFilepath = " + lockFilepath); //$NON-NLS-1$
+				unlockFile("lockFile_IOException"); //$NON-NLS-1$
+				IPC.logMessage("FileLock.lockFile() blocking lock failed with lockFilepath = " + lockFilepath + ", exception message: " + e.getMessage()); //$NON-NLS-1$ //$NON-NLS-2$
 			}
-			synchronized (shutdownSync) { 
-				if (null != fileLockWatchdogTimer) { 
-					wdog.cancel();
+			if (useWatchdog) {
+				synchronized (shutdownSync) {
+					if (null != fileLockWatchdogTimer) {
+						wdog.cancel();
+					}
 				}
 			}
 		} else {
-			IPC.logMessage("FileLock.lockFile() locking file succeeded, locked = " + locked); //$NON-NLS-1$
+			IPC.logMessage("FileLock.lockFile() locking file succeeded, locked = " + locked + ", fileDescriptor = " + fileDescriptor); //$NON-NLS-1$ //$NON-NLS-2$
 		}
 
 		return locked;
 	}
-	
+
 	/**
 	 * Release the lock on a file.
+	 *
 	 * @param callSite caller info
 	 */
 	public void unlockFile(String callSite) {
-		IPC.logMessage(callSite + "_unlockFile() ", lockFilepath);  //$NON-NLS-1$
+		IPC.logMessage(callSite + "_unlockFile() ", lockFilepath); //$NON-NLS-1$
+		// unlockFileImpl(fileDescriptor) is placed before FileLock.release()/RandomAccessFile.close() to avoid the chance
+		// that the portlibrary api might affect OpenJDK release/close.
+		// There is only one lock/unlock path, either portlibrary or OpenJDK methods, so technically order is not important.
+		if (locked && (fileDescriptor >= 0)) {
+			IPC.logMessage(callSite + "_unlockFile : unlockFileImpl fileDescriptor " + fileDescriptor); //$NON-NLS-1$
+			unlockFileImpl(fileDescriptor);
+			fileDescriptor = -1;
+		}
 		java.nio.channels.FileLock lockObjectCopy = lockObject;
 		if (null != lockObjectCopy) {
-			IPC.logMessage("FileLock.unlockFile closing lockObjectCopy ", lockFilepath);  //$NON-NLS-1$
+			IPC.logMessage("FileLock.unlockFile closing lockObjectCopy ", lockFilepath); //$NON-NLS-1$
 			try {
 				lockObjectCopy.release();
+				lockObject = null;
 			} catch (IOException e) {
 				IPC.logMessage("IOException at lockObjectCopy.release() with lockFilepath = " + lockFilepath, e); //$NON-NLS-1$
 			}
@@ -146,16 +163,13 @@ public final class FileLock {
 
 		RandomAccessFile lockFileRAFCopy = lockFileRAF;
 		if (lockFileRAFCopy != null) {
-			IPC.logMessage("FileLock.unlockFile closing lockFileRAFCopy ", lockFilepath);  //$NON-NLS-1$
+			IPC.logMessage("FileLock.unlockFile closing lockFileRAFCopy ", lockFilepath); //$NON-NLS-1$
 			try {
 				lockFileRAFCopy.close();
+				lockFileRAF = null;
 			} catch (IOException e) {
 				IPC.logMessage("IOException at lockFileRAFCopy.close() with lockFilepath = " + lockFilepath, e); //$NON-NLS-1$
 			}
-		}
-		if (locked && (fileDescriptor >= 0)) {
-			IPC.logMessage(callSite + "_unlockFile : unlockFileImpl fileDescriptor " + fileDescriptor); //$NON-NLS-1$
-			unlockFileImpl(fileDescriptor);
 		}
 		locked = false;
 	}
@@ -179,7 +193,7 @@ public final class FileLock {
 	private static native long lockFileImpl(String filePath, int mode, boolean blocking);
 
 	private static native int unlockFileImpl(long fileDesc);
-	
+
 	final class FileLockWatchdogTask extends TimerTask {
 		@Override
 		/**
@@ -198,7 +212,7 @@ public final class FileLock {
 				/* retry once.  If it fails more than once, it's a systemic problem */
 			}
 			/* unlocks the file if this process, and closes the file descriptor to break the wait */
-			unlockFile("FileLock.FileLockWatchdogTask"); //$NON-NLS-1$ 
+			unlockFile("FileLock.FileLockWatchdogTask"); //$NON-NLS-1$
 			/* delete the file if it's there */
 			if (!theFile.delete()) {
 				IPC.logMessage("waitAndCheckLock could not delete ", theFile.getAbsolutePath()); //$NON-NLS-1$

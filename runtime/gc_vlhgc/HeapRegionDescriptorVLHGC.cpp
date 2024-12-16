@@ -1,6 +1,6 @@
 
 /*******************************************************************************
- * Copyright (c) 1991, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,9 +16,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "j9.h"
@@ -46,6 +46,9 @@ MM_HeapRegionDescriptorVLHGC::MM_HeapRegionDescriptorVLHGC(MM_EnvironmentVLHGC *
 	,_projectedLiveBytesPreviousPGC(0)
 	,_projectedLiveBytesDeviation(0)
 	,_compactDestinationQueueNext(NULL)
+#if defined(J9VM_GC_SPARSE_HEAP_ALLOCATION)
+	,_sparseHeapAllocation(false)
+#endif /* defined(J9VM_GC_SPARSE_HEAP_ALLOCATION) */
 	,_defragmentationTarget(false)
 	,_extensions(MM_GCExtensions::getExtensions(env))
 	,_allocationAge(0)
@@ -108,6 +111,14 @@ MM_HeapRegionDescriptorVLHGC::initialize(MM_EnvironmentBase *env, MM_HeapRegionM
 	}
 	extensions->setOwnableSynchronizerObjectLists(&_ownableSynchronizerObjectList);
 	
+	/* add our continuation list to the global list (no locking - assumes single threaded initialization) */
+	_continuationObjectList.setNextList(extensions->getContinuationObjectLists());
+	_continuationObjectList.setPreviousList(NULL);
+	if (NULL != extensions->getContinuationObjectLists()) {
+		extensions->getContinuationObjectLists()->setPreviousList(&_continuationObjectList);
+	}
+	extensions->setContinuationObjectLists(&_continuationObjectList);
+
 	return true;
 }
 
@@ -130,6 +141,7 @@ MM_HeapRegionDescriptorVLHGC::tearDown(MM_EnvironmentBase *env)
 	_rememberedSetCardList.tearDown(extensions);
 	extensions->unfinalizedObjectLists = NULL;
 	extensions->setOwnableSynchronizerObjectLists(NULL);
+	extensions->setContinuationObjectLists(NULL);
 
 	MM_HeapRegionDescriptor::tearDown(env);
 }
@@ -153,12 +165,12 @@ MM_HeapRegionDescriptorVLHGC::allocateSupportingResources(MM_EnvironmentBase *en
 	return MM_GCExtensions::getExtensions(env)->interRegionRememberedSet->allocateRegionBuffers((MM_EnvironmentVLHGC *)env, this);
 }
 
-UDATA
+uintptr_t
 MM_HeapRegionDescriptorVLHGC::getProjectedReclaimableBytes() 
 {
-	UDATA regionSize = _extensions->regionSize;
-	UDATA consumedBytes = regionSize - getMemoryPool()->getFreeMemoryAndDarkMatterBytes();
-	UDATA projectedReclaimableBytes = consumedBytes - _projectedLiveBytes;
+	uintptr_t regionSize = _extensions->regionSize;
+	uintptr_t consumedBytes = regionSize - getMemoryPool()->getFreeMemoryAndDarkMatterBytes();
+	uintptr_t projectedReclaimableBytes = consumedBytes - _projectedLiveBytes;
 	return projectedReclaimableBytes;
 }
 
@@ -166,7 +178,7 @@ void
 MM_HeapRegionDescriptorVLHGC::resetAge(MM_EnvironmentVLHGC *env, U_64 allocationAge)
 {
 	MM_GCExtensions *extensions = MM_GCExtensions::getExtensions(env);
-	UDATA logicalAge = 0;
+	uintptr_t logicalAge = 0;
 	if (extensions->tarokAllocationAgeEnabled) {
 		logicalAge = MM_CompactGroupManager::calculateLogicalAgeForRegion(env, allocationAge);
 	}

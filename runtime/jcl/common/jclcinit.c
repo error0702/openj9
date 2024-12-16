@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1998, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 1998
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include <string.h>
@@ -593,6 +593,10 @@ initializeRequiredClasses(J9VMThread *vmThread, char* dllName)
 #if JAVA_SPEC_VERSION >= 18
 			J9VMCONSTANTPOOL_JAVALANGINVOKEMETHODHANDLENATIVES,
 #endif /* JAVA_SPEC_VERSION >= 18 */
+#if JAVA_SPEC_VERSION >= 19
+			J9VMCONSTANTPOOL_JAVALANGTHREADFIELDHOLDER,
+			J9VMCONSTANTPOOL_JAVALANGBASEVIRTUALTHREAD,
+#endif /* JAVA_SPEC_VERSION >= 19 */
 	};
 
 	/* Determine java/lang/String.value signature before any required class is initialized */
@@ -640,6 +644,22 @@ initializeRequiredClasses(J9VMThread *vmThread, char* dllName)
 	}
 #endif /* defined(J9VM_OPT_OPENJDK_METHODHANDLE) */
 
+#if JAVA_SPEC_VERSION >= 19
+	/* TLS hidden field points to an array holding jvmti thread local data. */
+	if (0 != vmFuncs->addHiddenInstanceField(vm, "java/lang/Thread", "tls", "J", &vm->tlsOffset)) {
+		return 1;
+	}
+
+	/* Counter to track if the virtual thread is being inspected by JVMTI. */
+	if (0 != vmFuncs->addHiddenInstanceField(vm, "java/lang/VirtualThread", "inspectorCount", "J", &vm->virtualThreadInspectorCountOffset)) {
+		return 1;
+	}
+
+	/* Stores the carrier J9VMThread if thread is in transition, and bit flags for suspend state in the last 8 bits. */
+	if (0 != vmFuncs->addHiddenInstanceField(vm, "java/lang/Thread", "internalSuspendState", "J", &vm->internalSuspendStateOffset)) {
+		return 1;
+	}
+#endif /* JAVA_SPEC_VERSION >= 19 */
 
 	vmThread->privateFlags |= J9_PRIVATE_FLAGS_REPORT_ERROR_LOADING_CLASS;
 
@@ -705,8 +725,10 @@ initializeRequiredClasses(J9VMThread *vmThread, char* dllName)
 	 */
 	vm->extendedRuntimeFlags |= J9_EXTENDED_RUNTIME_CLASS_OBJECT_ASSIGNED;
 
-	if (vmFuncs->internalCreateBaseTypePrimitiveAndArrayClasses(vmThread) != 0) {
-		return 1;
+	if (!IS_RESTORE_RUN(vm)) {
+		if (0 != vmFuncs->internalCreateBaseTypePrimitiveAndArrayClasses(vmThread)) {
+			return 1;
+		}
 	}
 
 	/* Initialize early since sendInitialize() uses this */ 

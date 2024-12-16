@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2001
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #if 0
@@ -121,6 +121,7 @@ typedef enum gc_policy{
 #endif /* defined(AIXPPC) */
 
 #if defined(J9ZOS390)
+#include <dlfcn.h>
 #include <dll.h>
 #include "atoe.h"
 #include <stdlib.h>
@@ -908,14 +909,16 @@ JNI_GetDefaultJavaVMInitArgs(void *vm_args)
 	iconv_init();
 #endif
 
-	if(globalInitArgs) {
+	if (NULL != globalInitArgs) {
 		return globalInitArgs(vm_args);
 	} else {
 		jint jniVersion = ((JavaVMInitArgs *)vm_args)->version;
 
 		switch (jniVersion) {
 		case JNI_VERSION_1_1:
+#if defined(OPENJ9_BUILD)
 			((JDK1_1InitArgs *)vm_args)->javaStackSize = J9_OS_STACK_SIZE;
+#endif /* defined(OPENJ9_BUILD) */
 			break;
 		case JNI_VERSION_1_2:
 		case JNI_VERSION_1_4:
@@ -927,7 +930,21 @@ JNI_GetDefaultJavaVMInitArgs(void *vm_args)
 #if JAVA_SPEC_VERSION >= 10
 		case JNI_VERSION_10:
 #endif /* JAVA_SPEC_VERSION >= 10 */
+#if JAVA_SPEC_VERSION >= 19
+		case JNI_VERSION_19:
+#endif /* JAVA_SPEC_VERSION >= 19 */
+#if JAVA_SPEC_VERSION >= 20
+		case JNI_VERSION_20:
+#endif /* JAVA_SPEC_VERSION >= 20 */
+#if JAVA_SPEC_VERSION >= 21
+		case JNI_VERSION_21:
+#endif /* JAVA_SPEC_VERSION >= 21 */
+#if JAVA_SPEC_VERSION >= 24
+		case JNI_VERSION_24:
+#endif /* JAVA_SPEC_VERSION >= 24 */
 			return JNI_OK;
+		default:
+			break;
 		}
 
 		return JNI_EVERSION;

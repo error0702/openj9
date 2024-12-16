@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "omr.h"
@@ -50,10 +50,10 @@
  * @ingroup GC_Metronome methodGroup
  */
 MM_Scheduler*
-MM_Scheduler::newInstance(MM_EnvironmentBase *env, omrsig_handler_fn handler, void* handler_arg, uintptr_t defaultOSStackSize)
+MM_Scheduler::newInstance(MM_EnvironmentBase *env, omrsig_handler_fn handler, void *handler_arg, uintptr_t defaultOSStackSize)
 {
 	MM_Scheduler *scheduler = (MM_Scheduler *)env->getForge()->allocate(sizeof(MM_Scheduler), MM_AllocationCategory::FIXED, OMR_GET_CALLSITE());
-	if (scheduler) {
+	if (NULL != scheduler) {
 		new(scheduler) MM_Scheduler(env, handler, handler_arg, defaultOSStackSize);
 		if (!scheduler->initialize(env)) {
 			scheduler->kill(env);
@@ -82,21 +82,26 @@ MM_Scheduler::kill(MM_EnvironmentBase *env)
 void
 MM_Scheduler::tearDown(MM_EnvironmentBase *env)
 {
-	if (_mainThreadMonitor) {
+	if (NULL != _mainThreadMonitor) {
 		omrthread_monitor_destroy(_mainThreadMonitor);
+		_mainThreadMonitor = NULL;
 	}
+
 	if (NULL != _threadResumedTable) {
 		env->getForge()->free(_threadResumedTable);
 		_threadResumedTable = NULL;
 	}
+
 	if (NULL != _utilTracker) {
 		_utilTracker->kill(env);
+		_utilTracker = NULL;
 	}
+
 	MM_ParallelDispatcher::kill(env);
 }
 
 uintptr_t
-MM_Scheduler::getParameter(uintptr_t which, char *keyBuffer, I_32 keyBufferSize, char *valueBuffer, I_32 valueBufferSize)
+MM_Scheduler::getParameter(uintptr_t which, char *keyBuffer, int32_t keyBufferSize, char *valueBuffer, int32_t valueBufferSize)
 {
 	OMRPORT_ACCESS_FROM_OMRVM(_vm);
 	switch (which) {
@@ -106,8 +111,8 @@ MM_Scheduler::getParameter(uintptr_t which, char *keyBuffer, I_32 keyBufferSize,
 		case 1:
 		{
 			omrstr_printf(keyBuffer, keyBufferSize, "Scheduling Method");
-			I_32 len = (I_32)omrstr_printf(valueBuffer, valueBufferSize, "TIME_BASED with ");
-			while (_alarmThread == NULL || _alarmThread->_alarm == NULL) {
+			int32_t len = (int32_t)omrstr_printf(valueBuffer, valueBufferSize, "TIME_BASED with ");
+			while ((NULL == _alarmThread) || (NULL == _alarmThread->_alarm)) {
 				/* Wait for GC to finish initializing */
 				omrthread_sleep(100);
 			}
@@ -116,7 +121,7 @@ MM_Scheduler::getParameter(uintptr_t which, char *keyBuffer, I_32 keyBufferSize,
 		}
 		case 2:
 			omrstr_printf(keyBuffer, keyBufferSize, "Time Window");
-			omrstr_printf(valueBuffer, valueBufferSize, "%6.2f ms", window * 1.0e3);
+			omrstr_printf(valueBuffer, valueBufferSize, "%6.2f ms", _window * 1.0e3);
 			return 1;
 		case 3:
 			omrstr_printf(keyBuffer, keyBufferSize, "Target Utilization");
@@ -124,7 +129,7 @@ MM_Scheduler::getParameter(uintptr_t which, char *keyBuffer, I_32 keyBufferSize,
 			return 1;
 		case 4:
 			omrstr_printf(keyBuffer, keyBufferSize, "Beat Size");
-			omrstr_printf(valueBuffer, valueBufferSize, "%4.2f ms", beat * 1.0e3);
+			omrstr_printf(valueBuffer, valueBufferSize, "%4.2f ms", _beat * 1.0e3);
 			return 1;
 		case 5:
 			omrstr_printf(keyBuffer, keyBufferSize, "Heap Size");
@@ -155,11 +160,15 @@ MM_Scheduler::showParameters(MM_EnvironmentBase *env)
 {
 	OMRPORT_ACCESS_FROM_ENVIRONMENT(env);
 	omrtty_printf("****************************************************************************\n");
-	for (uintptr_t which=0; ; which++) {
+	for (uintptr_t which = 0; ; which++) {
 		char keyBuffer[256], valBuffer[256];
 		uintptr_t rc = getParameter(which, keyBuffer, sizeof(keyBuffer), valBuffer, sizeof(valBuffer));
-		if (rc == 0) { break; }
-		if (rc == 1) { omrtty_printf("%s: %s\n", keyBuffer, valBuffer); }
+		if (rc == 0) {
+			break;
+		}
+		if (rc == 1) {
+			omrtty_printf("%s: %s\n", keyBuffer, valBuffer);
+		}
 	}
 	omrtty_printf("****************************************************************************\n");
 }
@@ -184,12 +193,53 @@ MM_Scheduler::initialize(MM_EnvironmentBase *env)
 		return false;
 	}
 
+	if (_extensions->gcTrigger == 0) {
+		_extensions->gcTrigger = (_extensions->memoryMax / 2);
+		_extensions->gcInitialTrigger = (_extensions->memoryMax / 2);
+	}
+
+	_extensions->distanceToYieldTimeCheck = 0;
+
+	/* Maintain window-beat ratio of 20x, unless window specified explicitly */
+	if (METRONOME_DEFAULT_TIME_WINDOW_MICRO == _extensions->timeWindowMicro) {
+		_extensions->timeWindowMicro = 20 * _extensions->beatMicro;
+	}
+
+	/* Currently all supported SRT platforms - AIX and Linux, can only use HRT for alarm thread implementation.
+	 * The default value for HRT period is 1/3 of the default quanta: 1 msec for HRT period and 3 msec quanta,
+	 * we will attempt to adjust the HRT period to 1/3 of the specified quanta.
+	 */
+	uintptr_t hrtPeriodMicro = _extensions->beatMicro / 3;
+	if ((hrtPeriodMicro < METRONOME_DEFAULT_HRT_PERIOD_MICRO) && (METRONOME_DEFAULT_HRT_PERIOD_MICRO < _extensions->beatMicro)) {
+		/* If the adjusted value is too small for the hires clock resolution, we will use the default HRT period provided that
+		 * the default period is smaller than the quanta time specified.
+		 * Otherwise we fail to initialize the alarm thread with an error message.
+		 */
+		hrtPeriodMicro = METRONOME_DEFAULT_HRT_PERIOD_MICRO;
+	}
+	Assert_MM_true(0 != hrtPeriodMicro);
+	_extensions->hrtPeriodMicro = hrtPeriodMicro;
+
+	/* On Windows SRT we still use interrupt-based alarm. Set the interrupt period the same as hires timer period.
+	 * We will fail to init the alarm if this is too small a resolution for Windows.
+	 */
+	_extensions->itPeriodMicro = _extensions->hrtPeriodMicro;
+
+	/* if the pause time user specified is larger than the default value, calculate if there is opportunity
+	 * for the GC to do time checking less often inside condYieldFromGC.
+	 */
+	if (METRONOME_DEFAULT_BEAT_MICRO < _extensions->beatMicro) {
+		uintptr_t intervalToSkipYieldCheckMicro = _extensions->beatMicro - METRONOME_DEFAULT_BEAT_MICRO;
+		uintptr_t maxInterYieldTimeMicro = INTER_YIELD_MAX_NS / 1000;
+		_extensions->distanceToYieldTimeCheck = (uint32_t)(intervalToSkipYieldCheckMicro / maxInterYieldTimeMicro);
+	}
+
 	/* Show GC parameters here before we enter real execution */
-	window = _extensions->timeWindowMicro / 1e6;
-	beat = _extensions->beatMicro / 1e6;
-	beatNanos = (U_64) (_extensions->beatMicro * 1e3);
+	_window = _extensions->timeWindowMicro / 1e6;
+	_beat = _extensions->beatMicro / 1e6;
+	_beatNanos = (uint64_t) (_extensions->beatMicro * 1e3);
 	_staticTargetUtilization = _extensions->targetUtilizationPercentage / 1e2;
-	_utilTracker = MM_UtilizationTracker::newInstance(env, window, beatNanos, _staticTargetUtilization);
+	_utilTracker = MM_UtilizationTracker::newInstance(env, _window, _beatNanos, _staticTargetUtilization);
 	if (NULL == _utilTracker) {
 		goto error_no_memory;
 	}
@@ -286,13 +336,13 @@ MM_Scheduler::continueGC(MM_EnvironmentRealtime *env, GCReason reason, uintptr_t
 	 * Make sure _completeCurrentGCSynchronously and _mode are atomically changed.
 	 */
 	omrthread_monitor_enter(_mainThreadMonitor);
-	switch(reason) {
+	switch (reason) {
 		case OUT_OF_MEMORY_TRIGGER:
 			/* For now we assume that OUT_OF_MEMORY trigger means perform
 		 	* a synchronous GC, but maybe we want a mode where we try one
 		 	* more time slice before degrading to synchronous.
 		 	*/
-		 	if(!_extensions->synchronousGCOnOOM) {
+			if (!_extensions->synchronousGCOnOOM) {
 		 		break;
 		 	}
 		 	/* fall through */
@@ -306,9 +356,9 @@ MM_Scheduler::continueGC(MM_EnvironmentRealtime *env, GCReason reason, uintptr_t
 
 			break;
 		default: /* WORK_TRIGGER or TIME_TRIGGER */ {
-			if(_threadWaitingOnMainThreadMonitor != NULL) {
+			if (NULL != _threadWaitingOnMainThreadMonitor) {
 				/* Check your timer again incase another thread beat you to checking for shouldMutatorDoubleBeat */
-				if (env->getTimer()->hasTimeElapsed(getStartTimeOfCurrentMutatorSlice(), beatNanos)) {
+				if (env->getTimer()->hasTimeElapsed(getStartTimeOfCurrentMutatorSlice(), _beatNanos)) {
 					if (shouldMutatorDoubleBeat(_threadWaitingOnMainThreadMonitor, env->getTimer())) {
 						/*
 						 * Since the mutator should double beat signal the mutator threads to update their
@@ -326,7 +376,7 @@ MM_Scheduler::continueGC(MM_EnvironmentRealtime *env, GCReason reason, uintptr_t
 			break;
 		}
 	}
-	if(_threadWaitingOnMainThreadMonitor == NULL) {
+	if (NULL == _threadWaitingOnMainThreadMonitor) {
 		/*
  		* The gc thread(s) are already awake and collecting (otherwise, the main
  		* gc thread would be waiting on the monitor).
@@ -382,7 +432,7 @@ exit:
 uintptr_t
 MM_Scheduler::getTaskThreadCount(MM_EnvironmentBase *env)
 {
-	if (env->_currentTask == NULL) {
+	if (NULL == env->_currentTask) {
 		return 1;
 	}
 	return env->_currentTask->getThreadCount();
@@ -395,7 +445,7 @@ MM_Scheduler::waitForMutatorsToStop(MM_EnvironmentRealtime *env)
 	OMRPORT_ACCESS_FROM_ENVIRONMENT(env);
 
 	/* we need to record how long it took to wait for the mutators to stop */
-	U_64 exclusiveAccessTime = omrtime_hires_clock();
+	uint64_t exclusiveAccessTime = omrtime_hires_clock();
 
 	/* The time before acquiring exclusive VM access is charged to the mutator but the time
 	 * during the acquisition is conservatively charged entirely to the GC. */
@@ -410,7 +460,7 @@ MM_Scheduler::waitForMutatorsToStop(MM_EnvironmentRealtime *env)
 	 * TODO: This approach is just to fix some timing holes in shutdown. Consider removing this
 	 * "if" statement and fix alarm thread not to die before requesting exclusive access for us.
 	 */
-	if (_mainThreadMustShutDown && _mode != WAKING_GC) {
+	if (_mainThreadMustShutDown && (WAKING_GC != _mode)) {
 		uintptr_t gcPriority = 0;
 		_gc->getRealtimeDelegate()->requestExclusiveVMAccess(env, TRUE /* block */, &gcPriority);
 		_gc->setGCThreadPriority(env->getOmrVMThread(), gcPriority);
@@ -455,15 +505,15 @@ MM_Scheduler::shouldGCDoubleBeat(MM_EnvironmentRealtime *env)
 	if (targetUtilization <= 0.0) {
 		return true;
 	}
-	I_32 maximumAllowedConsecutiveBeats = (I_32) (1.0 / targetUtilization);
+	int32_t maximumAllowedConsecutiveBeats = (int32_t) (1.0 / targetUtilization);
 	if (_currentConsecutiveBeats >= maximumAllowedConsecutiveBeats) {
 		return false;
 	}
 	/* Note that shouldGCDoubleBeat is only called by the main thread, this means we
 	 * can call addTimeSlice without checking for isMainThread() */
 	_utilTracker->addTimeSlice(env, env->getTimer(), false);
-	double excessTime = (_utilTracker->getCurrentUtil() - targetUtilization) * window;
-	double excessBeats = excessTime / beat;
+	double excessTime = (_utilTracker->getCurrentUtil() - targetUtilization) * _window;
+	double excessBeats = excessTime / _beat;
 	return (excessBeats >= 2.0);
 }
 
@@ -475,8 +525,8 @@ MM_Scheduler::shouldMutatorDoubleBeat(MM_EnvironmentRealtime *env, MM_Timer *tim
 	/* The call to currentUtil will modify the timeSlice array, so calls to shouldMutatorDoubleBeat
 	 * must be protected by a mutex (which is indeed currently the case) */
 	double curUtil = _utilTracker->getCurrentUtil();
-	double excessTime = (curUtil - _utilTracker->getTargetUtilization()) * window;
-	double excessBeats = excessTime / beat;
+	double excessTime = (curUtil - _utilTracker->getTargetUtilization()) * _window;
+	double excessBeats = excessTime / _beat;
 	return (excessBeats <= 1.0);
 }
 
@@ -485,10 +535,10 @@ MM_Scheduler::reportStartGCIncrement(MM_EnvironmentRealtime *env)
 {
 	OMRPORT_ACCESS_FROM_ENVIRONMENT(env);
 
-	if(_completeCurrentGCSynchronously) {
+	if (_completeCurrentGCSynchronously) {
 		_completeCurrentGCSynchronouslyMainThreadCopy = true;
-		U_64 exclusiveAccessTimeMicros = 0;
-		U_64 meanExclusiveAccessIdleTimeMicros = 0;
+		uint64_t exclusiveAccessTimeMicros = 0;
+		uint64_t meanExclusiveAccessIdleTimeMicros = 0;
 
 		Trc_MM_SystemGCStart(env->getLanguageVMThread(),
 			_extensions->heap->getApproximateActiveFreeMemorySize(MEMORY_TYPE_NEW),
@@ -502,10 +552,10 @@ MM_Scheduler::reportStartGCIncrement(MM_EnvironmentRealtime *env)
 		exclusiveAccessTimeMicros = omrtime_hires_delta(0, env->getExclusiveAccessTime(), OMRPORT_TIME_DELTA_IN_MICROSECONDS);
 		meanExclusiveAccessIdleTimeMicros = omrtime_hires_delta(0, env->getMeanExclusiveAccessIdleTime(), OMRPORT_TIME_DELTA_IN_MICROSECONDS);
 		Trc_MM_ExclusiveAccess(env->getLanguageVMThread(),
-			(U_32)(exclusiveAccessTimeMicros / 1000),
-			(U_32)(exclusiveAccessTimeMicros % 1000),
-			(U_32)(meanExclusiveAccessIdleTimeMicros / 1000),
-			(U_32)(meanExclusiveAccessIdleTimeMicros % 1000),
+			(uint32_t)(exclusiveAccessTimeMicros / 1000),
+			(uint32_t)(exclusiveAccessTimeMicros % 1000),
+			(uint32_t)(meanExclusiveAccessIdleTimeMicros / 1000),
+			(uint32_t)(meanExclusiveAccessIdleTimeMicros % 1000),
 			env->getExclusiveAccessHaltedThreads(),
 			env->getLastExclusiveAccessResponder(),
 			env->exclusiveAccessBeatenByOtherThread());
@@ -596,7 +646,7 @@ MM_Scheduler::restartMutatorsAndWait(MM_EnvironmentRealtime *env)
 }
 
 bool
-MM_Scheduler::shouldGCYield(MM_EnvironmentRealtime *env, U_64 timeSlack)
+MM_Scheduler::shouldGCYield(MM_EnvironmentRealtime *env, uint64_t timeSlack)
 {
 	return internalShouldGCYield(env, timeSlack);
 }
@@ -611,14 +661,14 @@ MM_Scheduler::shouldGCYield(MM_EnvironmentRealtime *env, U_64 timeSlack)
  * @return true if the GC thread should yield, false otherwise
  */
 MMINLINE bool
-MM_Scheduler::internalShouldGCYield(MM_EnvironmentRealtime *env, U_64 timeSlack)
+MM_Scheduler::internalShouldGCYield(MM_EnvironmentRealtime *env, uint64_t timeSlack)
 {
 	if (_completeCurrentGCSynchronouslyMainThreadCopy) {
 		/* If we have degraded to a synchronous GC, don't yield until finished */
 		return false;
 	}
 	/* Be harmless when called indirectly on mutator thread */
-	if (env->getThreadType() == MUTATOR_THREAD) {
+	if (MUTATOR_THREAD == env->getThreadType()) {
 		return false;
 	}
 	/* The GC does not have to yield when ConcurrentTracing or ConcurrentSweeping is
@@ -638,9 +688,9 @@ MM_Scheduler::internalShouldGCYield(MM_EnvironmentRealtime *env, U_64 timeSlack)
 		return false;
 	}
 
-	I_64 nanosLeft = _utilTracker->getNanosLeft(env, getStartTimeOfCurrentGCSlice());
+	int64_t nanosLeft = _utilTracker->getNanosLeft(env, getStartTimeOfCurrentGCSlice());
 	if (nanosLeft > 0) {
-		if ((U_64)nanosLeft > timeSlack) {
+		if ((uint64_t)nanosLeft > timeSlack) {
 			return false;
 		}
 	}
@@ -649,7 +699,7 @@ MM_Scheduler::internalShouldGCYield(MM_EnvironmentRealtime *env, U_64 timeSlack)
 }
 
 bool
-MM_Scheduler::condYieldFromGCWrapper(MM_EnvironmentBase *env, U_64 timeSlack)
+MM_Scheduler::condYieldFromGCWrapper(MM_EnvironmentBase *env, uint64_t timeSlack)
 {
 	return condYieldFromGC(env, timeSlack);
 }
@@ -665,7 +715,7 @@ MM_Scheduler::condYieldFromGCWrapper(MM_EnvironmentBase *env, U_64 timeSlack)
  * @return true if yielding actually occurred, false otherwise
  */
 bool
-MM_Scheduler::condYieldFromGC(MM_EnvironmentBase *envBase, U_64 timeSlack)
+MM_Scheduler::condYieldFromGC(MM_EnvironmentBase *envBase, uint64_t timeSlack)
 {
 	MM_EnvironmentRealtime *env = MM_EnvironmentRealtime::getEnvironment(envBase);
 
@@ -727,14 +777,17 @@ MM_Scheduler::prepareThreadsForTask(MM_EnvironmentBase *env, MM_Task *task, uint
 	omrthread_monitor_enter(_workerThreadMutex);
 	_workerThreadsReservedForGC = true;
 
+	uintptr_t activeThreads = recomputeActiveThreadCountForTask(env, task, threadCount);
+
+	task->mainSetup(env);
 	task->setSynchronizeMutex(_synchronizeMutex);
 
-	for (uintptr_t index=0; index < threadCount; index++) {
+	for (uintptr_t index = 0; index < activeThreads; index++) {
 		_statusTable[index] = worker_status_reserved;
 		_taskTable[index] = task;
 	}
 
-	wakeUpThreads(threadCount);
+	wakeUpThreads(activeThreads);
 	omrthread_monitor_exit(_workerThreadMutex);
 
 	pushYieldCollaborator(((MM_IncrementalParallelTask *)task)->getYieldCollaborator());
@@ -775,7 +828,7 @@ MM_Scheduler::startUpThreads()
 
 	/* Now that the GC threads are started, it is safe to start the alarm thread */
 	_alarmThread = MM_MetronomeAlarmThread::newInstance(&env);
-	if (_alarmThread == NULL) {
+	if (NULL == _alarmThread) {
 		omrtty_printf("Unable to initialize alarm thread for time-based GC scheduling\n");
 		omrtty_printf("Most likely cause is non-supported version of OS\n");
 		return false;
@@ -823,13 +876,13 @@ MM_Scheduler::workerEntryPoint(MM_EnvironmentBase *envModron)
 
 	omrthread_monitor_enter(_workerThreadMutex);
 
-	while(worker_status_dying != _statusTable[workerID]) {
+	while (worker_status_dying != _statusTable[workerID]) {
 		/* Wait for a task to be dispatched to the worker thread */
-		while(worker_status_waiting == _statusTable[workerID]) {
+		while (worker_status_waiting == _statusTable[workerID]) {
 			omrthread_monitor_wait(_workerThreadMutex);
 		}
 
-		if(worker_status_reserved == _statusTable[workerID]) {
+		if (worker_status_reserved == _statusTable[workerID]) {
 			/* Found a task to dispatch to - do prep work for dispatch */
 			acceptTask(env);
 			omrthread_monitor_exit(_workerThreadMutex);
@@ -841,6 +894,7 @@ MM_Scheduler::workerEntryPoint(MM_EnvironmentBase *envModron)
 			completeTask(env);
 		}
 	}
+
 	omrthread_monitor_exit(_workerThreadMutex);
 }
 
@@ -1037,7 +1091,7 @@ MM_Scheduler::shutDownMainThread()
 }
 
 /**
- * Check to see if it is time to do the next GC increment.  If beatNanos time
+ * Check to see if it is time to do the next GC increment.  If _beatNanos time
  * has elapsed since the end of the last GC increment then start the next
  * increment now.
  */
@@ -1045,7 +1099,7 @@ void
 MM_Scheduler::startGCIfTimeExpired(MM_EnvironmentBase *envModron)
 {
 	MM_EnvironmentRealtime *env = MM_EnvironmentRealtime::getEnvironment(envModron);
-	if (isInitialized() && isGCOn() && env->getTimer()->hasTimeElapsed(getStartTimeOfCurrentMutatorSlice(), beatNanos)) {
+	if (isInitialized() && isGCOn() && env->getTimer()->hasTimeElapsed(getStartTimeOfCurrentMutatorSlice(), _beatNanos)) {
 		continueGC(env, TIME_TRIGGER, 0, env->getOmrVMThread(), true);
 	}
 }
@@ -1059,7 +1113,7 @@ MM_Scheduler::incrementMutatorCount()
 extern "C" {
 
 void
-j9gc_startGCIfTimeExpired(OMR_VMThread* vmThread)
+j9gc_startGCIfTimeExpired(OMR_VMThread *vmThread)
 {
 	MM_EnvironmentRealtime *env = MM_EnvironmentRealtime::getEnvironment(vmThread);
 	MM_Scheduler *scheduler = (MM_Scheduler *)env->getExtensions()->dispatcher;

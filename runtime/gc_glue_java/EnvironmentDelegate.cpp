@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2017, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2017
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 #include "j9protos.h"
 #include "ModronAssertions.h"
@@ -30,6 +30,9 @@
 #include "OwnableSynchronizerObjectBufferRealtime.hpp"
 #include "OwnableSynchronizerObjectBufferStandard.hpp"
 #include "OwnableSynchronizerObjectBufferVLHGC.hpp"
+#include "ContinuationObjectBufferRealtime.hpp"
+#include "ContinuationObjectBufferStandard.hpp"
+#include "ContinuationObjectBufferVLHGC.hpp"
 #include "ReferenceObjectBufferRealtime.hpp"
 #include "ReferenceObjectBufferStandard.hpp"
 #include "ReferenceObjectBufferVLHGC.hpp"
@@ -56,18 +59,21 @@ MM_EnvironmentDelegate::initialize(MM_EnvironmentBase *env)
 		_gcEnv._referenceObjectBuffer = MM_ReferenceObjectBufferStandard::newInstance(env);
 		_gcEnv._unfinalizedObjectBuffer = MM_UnfinalizedObjectBufferStandard::newInstance(env);
 		_gcEnv._ownableSynchronizerObjectBuffer = MM_OwnableSynchronizerObjectBufferStandard::newInstance(env);
+		_gcEnv._continuationObjectBuffer = MM_ContinuationObjectBufferStandard::newInstance(env);
 #endif /* defined(OMR_GC_MODRON_STANDARD) */
 	} else if (extensions->isMetronomeGC()) {
 #if defined(OMR_GC_REALTIME)
 		_gcEnv._referenceObjectBuffer = MM_ReferenceObjectBufferRealtime::newInstance(env);
 		_gcEnv._unfinalizedObjectBuffer = MM_UnfinalizedObjectBufferRealtime::newInstance(env);
 		_gcEnv._ownableSynchronizerObjectBuffer = MM_OwnableSynchronizerObjectBufferRealtime::newInstance(env);
+		_gcEnv._continuationObjectBuffer = MM_ContinuationObjectBufferRealtime::newInstance(env);
 #endif /* defined(OMR_GC_REALTIME) */
 	} else if (extensions->isVLHGC()) {
 #if defined(OMR_GC_VLHGC)
 		_gcEnv._referenceObjectBuffer = MM_ReferenceObjectBufferVLHGC::newInstance(env);
 		_gcEnv._unfinalizedObjectBuffer = MM_UnfinalizedObjectBufferVLHGC::newInstance(env);
 		_gcEnv._ownableSynchronizerObjectBuffer = MM_OwnableSynchronizerObjectBufferVLHGC::newInstance(env);
+		_gcEnv._continuationObjectBuffer = MM_ContinuationObjectBufferVLHGC::newInstance(env);
 #endif /* defined(OMR_GC_VLHGC) */
 	} else {
 		Assert_MM_unreachable();
@@ -75,6 +81,7 @@ MM_EnvironmentDelegate::initialize(MM_EnvironmentBase *env)
 
 	if ((NULL == _gcEnv._referenceObjectBuffer) ||
 			(NULL == _gcEnv._unfinalizedObjectBuffer) ||
+			(NULL == _gcEnv._continuationObjectBuffer) ||
 			(NULL == _gcEnv._ownableSynchronizerObjectBuffer)) {
 		return false;
 	}
@@ -101,6 +108,10 @@ MM_EnvironmentDelegate::tearDown()
 	if (NULL != _gcEnv._ownableSynchronizerObjectBuffer) {
 		_gcEnv._ownableSynchronizerObjectBuffer->kill(_env);
 		_gcEnv._ownableSynchronizerObjectBuffer = NULL;
+	}
+	if (NULL != _gcEnv._continuationObjectBuffer) {
+		_gcEnv._continuationObjectBuffer->kill(_env);
+		_gcEnv._continuationObjectBuffer = NULL;
 	}
 }
 
@@ -151,6 +162,7 @@ MM_EnvironmentDelegate::flushNonAllocationCaches()
 #endif /* J9VM_GC_FINALIZATION */
 
 	_gcEnv._ownableSynchronizerObjectBuffer->flush(_env);
+	_gcEnv._continuationObjectBuffer->flush(_env);
 }
 
 void
@@ -234,7 +246,6 @@ MM_EnvironmentDelegate::assumeExclusiveVMAccess(uintptr_t exclusiveCount)
 void
 MM_EnvironmentDelegate::releaseCriticalHeapAccess(uintptr_t *data)
 {
-	VM_VMAccess::setPublicFlags(_vmThread, J9_PUBLIC_FLAGS_NOT_AT_SAFE_POINT);
 	MM_JNICriticalRegion::releaseAccess(_vmThread, data);
 }
 
@@ -242,7 +253,6 @@ void
 MM_EnvironmentDelegate::reacquireCriticalHeapAccess(uintptr_t data)
 {
 	MM_JNICriticalRegion::reacquireAccess(_vmThread, data);
-	VM_VMAccess::clearPublicFlags(_vmThread, J9_PUBLIC_FLAGS_NOT_AT_SAFE_POINT);
 }
 
 void
@@ -384,3 +394,22 @@ MM_EnvironmentDelegate::getAllocatedSizeInsideTLH()
 
 #endif /* J9VM_GC_THREAD_LOCAL_HEAP */
 
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+bool
+MM_EnvironmentDelegate::reinitializeForRestore(MM_EnvironmentBase *env)
+{
+	bool rc = true;
+
+	Assert_MM_true(_extensions->isStandardGC());
+
+	if (!_gcEnv._referenceObjectBuffer->reinitializeForRestore(env)
+		|| !_gcEnv._unfinalizedObjectBuffer->reinitializeForRestore(env)
+		|| !_gcEnv._ownableSynchronizerObjectBuffer->reinitializeForRestore(env)
+		|| !_gcEnv._continuationObjectBuffer->reinitializeForRestore(env)
+	) {
+		rc = false;
+	}
+
+	return rc;
+}
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */

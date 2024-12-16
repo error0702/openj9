@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2019, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2019
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "codegen/ARM64ConditionCode.hpp"
@@ -113,6 +113,7 @@ void J9::Recompilation::fixUpMethodCode(void *startPC)
                 newInstr, jitEntry, *jitEntry); fflush(stdout);
          }
 
+      omrthread_jit_write_protect_disable();
       // Other thread might try to do the same thing at the same time.
       while ((preserved & B_INSTR_MASK) != TR::InstOpCode::getOpCodeBinaryEncoding(TR::InstOpCode::b))
          {
@@ -140,6 +141,7 @@ void J9::Recompilation::fixUpMethodCode(void *startPC)
 #endif
          preserved = *jitEntry;
          }
+      omrthread_jit_write_protect_enable();
       }
    }
 
@@ -177,8 +179,10 @@ void J9::Recompilation::methodHasBeenRecompiled(void *oldStartPC, void *newStart
          printf("\tsampling recomp, change instruction location (%p) of sampling branch to branch encoding 0x%x (to TR_ARM64samplingPatchCallSite)\n",
                   patchAddr, newInstr); fflush(stdout);
          }
+      omrthread_jit_write_protect_disable();
       *patchAddr = newInstr;
       arm64CodeSync((uint8_t *)patchAddr, ARM64_INSTRUCTION_LENGTH);
+      omrthread_jit_write_protect_enable();
 
       fixUpMethodCode(oldStartPC);
 
@@ -186,7 +190,9 @@ void J9::Recompilation::methodHasBeenRecompiled(void *oldStartPC, void *newStart
       }
 
    bool codeMemoryWasAlreadyReleased = linkageInfo->hasBeenRecompiled(); // HCR - can recompile the same body twice
+   omrthread_jit_write_protect_disable();
    linkageInfo->setHasBeenRecompiled();
+   omrthread_jit_write_protect_enable();
 
    if (linkageInfo->isSamplingMethodBody() && !codeMemoryWasAlreadyReleased)
       {
@@ -213,7 +219,8 @@ void J9::Recompilation::methodCannotBeRecompiled(void *oldStartPC, TR_FrontEnd *
 
    if (bodyInfo->getUsesPreexistence()
        || methodInfo->hasBeenReplaced()
-       || (linkageInfo->isSamplingMethodBody() && !fej9->isAsyncCompilation())) // go interpreted for failed recomps in sync mode
+       || (linkageInfo->isSamplingMethodBody() && !fej9->isAsyncCompilation()) // go interpreted for failed recomps in sync mode
+       || methodInfo->isExcludedPostRestore()) // go interpreted if method is excluded post restore
       {
       // Patch the first instruction regardless of counting or sampling
       patchAddr = (int32_t *)((uint8_t *)oldStartPC + getJitEntryOffset(linkageInfo));
@@ -229,8 +236,10 @@ void J9::Recompilation::methodCannotBeRecompiled(void *oldStartPC, TR_FrontEnd *
          printf("oldStartPC %p, patchAddr %p, target %lx\n", oldStartPC, patchAddr, target); fflush(stdout);
          }
 
+      omrthread_jit_write_protect_disable();
       *patchAddr = encodeDistanceInBranchInstruction(TR::InstOpCode::b, distance);
       arm64CodeSync((uint8_t *)patchAddr, ARM64_INSTRUCTION_LENGTH);
+      omrthread_jit_write_protect_enable();
 
       if (!methodInfo->hasBeenReplaced()) // HCR: VM presumably already has the method in its proper state
          fej9->revertToInterpreted(methodInfo->getMethodInfo());
@@ -252,12 +261,16 @@ void J9::Recompilation::methodCannotBeRecompiled(void *oldStartPC, TR_FrontEnd *
             printf("MethodCannotBeRecompiled sampling recomp sync compilation restoring preserved jitEntry of 0x%x at location %p\n",
                    *((int32_t *)((uint8_t *)oldStartPC + OFFSET_SAMPLING_PRESERVED_FROM_STARTPC)), startByte); fflush(stdout);
             }
+         omrthread_jit_write_protect_disable();
          *startByte = *((int32_t *)((uint8_t *)oldStartPC + OFFSET_SAMPLING_PRESERVED_FROM_STARTPC));
          arm64CodeSync((uint8_t *)startByte, 4);
+         omrthread_jit_write_protect_enable();
          }
       }
 
+   omrthread_jit_write_protect_disable();
    linkageInfo->setHasFailedRecompilation();
+   omrthread_jit_write_protect_enable();
    }
 
 void J9::Recompilation::invalidateMethodBody(void *startPC, TR_FrontEnd *fe)

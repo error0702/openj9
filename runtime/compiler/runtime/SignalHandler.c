@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "j9protos.h"
@@ -264,7 +264,7 @@ static IDATA jitX86decodeIdivInstruction(J9PortLibrary* portLib, void* sigInfo, 
 		}
 	}
 	return -1;
-	}
+}
 
 UDATA jitX86Handler(J9VMThread* vmThread, U_32 sigType, void* sigInfo)
 {
@@ -398,7 +398,7 @@ UDATA jitX86Handler(J9VMThread* vmThread, U_32 sigType, void* sigInfo)
 					}
 				}
 
-				stackMap = jitConfig->jitGetStackMapFromPC(vmThread, exceptionTable, (UDATA) (eip + 1));
+				stackMap = jitConfig->jitGetStackMapFromPC(vmThread, vmThread->javaVM, exceptionTable, (UDATA) (eip + 1));
 				if (stackMap ) {
 					registerMap = jitConfig->getJitRegisterMap(exceptionTable, stackMap);
 					*espPtr += (((registerMap >> 16) & 0xFF) * sizeof(UDATA));
@@ -1909,20 +1909,20 @@ UDATA jitARM64Handler(J9VMThread* vmThread, U_32 sigType, void* sigInfo)
 		exceptionTable = jitConfig->jitGetExceptionTableFromPC(vmThread, *pcPtr);
 
 		if (!exceptionTable && J9PORT_SIG_FLAG_SIGBUS == sigType) {
-		   // We might be in a jit helper routine (like arraycopy) so look at the link register as well...
-		   UDATA *lrPtr;
-		   /* R30 is LR for aarch64 */
-		   infoType = j9sig_info(sigInfo, J9PORT_SIG_GPR, 30, &infoName, &infoValue);
-		   if (infoType != J9PORT_SIG_VALUE_ADDRESS) {
-		      return J9PORT_SIG_EXCEPTION_CONTINUE_SEARCH;
-		   }
-		   lrPtr = (UDATA *) infoValue;
-		   exceptionTable = jitConfig->jitGetExceptionTableFromPC(vmThread, *lrPtr);
-		   if (exceptionTable) {
+			// We might be in a jit helper routine (like arraycopy) so look at the link register as well...
+			UDATA *lrPtr;
+			/* R30 is LR for aarch64 */
+			infoType = j9sig_info(sigInfo, J9PORT_SIG_GPR, 30, &infoName, &infoValue);
+			if (infoType != J9PORT_SIG_VALUE_ADDRESS) {
+				return J9PORT_SIG_EXCEPTION_CONTINUE_SEARCH;
+			}
+			lrPtr = (UDATA *) infoValue;
+			exceptionTable = jitConfig->jitGetExceptionTableFromPC(vmThread, *lrPtr);
+			if (exceptionTable) {
 				vmThread->jitException = (J9Object *) (*lrPtr);  /* the lr points at the instruction after the helper call */
 				*pcPtr = (UDATA) ((void *) &jitHandleInternalErrorTrap);
 				return J9PORT_SIG_EXCEPTION_CONTINUE_EXECUTION;
-		   }
+			}
 		}
 
 		if (exceptionTable) {

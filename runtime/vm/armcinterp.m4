@@ -1,4 +1,4 @@
-dnl Copyright (c) 2017, 2017 IBM Corp. and others
+dnl Copyright IBM Corp. and others 2017
 dnl
 dnl This program and the accompanying materials are made available under
 dnl the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,9 +14,9 @@ dnl Exception [1] and GNU General Public License, version 2 with the
 dnl OpenJDK Assembly Exception [2].
 dnl
 dnl [1] https://www.gnu.org/software/classpath/license.html
-dnl [2] http://openjdk.java.net/legal/assembly-exception.html
+dnl [2] https://openjdk.org/legal/assembly-exception.html
 dnl
-dnl SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+dnl SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
 
 include(armhelpers.m4)
 
@@ -30,7 +30,7 @@ START_PROC(c_cInterpreter)
 	add r3,r13,{#}FPR_SAVE_OFFSET(0)
 	vstmia.64 r3,{{ D8-D15 }}
 	mov J9VMTHREAD,r0
-	ldr r4,[J9VMTHREAD,{#}J9TR_VMThread_entryLocalStorage]	
+	ldr r4,[J9VMTHREAD,{#}J9TR_VMThread_entryLocalStorage]
 	add r3,r13,{#}JIT_GPR_SAVE_OFFSET(0)
 	str r3,[r4,{#}J9TR_ELS_jitGlobalStorageBase]
 	add r3,r13,{#}JIT_FPR_SAVE_OFFSET(0)
@@ -42,6 +42,8 @@ cInterpreter:
 	ldr r15,[r4,{#}J9TR_JavaVM_bytecodeLoop]
 	cmp r0,{#}J9TR_bcloop_exit_interpreter
 	beq .L_cInterpExit
+	cmp r0,{#}J9TR_bcloop_reenter_interpreter
+	beq cInterpreter
 	RESTORE_PRESERVED_REGS
 	RESTORE_LR
 	SWITCH_TO_JAVA_STACK

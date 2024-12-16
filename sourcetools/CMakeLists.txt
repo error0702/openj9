@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2017, 2021 IBM Corp. and others
+# Copyright IBM Corp. and others 2017
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
 # OpenJDK Assembly Exception [2].
 #
 # [1] https://www.gnu.org/software/classpath/license.html
-# [2] http://openjdk.java.net/legal/assembly-exception.html
+# [2] https://openjdk.org/legal/assembly-exception.html
 #
-# SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+# SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
 ################################################################################
 
 # set JAVA_HOME to guide FindJava
@@ -29,20 +29,16 @@ project(j9_sourcetools VERSION 1.0)
 
 set(CMAKE_JAVA_TARGET_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}")
 
-# Due to the way cmake generates the java class path, it will generate a leading path separator.
-# This prevents fixpath from JDKs after JDK11 from properly translating the path.
-# To work around the issue we tack on a dummy path at the beginning of the output classpath.
-if((WIN32 AND NOT CMAKE_HOST_WIN32) AND (JAVA_SPEC_VERSION GREATER 11))
+# CMake generates the java classpath with a leading path separator
+# which fixpath.sh in JDK11+ will not handle: Add a dummy prefix.
+if(WIN32 AND (NOT CMAKE_HOST_WIN32) AND (NOT JAVA_SPEC_VERSION LESS 11))
 	set(CMAKE_JAVA_INCLUDE_PATH_FINAL "${CMAKE_CURRENT_SOURCE_DIR}")
 endif()
 
-# TODO this needs to be named and handled better
-set(SPEC_LEVEL 7 CACHE STRING "")
-set(CMAKE_JAVA_COMPILE_FLAGS -nowarn -source ${SPEC_LEVEL} -target ${SPEC_LEVEL})
+set(CMAKE_JAVA_COMPILE_FLAGS -nowarn)
 
-# Note add_jar isn't as good at tracking target dependencies as regular cmake
+# Note add_jar isn't as good at tracking target dependencies as regular cmake.
 # In particular it will not let you link against a target which will be defined later.
-add_subdirectory(com.ibm.jpp.preprocessor)
 add_subdirectory(objectmodel)
 add_subdirectory(j9constantpool)
 add_subdirectory(j9nls)

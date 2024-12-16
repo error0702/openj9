@@ -1,6 +1,6 @@
 
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,14 +16,15 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "j9.h"
 #include "j9cfg.h"
 #include "j9consts.h"
+#include "ModronAssertions.h"
 
 #if defined(J9VM_GC_FINALIZATION)
 #include "CollectorLanguageInterfaceImpl.hpp"
@@ -41,12 +42,16 @@
 #include "MarkingSchemeRootClearer.hpp"
 #include "ModronAssertions.h"
 #include "OwnableSynchronizerObjectBuffer.hpp"
+#include "ContinuationObjectBufferStandard.hpp"
 #include "ParallelDispatcher.hpp"
 #include "ReferenceObjectBuffer.hpp"
 #include "ReferenceStats.hpp"
 #include "RootScanner.hpp"
 #include "StackSlotValidator.hpp"
 #include "UnfinalizedObjectBuffer.hpp"
+#if JAVA_SPEC_VERSION >= 19
+#include "ContinuationHelpers.hpp"
+#endif /* JAVA_SPEC_VERSION >= 19 */
 
 void
 MM_MarkingSchemeRootClearer::doSlot(omrobjectptr_t *slotPtr)
@@ -78,7 +83,7 @@ MM_MarkingSchemeRootClearer::scanWeakReferenceObjects(MM_EnvironmentBase *env)
 	while (NULL != (region = regionIterator.nextRegion())) {
 		MM_HeapRegionDescriptorStandardExtension *regionExtension = MM_ConfigurationDelegate::getHeapRegionDescriptorStandardExtension(env, region);
 		/* NOTE: we can't look at the list to determine if there's work to do since another thread may have already processed it and deleted everything */
-		for (UDATA i = 0; i < regionExtension->_maxListIndex; i++) {
+		for (uintptr_t i = 0; i < regionExtension->_maxListIndex; i++) {
 			if (J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
 				MM_ReferenceObjectList *list = &regionExtension->_referenceObjectLists[i];
 				list->startWeakReferenceProcessing();
@@ -115,7 +120,7 @@ MM_MarkingSchemeRootClearer::scanSoftReferenceObjects(MM_EnvironmentBase *env)
 	while (NULL != (region = regionIterator.nextRegion())) {
 		MM_HeapRegionDescriptorStandardExtension *regionExtension = MM_ConfigurationDelegate::getHeapRegionDescriptorStandardExtension(env, region);
 		/* NOTE: we can't look at the list to determine if there's work to do since another thread may have already processed it and deleted everything */
-		for (UDATA i = 0; i < regionExtension->_maxListIndex; i++) {
+		for (uintptr_t i = 0; i < regionExtension->_maxListIndex; i++) {
 			if (J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
 				MM_ReferenceObjectList *list = &regionExtension->_referenceObjectLists[i];
 				list->startSoftReferenceProcessing();
@@ -154,7 +159,7 @@ MM_MarkingSchemeRootClearer::scanPhantomReferenceObjects(MM_EnvironmentBase *env
 	while (NULL != (region = regionIterator.nextRegion())) {
 		MM_HeapRegionDescriptorStandardExtension *regionExtension = MM_ConfigurationDelegate::getHeapRegionDescriptorStandardExtension(env, region);
 		/* NOTE: we can't look at the list to determine if there's work to do since another thread may have already processed it and deleted everything */
-		for (UDATA i = 0; i < regionExtension->_maxListIndex; i++) {
+		for (uintptr_t i = 0; i < regionExtension->_maxListIndex; i++) {
 			if (J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
 				MM_ReferenceObjectList *list = &regionExtension->_referenceObjectLists[i];
 				list->startPhantomReferenceProcessing();
@@ -199,7 +204,7 @@ MM_MarkingSchemeRootClearer::scanUnfinalizedObjects(MM_EnvironmentBase *env)
 		GC_HeapRegionIteratorStandard regionIterator(_extensions->heap->getHeapRegionManager());
 		while (NULL != (region = regionIterator.nextRegion())) {
 			MM_HeapRegionDescriptorStandardExtension *regionExtension = MM_ConfigurationDelegate::getHeapRegionDescriptorStandardExtension(env, region);
-			for (UDATA i = 0; i < regionExtension->_maxListIndex; i++) {
+			for (uintptr_t i = 0; i < regionExtension->_maxListIndex; i++) {
 				MM_UnfinalizedObjectList *list = &regionExtension->_unfinalizedObjectLists[i];
 				if (!list->wasEmpty()) {
 					if (J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
@@ -269,7 +274,7 @@ MM_MarkingSchemeRootClearer::scanOwnableSynchronizerObjects(MM_EnvironmentBase *
 		GC_HeapRegionIteratorStandard regionIterator(_extensions->heap->getHeapRegionManager());
 		while (NULL != (region = regionIterator.nextRegion())) {
 			MM_HeapRegionDescriptorStandardExtension *regionExtension = MM_ConfigurationDelegate::getHeapRegionDescriptorStandardExtension(env, region);
-			for (UDATA i = 0; i < regionExtension->_maxListIndex; i++) {
+			for (uintptr_t i = 0; i < regionExtension->_maxListIndex; i++) {
 				MM_OwnableSynchronizerObjectList *list = &regionExtension->_ownableSynchronizerObjectLists[i];
 				if (!list->wasEmpty()) {
 					if (J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
@@ -304,26 +309,100 @@ MM_MarkingSchemeRootClearer::scanOwnableSynchronizerObjects(MM_EnvironmentBase *
 }
 
 void
+MM_MarkingSchemeRootClearer::scanContinuationObjects(MM_EnvironmentBase *env)
+{
+#if JAVA_SPEC_VERSION >= 19
+	if (_markingDelegate->shouldScanContinuationObjects()) {
+		/* allow the marking scheme to handle this */
+		reportScanningStarted(RootScannerEntity_ContinuationObjects);
+		GC_Environment *gcEnv = env->getGCEnvironment();
+		bool const compressed = _extensions->compressObjectReferences();
+
+		MM_HeapRegionDescriptorStandard *region = NULL;
+		GC_HeapRegionIteratorStandard regionIterator(_extensions->heap->getHeapRegionManager());
+		while (NULL != (region = regionIterator.nextRegion())) {
+			MM_HeapRegionDescriptorStandardExtension *regionExtension = MM_ConfigurationDelegate::getHeapRegionDescriptorStandardExtension(env, region);
+			for (uintptr_t i = 0; i < regionExtension->_maxListIndex; i++) {
+				MM_ContinuationObjectList *list = &regionExtension->_continuationObjectLists[i];
+				if (!list->wasEmpty()) {
+					if (J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
+						omrobjectptr_t object = list->getPriorList();
+						while (NULL != object) {
+							gcEnv->_markJavaStats._continuationCandidates += 1;
+							omrobjectptr_t next = _extensions->accessBarrier->getContinuationLink(object);
+#if defined(OMR_GC_CONCURRENT_SCAVENGER)
+							{
+								/**
+								 * In case of CS backout make sure the list contains the new version of the objects or if there is only one version,
+								 * due to being self-forwarded, restore the self-forwarded bit.
+								 */
+								MM_ForwardedHeader forwardHeader(object, compressed);
+								omrobjectptr_t forwardPtr = forwardHeader.getNonStrictForwardedObject();
+
+								if (NULL != forwardPtr) {
+									Assert_MM_true(_extensions->isConcurrentScavengerEnabled() && _extensions->isScavengerBackOutFlagRaised());
+									Assert_MM_false(_markingScheme->isMarked(object));
+									if (forwardHeader.isSelfForwardedPointer()) {
+										forwardHeader.restoreSelfForwardedPointer();
+									} else {
+										object = forwardPtr;
+									}
+								}
+							}
+#endif /* OMR_GC_CONCURRENT_SCAVENGER */
+
+							if (_markingScheme->isMarked(object) && !VM_ContinuationHelpers::isFinished(*VM_ContinuationHelpers::getContinuationStateAddress((J9VMThread *)env->getLanguageVMThread() , object))) {
+								/* object was already marked. */
+								gcEnv->_continuationObjectBuffer->add(env, object);
+							} else {
+								/* object was not previously marked */
+								gcEnv->_markJavaStats._continuationCleared += 1;
+								_extensions->releaseNativesForContinuationObject(env, object);
+							}
+							object = next;
+						}
+					}
+				}
+			}
+		}
+
+		/* restore everything to a flushed state before exiting */
+		gcEnv->_continuationObjectBuffer->flush(env);
+		reportScanningEnded(RootScannerEntity_ContinuationObjects);
+	}
+#endif /* JAVA_SPEC_VERSION >= 19 */
+}
+
+void
+MM_MarkingSchemeRootClearer::iterateAllContinuationObjects(MM_EnvironmentBase *env)
+{
+	if (_markingDelegate->shouldScanContinuationObjects()) {
+		reportScanningStarted(RootScannerEntity_ContinuationObjectsComplete);
+		MM_ContinuationObjectBufferStandard::iterateAllContinuationObjects(env);
+		reportScanningEnded(RootScannerEntity_ContinuationObjectsComplete);
+	}
+}
+
+void
 MM_MarkingSchemeRootClearer::doMonitorReference(J9ObjectMonitor *objectMonitor, GC_HashTableIterator *monitorReferenceIterator)
 {
-	J9ThreadAbstractMonitor * monitor = (J9ThreadAbstractMonitor*)objectMonitor->monitor;
+	J9ThreadAbstractMonitor *monitor = (J9ThreadAbstractMonitor*)objectMonitor->monitor;
 	_env->getGCEnvironment()->_markJavaStats._monitorReferenceCandidates += 1;
 
-	if(!_markingScheme->isMarked((omrobjectptr_t )monitor->userData)) {
+	if (!_markingScheme->isMarked((omrobjectptr_t )monitor->userData)) {
 		monitorReferenceIterator->removeSlot();
 		_env->getGCEnvironment()->_markJavaStats._monitorReferenceCleared += 1;
 		/* We must call objectMonitorDestroy (as opposed to omrthread_monitor_destroy) when the
 		 * monitor is not internal to the GC */
-		static_cast<J9JavaVM*>(_omrVM->_language_vm)->internalVMFunctions->objectMonitorDestroy(static_cast<J9JavaVM*>(_omrVM->_language_vm), (J9VMThread *)_env->getLanguageVMThread(), (omrthread_monitor_t)monitor);
+		_javaVM->internalVMFunctions->objectMonitorDestroy(_javaVM, (J9VMThread *)_env->getLanguageVMThread(), (omrthread_monitor_t)monitor);
 	}
 }
 
 MM_RootScanner::CompletePhaseCode
 MM_MarkingSchemeRootClearer::scanMonitorReferencesComplete(MM_EnvironmentBase *env)
 {
-	J9JavaVM *javaVM = (J9JavaVM *)env->getLanguageVM();
 	reportScanningStarted(RootScannerEntity_MonitorReferenceObjectsComplete);
-	javaVM->internalVMFunctions->objectMonitorDestroyComplete(javaVM, (J9VMThread *)env->getLanguageVMThread());
+	_javaVM->internalVMFunctions->objectMonitorDestroyComplete(_javaVM, (J9VMThread *)env->getLanguageVMThread());
 	reportScanningEnded(RootScannerEntity_MonitorReferenceObjectsComplete);
 	return complete_phase_OK;
 }
@@ -353,7 +432,7 @@ void
 MM_MarkingSchemeRootClearer::doStringTableSlot(omrobjectptr_t *slotPtr, GC_StringTableIterator *stringTableIterator)
 {
 	_env->getGCEnvironment()->_markJavaStats._stringConstantsCandidates += 1;
-	if(!_markingScheme->isMarked(*slotPtr)) {
+	if (!_markingScheme->isMarked(*slotPtr)) {
 		_env->getGCEnvironment()->_markJavaStats._stringConstantsCleared += 1;
 		stringTableIterator->removeSlot();
 	}
@@ -366,7 +445,7 @@ void
 MM_MarkingSchemeRootClearer::doStringCacheTableSlot(omrobjectptr_t *slotPtr)
 {
 	omrobjectptr_t objectPtr = *slotPtr;
-	if((NULL != objectPtr) && (!_markingScheme->isMarked(*slotPtr))) {
+	if ((NULL != objectPtr) && (!_markingScheme->isMarked(*slotPtr))) {
 		*slotPtr = NULL;
 	}
 }
@@ -374,7 +453,7 @@ MM_MarkingSchemeRootClearer::doStringCacheTableSlot(omrobjectptr_t *slotPtr)
 void
 MM_MarkingSchemeRootClearer::doJVMTIObjectTagSlot(omrobjectptr_t *slotPtr, GC_JVMTIObjectTagTableIterator *objectTagTableIterator)
 {
-	if(!_markingScheme->isMarked(*slotPtr)) {
+	if (!_markingScheme->isMarked(*slotPtr)) {
 		objectTagTableIterator->removeSlot();
 	}
 }

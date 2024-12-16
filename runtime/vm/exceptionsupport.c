@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include <string.h>
@@ -838,11 +838,6 @@ walkStackForExceptionThrow(J9VMThread * currentThread, j9object_t exception, UDA
 	if (!walkOnly) {
 		walkState->flags |= (J9_STACKWALK_INCLUDE_CALL_IN_FRAMES | J9_STACKWALK_INCLUDE_NATIVES | J9_STACKWALK_MAINTAIN_REGISTER_MAP);
 	}
-	/* PR 81484: Clear jitStackFrameFlags before the walk.
-	 * 1) It is not used by the stack walker.
-	 * 2) It could affect code that runs to load exception classes during the walk.
-	 */
-	currentThread->jitStackFrameFlags = 0;
 
 	currentThread->javaVM->walkStackFrames(currentThread, walkState);
 
@@ -1291,3 +1286,32 @@ setIllegalAccessErrorFinalFieldSet(J9VMThread *currentThread, UDATA isStatic, J9
 	setCurrentExceptionUTF(currentThread, J9VMCONSTANTPOOL_JAVALANGILLEGALACCESSERROR, msg);
 	j9mem_free_memory(msg);
 }
+
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+void
+setCRIUSingleThreadModeJVMCRIUException(J9VMThread *vmThread, U_32 moduleName, U_32 messageNumber)
+{
+	PORT_ACCESS_FROM_VMC(vmThread);
+	J9JavaVM *vm = vmThread->javaVM;
+	const char *msg = NULL;
+	omr_error_t rc = 0;
+
+	/* If no custom NLS message was specified, use the generic one */
+	if ((0 == moduleName) && (0 == messageNumber)) {
+		moduleName = J9NLS_VM_CRIU_SINGLETHREADMODE_JVMCRIUEXCEPTION__MODULE;
+		messageNumber = J9NLS_VM_CRIU_SINGLETHREADMODE_JVMCRIUEXCEPTION__ID;
+	}
+	msg = OMRPORT_FROM_J9PORT(PORTLIB)->nls_lookup_message(OMRPORT_FROM_J9PORT(PORTLIB), J9NLS_DO_NOT_PRINT_MESSAGE_TAG | J9NLS_DO_NOT_APPEND_NEWLINE, moduleName, messageNumber, NULL);
+
+	/* set openj9.internal.criu.JVMCheckpointException or JVMRestoreException */
+	if (0 == vm->checkpointState.checkpointRestoreTimeDelta) {
+		/* throw JVMCheckpointException at checkpoint */
+		setCurrentExceptionUTF(vmThread, J9VMCONSTANTPOOL_OPENJ9INTERNALCRIUJVMCHECKPOINTEXCEPTION, msg);
+	} else {
+		/* throw JVMRestoreException at restore */
+		setCurrentExceptionUTF(vmThread, J9VMCONSTANTPOOL_OPENJ9INTERNALCRIUJVMRESTOREEXCEPTION, msg);
+	}
+	rc = vm->j9rasDumpFunctions->triggerOneOffDump(vm, "java", "CRIUSingleThreadModeJVMCRIUException", NULL, 0);
+	Trc_VM_criu_setSingleThreadModeJVMCRIUException_triggerOneOffJavaDump(vmThread, rc);
+}
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */

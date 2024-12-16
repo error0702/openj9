@@ -1,5 +1,5 @@
 *
-* Copyright (c) 2021, 2021 IBM Corp. and others
+* Copyright IBM Corp. and others 2021
 *
 * This program and the accompanying materials are made
 * available under the terms of the Eclipse Public License 2.0
@@ -16,7 +16,7 @@
 * Exception [2].
 *
 * [1] https://www.gnu.org/software/classpath/license.html
-* [2] http://openjdk.java.net/legal/assembly-exception.html
+* [2] https://openjdk.org/legal/assembly-exception.html
 *
          TITLE 'j9vm31floatstubs'
 **********************************************************************

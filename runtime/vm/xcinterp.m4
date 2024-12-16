@@ -1,4 +1,4 @@
-dnl Copyright (c) 2017, 2018 IBM Corp. and others
+dnl Copyright IBM Corp. and others 2017
 dnl
 dnl This program and the accompanying materials are made available under
 dnl the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,9 +14,9 @@ dnl Exception [1] and GNU General Public License, version 2 with the
 dnl OpenJDK Assembly Exception [2].
 dnl
 dnl [1] https://www.gnu.org/software/classpath/license.html
-dnl [2] http://openjdk.java.net/legal/assembly-exception.html
+dnl [2] https://openjdk.org/legal/assembly-exception.html
 dnl
-dnl SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+dnl SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
 
 include(xhelpers.m4)
 
@@ -78,7 +78,7 @@ define({C_EPILOGUE},{
 	ret
 })
 
-},{	dnl WIN32
+},{ dnl WIN32
 
 dnl Linux 64
 
@@ -106,9 +106,9 @@ define({C_EPILOGUE},{
 	ret
 })
 
-})	dnl WIN32
+}) dnl WIN32
 
-},{	dnl ASM_J9VM_ENV_DATA64
+},{ dnl ASM_J9VM_ENV_DATA64
 
 dnl Windows and Linux 32
 
@@ -151,9 +151,9 @@ START_PROC(setFS0)
 	ret
 END_PROC(setFS0)
 
-})	dnl WIN32
+}) dnl WIN32
 
-})	dnl ASM_J9VM_ENV_DATA64
+}) dnl ASM_J9VM_ENV_DATA64
 
 START_PROC(c_cInterpreter)
 	C_PROLOGUE
@@ -168,6 +168,8 @@ C_FUNCTION_SYMBOL(cInterpreter):
 	CALL_C_ADDR_WITH_VMTHREAD(uword ptr J9TR_JavaVM_bytecodeLoop[_rax],0)
 	cmp _rax,J9TR_bcloop_exit_interpreter
 	je SHORT_JMP cInterpExit
+	cmp _rax,J9TR_bcloop_reenter_interpreter
+	je SHORT_JMP C_FUNCTION_SYMBOL(cInterpreter)
 	RESTORE_PRESERVED_REGS
 	SWITCH_TO_JAVA_STACK
 	jmp uword ptr J9TR_VMThread_tempSlot[_rbp]

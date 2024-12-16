@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2021, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2021
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "optimizer/TreeLowering.hpp"
@@ -690,20 +690,14 @@ NonNullableArrayNullStoreCheckTransformer::lower(TR::Node* const node, TR::TreeT
    //   | BBEnd                          |         |
    //   +--------------------------------+         |
    //   | BBStart (Extension)            |         |
-   //   | ificmpeq  -->------------------*---------+
-   //   |   iand                         |         |
-   //   |     iloadi <isClassFlags>      |         |
-   //   |       aloadi <componentClass>  |         |
+   //   | ZEROCHK jitArrayStoreException |         |
+   //   |   icmpeq                       |         |
+   //   |     iand                       |         |
+   //   |       iloadi <isClassFlags>    |         |
    //   |         aloadi <vft-symbol>    |         |
    //   |           ==><array-reference> |         |
-   //   |     iconst J9ClassIsValueType  |         |
-   //   |   iconst 0                     |         |
-   //   | BBEnd                          |         |
-   //   +--------------------------------+         |
-   //   | BBStart (Extension)            |         |
-   //   | NULLCHK                        |         |
-   //   |   Passthrough                  |         |
-   //   |     ==><value-reference>       |         |
+   //   |       iconst J9ClassArrayIsNullRestricted|
+   //   |     iconst 0                   |         |
    //   | BBEnd                          |         |
    //   +--------------------------------+         |
    //                   |                          |
@@ -731,17 +725,18 @@ NonNullableArrayNullStoreCheckTransformer::lower(TR::Node* const node, TR::TreeT
       tt->getPrevTreeTop()->join(nextTT);
       TR::Block *nextBlock = prevBlock->splitPostGRA(nextTT, cfg);
 
-      TR::Node *ifNode = comp()->fej9()->checkArrayCompClassValueType(destChild, TR::ificmpeq);
+      TR::SymbolReference* const vftSymRef = comp()->getSymRefTab()->findOrCreateVftSymbolRef();
 
-      ifNode->setBranchDestination(nextBlock->getEntry());
+      TR::Node *vftNode = TR::Node::createWithSymRef(node, TR::aloadi, 1, destChild, vftSymRef);
 
-      // Copy register dependencies from the end of the block split
-      // to the ificmpeq, which checks for a value type, that's being
-      // added to the end of that block
-      //
-      copyRegisterDependency(prevBlock->getExit()->getNode(), ifNode);
+      TR::Node *testIsNullRestrictedArray = comp()->fej9()->testIsArrayClassNullRestrictedType(vftNode);
+      TR::Node *testIsNotNullRestrictedArray = TR::Node::create(TR::icmpeq, 2, testIsNullRestrictedArray, TR::Node::iconst(0));
 
-      TR::TreeTop *ifArrayCompClassValueTypeTT = prevBlock->append(TR::TreeTop::create(comp(), ifNode));
+      TR::ResolvedMethodSymbol *currentMethod = comp()->getMethodSymbol();
+
+      TR::SymbolReference *jitThrowArrayStoreException = comp()->getSymRefTab()->findOrCreateArrayStoreExceptionSymbolRef(currentMethod);
+      TR::Node *checkNotNullRestrictedArray = TR::Node::createWithSymRef(TR::ZEROCHK, 1, 1, testIsNotNullRestrictedArray, jitThrowArrayStoreException);
+      TR::TreeTop *checkNotNullRestrictedArrayTT = prevBlock->append(TR::TreeTop::create(comp(), checkNotNullRestrictedArray));
 
       bool enableTrace = trace();
       auto* const nullConst = TR::Node::aconst(0);
@@ -753,35 +748,24 @@ NonNullableArrayNullStoreCheckTransformer::lower(TR::Node* const node, TR::TreeT
       //
       copyRegisterDependency(prevBlock->getExit()->getNode(), checkValueNull);
 
-      TR::TreeTop *checkValueNullTT = ifArrayCompClassValueTypeTT->insertBefore(TR::TreeTop::create(comp(), checkValueNull));
+      TR::TreeTop *checkValueNullTT = checkNotNullRestrictedArrayTT->insertBefore(TR::TreeTop::create(comp(), checkValueNull));
 
       if (enableTrace)
          {
-         traceMsg(comp(),"checkValueNull n%dn is inserted before  n%dn in prevBlock %d\n", checkValueNull->getGlobalIndex(), ifNode->getGlobalIndex(), prevBlock->getNumber());
+         traceMsg(comp(),"checkValueNull n%dn is inserted before  n%dn in prevBlock %d\n", checkValueNull->getGlobalIndex(), checkNotNullRestrictedArray->getGlobalIndex(), prevBlock->getNumber());
          }
 
-      TR::Block *compTypeTestBlock = prevBlock->split(ifArrayCompClassValueTypeTT, cfg);
-      compTypeTestBlock->setIsExtensionOfPreviousBlock(true);
+      TR::Block *checkNotNullRestrictedBlock = prevBlock->split(checkNotNullRestrictedArrayTT, cfg);
+      checkNotNullRestrictedBlock->setIsExtensionOfPreviousBlock(true);
 
       cfg->addEdge(prevBlock, nextBlock);
 
       if (enableTrace)
          {
-         traceMsg(comp(),"ifArrayCompClassValueTypeTT n%dn is isolated in compTypeTestBlock %d\n", ifNode->getGlobalIndex(), compTypeTestBlock->getNumber());
+         traceMsg(comp(),"checkNotNullRestrictedArray n%dn is isolated in checkNotNullRestrictedBlock %d\n", checkNotNullRestrictedArray->getGlobalIndex(), checkNotNullRestrictedBlock->getNumber());
          }
 
-      TR::ResolvedMethodSymbol *currentMethod = comp()->getMethodSymbol();
-
-      TR::Node *passThru  = TR::Node::create(node, TR::PassThrough, 1, sourceChild);
-      TR::Node *nullCheck = TR::Node::createWithSymRef(node, TR::NULLCHK, 1, passThru,
-                               comp()->getSymRefTab()->findOrCreateNullCheckSymbolRef(currentMethod));
-      TR::TreeTop *nullCheckTT = compTypeTestBlock->append(TR::TreeTop::create(comp(), nullCheck));
-
-      TR::Block *nullCheckBlock = compTypeTestBlock->split(nullCheckTT, cfg);
-
-      nullCheckBlock->setIsExtensionOfPreviousBlock(true);
-
-      cfg->addEdge(compTypeTestBlock, nextBlock);
+      cfg->addEdge(checkNotNullRestrictedBlock, nextBlock);
       }
    else
       {
@@ -887,7 +871,7 @@ static bool skipBoundChecks(TR::Compilation *comp, TR::Node *node)
  * LoadArrayElementTransformer transforms the block that contains the jitLoadFlattenableArrayElement helper call into three blocks:
  *   1. The merge block (blockAfterHelperCall) that contains the tree tops after the helper call
  *   2. The helper call block (helperCallBlock) that contains the helper call and is moved to the end of the tree top list
- *   3. The new non-VT array load block (arrayElementLoadBlock) which is an extended block of the original block
+ *   3. The new nullable array load block (arrayElementLoadBlock) which is an extended block of the original block
  *
  *      originalBlock----------+
  *      arrayElementLoadBlock  |
@@ -901,6 +885,9 @@ static bool skipBoundChecks(TR::Compilation *comp, TR::Node *node)
  *
  Before:
  +----------------------------------------+
+ |NULLCHK                                 |
+ |   PassThrough                          |
+ |      ==>iRegLoad  (array address)      |
  |treetop                                 |
  |  acall  jitLoadFlattenableArrayElement |
  |     ==>iRegLoad                        |
@@ -911,15 +898,16 @@ static bool skipBoundChecks(TR::Compilation *comp, TR::Node *node)
  After:
  +------------------------------------------+
  |BBStart                                   |
- |treetop                                   |
- |   ==>iRegLoad                            |
+ |NULLCHK                                   |
+ |   PassThrough                            |
+ |      ==>iRegLoad (array address)         |
  |treetop                                   |
  |   ==>aRegLoad                            |
  |ificmpne ----->---------------------------+-----------+
  |   iand                                   |           |
  |      iloadi  <isClassFlags>              |           |
  |      ...                                 |           |
- |      iconst 1024                         |           |
+ |      iconst J9ClassArrayIsNullRestricted |           |
  |   iconst 0                               |           |
  |   GlRegDeps ()                           |           |
  |      ==>aRegLoad                         |           |
@@ -1008,7 +996,7 @@ LoadArrayElementTransformer::lower(TR::Node* const node, TR::TreeTop* const tt)
    // 1. Anchor helper call node after the helper call
    //    Anchor elementIndex and arrayBaseAddress before the helper call
 
-   // Anchoring the helper call ensures that the return value from the helper call or from the non-VT array element load
+   // Anchoring the helper call ensures that the return value from the helper call or from the nullable array element load
    // will be saved to a register or a temp.
    TR::TreeTop *anchoredCallTT = TR::TreeTop::create(comp, tt, TR::Node::create(TR::treetop, 1, node));
    TR::TreeTop *anchoredElementIndexTT = TR::TreeTop::create(comp, tt->getPrevTreeTop(), TR::Node::create(TR::treetop, 1, elementIndexNode));
@@ -1120,8 +1108,13 @@ LoadArrayElementTransformer::lower(TR::Node* const node, TR::TreeTop* const tt)
    ///////////////////////////////////////
    // 9. Create ificmpne node that checks classFlags
 
+   TR::SymbolReference* const vftSymRef = comp->getSymRefTab()->findOrCreateVftSymbolRef();
+
+   TR::Node *vftNode = TR::Node::createWithSymRef(node, TR::aloadi, 1, anchoredArrayBaseAddressNode, vftSymRef);
+   TR::Node *testIsArrayClassNullRestrictedNode = comp->fej9()->testIsArrayClassNullRestrictedType(vftNode);
+
    // The branch destination will be set up later
-   TR::Node *ifNode = comp->fej9()->checkArrayCompClassValueType(anchoredArrayBaseAddressNode, TR::ificmpne);
+   TR::Node *ifNode = TR::Node::createif(TR::ificmpne, testIsArrayClassNullRestrictedNode, TR::Node::iconst(0));
 
    // Copy register dependency to the ificmpne node that's being appended to the current block
    copyRegisterDependency(arrayElementLoadBlock->getExit()->getNode(), ifNode);
@@ -1213,7 +1206,7 @@ static bool skipArrayStoreChecks(TR::Compilation *comp, TR::Node *node)
  * StoreArrayElementTransformer transforms the block that contains the jitStoreFlattenableArrayElement helper call into three blocks:
  *   1. The merge block that contains the tree tops after the helper call
  *   2. The helper call block that contains the helper call and is moved to the end of the tree top list
- *   3. The new non-VT array store block which is an extended block of the original block
+ *   3. The new nullable array store block which is an extended block of the original block
  *
  *      originalBlock ----------+
  *      arrayElementStoreBlock  |
@@ -1226,6 +1219,9 @@ static bool skipArrayStoreChecks(TR::Compilation *comp, TR::Node *node)
  *
  Before:
  +-------------------------------------------+
+ |NULLCHK                                    |
+ |   PassThrough                             |
+ |      aload <ArrayAddress>                 |
  |treetop                                    |
  |   acall  jitStoreFlattenableArrayElement  |
  |      aload <value>                        |
@@ -1237,8 +1233,9 @@ static bool skipArrayStoreChecks(TR::Compilation *comp, TR::Node *node)
  After:
  +-------------------------------------------+
  |BBStart                                    |
- |treetop                                    |
- |   aload <ArrayAddress>                    |
+ |NULLCHK                                    |
+ |   PassThrough                             |
+ |      aload <ArrayAddress>                 |
  |treetop                                    |
  |   aload <index>                           |
  |treetop                                    |
@@ -1247,7 +1244,7 @@ static bool skipArrayStoreChecks(TR::Compilation *comp, TR::Node *node)
  |   iand                                    |               |
  |      iloadi  <isClassFlags>               |               |
  |      ...                                  |               |
- |      iconst 1024                          |               |
+ |      iconst J9ClassArrayIsNullRestricted  |               |
  |   iconst 0                                |               |
  |   GlRegDeps ()                            |               |
  |      PassThrough rcx                      |               |
@@ -1260,8 +1257,6 @@ static bool skipArrayStoreChecks(TR::Compilation *comp, TR::Node *node)
  +-------------------------------------------+               |
  +-------------------------------------------+               |
  |BBStart (extension of previous block)      |               |
- |NULLCHK on n82n [if required]              |               |
- |   ...                                     |               |
  |BNDCHK                                     |               |
  |   ...                                     |               |
  |treetop                                    |               |
@@ -1298,9 +1293,6 @@ static bool skipArrayStoreChecks(TR::Compilation *comp, TR::Node *node)
  |      aRegLoad ecx                         |     |
  |      aRegLoad r8d                         |     |
  |      iRegLoad edi                         |     |
- |NULLCHK                                    |     |
- |   PassThrough                             |     |
- |      ==>aload                             |     |
  |treetop                                    |     |
  |   acall  jitStoreFlattenableArrayElement  |     |
  |      ==>aRegLoad                          |     |
@@ -1378,18 +1370,11 @@ StoreArrayElementTransformer::lower(TR::Node* const node, TR::TreeTop* const tt)
 
 
    ///////////////////////////////////////
-   // 5. Split (2) at the helper call node including the nullchk on the value reference into its own helperCallBlock
+   // 5. Split (2) at the helper call node into its own helperCallBlock
 
-   // Insert NULLCHK for VT
+   // Insert NULLCHK for null-restricted VT
    TR::Node *anchoredValueNode = anchoredValueTT->getNode()->getFirstChild();
    TR::TreeTop *ttForHelperCallBlock = tt;
-
-   if (!anchoredValueNode->isNonNull())
-      {
-      TR::Node *passThru  = TR::Node::create(node, TR::PassThrough, 1, anchoredValueNode);
-      TR::Node *nullCheck = TR::Node::createWithSymRef(node, TR::NULLCHK, 1, passThru, comp->getSymRefTab()->findOrCreateNullCheckSymbolRef(comp->getMethodSymbol()));
-      ttForHelperCallBlock = tt->insertBefore(TR::TreeTop::create(comp, nullCheck));
-      }
 
    TR::Block *helperCallBlock = originalBlock->splitPostGRA(ttForHelperCallBlock, cfg, true, NULL);
 
@@ -1486,8 +1471,13 @@ StoreArrayElementTransformer::lower(TR::Node* const node, TR::TreeTop* const tt)
    ///////////////////////////////////////
    // 8. Create the ificmpne node that checks classFlags
 
+   TR::SymbolReference* const vftSymRef = comp->getSymRefTab()->findOrCreateVftSymbolRef();
+
+   TR::Node *vftNode = TR::Node::createWithSymRef(node, TR::aloadi, 1, anchoredArrayBaseAddressNode, vftSymRef);
+   TR::Node *testIsArrayClassNullRestrictedNode = comp->fej9()->testIsArrayClassNullRestrictedType(vftNode);
+
    // The branch destination will be set up later
-   TR::Node *ifNode = comp->fej9()->checkArrayCompClassValueType(anchoredArrayBaseAddressNode, TR::ificmpne);
+   TR::Node *ifNode = TR::Node::createif(TR::ificmpne, testIsArrayClassNullRestrictedNode, TR::Node::iconst(0));
 
    // Copy register dependency to the ificmpne node that's being appended to the current block
    copyRegisterDependency(arrayElementStoreBlock->getExit()->getNode(), ifNode);
@@ -1558,6 +1548,15 @@ TR::TreeLowering::lowerValueTypeOperations(TransformationManager& transformation
 
    if (node->getOpCode().isCall())
       {
+      if (symRefTab->isNonHelper(node->getSymbolReference(), TR::SymbolReferenceTable::loadFlattenableArrayElementNonHelperSymbol))
+         {
+         node->setSymbolReference(symRefTab->findOrCreateLoadFlattenableArrayElementSymbolRef());
+         }
+      if (symRefTab->isNonHelper(node->getSymbolReference(), TR::SymbolReferenceTable::storeFlattenableArrayElementNonHelperSymbol))
+         {
+         node->setSymbolReference(symRefTab->findOrCreateStoreFlattenableArrayElementSymbolRef());
+         }
+
       // IL Generation only uses the <objectInequalityComparison> non-helper today,
       // but just in case, make sure TreeLowering can handle both possibilities.
       const bool isObjectEqualityTest = symRefTab->isNonHelper(node->getSymbolReference(), TR::SymbolReferenceTable::objectEqualityComparisonSymbol);

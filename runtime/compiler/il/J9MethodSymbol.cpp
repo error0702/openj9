@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "compile/Compilation.hpp"
@@ -67,6 +67,7 @@ J9::MethodSymbol::isPureFunction()
       case TR::java_lang_Math_min_L:
       case TR::java_lang_Math_min_F:
       case TR::java_lang_Math_min_D:
+      case TR::java_lang_Math_multiplyHigh:
       case TR::java_lang_Math_nextAfter_F:
       case TR::java_lang_Math_nextAfter_D:
       case TR::java_lang_Math_pow:
@@ -132,11 +133,11 @@ J9::MethodSymbol::isPureFunction()
 
 /**
  * Returns true if the function call will not yield to OSR point.
- * 
+ *
  * An example of kind of function which can go in the list would be recognized calls with
- * NOP calls or the one that are guaranteed to be inlined by codegenerator. 
+ * NOP calls or the one that are guaranteed to be inlined by codegenerator.
  */
-bool 
+bool
 J9::MethodSymbol::functionCallDoesNotYieldOSR()
    {
    switch(self()->getRecognizedMethod())
@@ -145,7 +146,7 @@ J9::MethodSymbol::functionCallDoesNotYieldOSR()
       case TR::java_nio_Bits_keepAlive:
          return true;
       default:
-         return OMR::MethodSymbolConnector::functionCallDoesNotYieldOSR(); 
+         return OMR::MethodSymbolConnector::functionCallDoesNotYieldOSR();
       }
    return false;
    }
@@ -200,10 +201,13 @@ static TR::RecognizedMethod canSkipNullChecks[] =
    //TR::java_util_Vector_addElement,
    TR::java_math_BigDecimal_longString1C,
    TR::java_math_BigDecimal_longString2,
+   TR::java_math_BigInteger_init_long,
+#ifdef OPENJ9_BUILD
+   TR::java_math_BigInteger_toByteArray,
+#endif // OPENJ9_BUILD
+   TR::java_math_BigInteger_stripLeadingZeroBytes1,
+   TR::java_math_BigInteger_stripLeadingZeroBytes2,
    TR::java_util_EnumMap__nec_,
-   TR::java_util_TreeMapUnboundedValueIterator_next,
-   TR::java_util_TreeMapSubMap_setFirstKey,
-   TR::java_util_TreeMapSubMap_setLastKey,
    TR::java_nio_Bits_getCharB,
    TR::java_nio_Bits_getCharL,
    TR::java_nio_Bits_getShortB,
@@ -282,6 +286,7 @@ static TR::RecognizedMethod canSkipBoundChecks[] =
    TR::java_util_HashtableHashEnumerator_hasMoreElements,
    TR::java_util_HashtableHashEnumerator_nextElement,
    TR::java_util_HashMap_getNode,
+   TR::java_util_HashMap_getNode_Object,
    TR::java_util_HashMap_resize,
    //TR::java_util_HashMapHashIterator_nextNode,  /* Unsafe if the Iterator is being incorrectly used (concurrent execution) */
    TR::java_util_HashMapHashIterator_init,        /* Safe because the object is only visible by one thread when init() is executing */
@@ -290,12 +295,18 @@ static TR::RecognizedMethod canSkipBoundChecks[] =
    TR::java_util_EnumMap__init_,
    TR::java_util_EnumMap__nec_,
    TR::java_util_TreeMap_all,
-   TR::java_util_TreeMap_rbInsert,
    TR::java_math_BigDecimal_longString1C,
    TR::java_math_BigDecimal_longString2,
-   TR::java_util_TreeMapUnboundedValueIterator_next,
-   TR::java_util_TreeMapSubMap_setFirstKey,
-   TR::java_util_TreeMapSubMap_setLastKey,
+   TR::java_math_BigInteger_init_long,
+#ifdef OPENJ9_BUILD
+   TR::java_math_BigInteger_toByteArray,
+#endif // OPENJ9_BUILD
+   TR::java_math_BigInteger_stripLeadingZeroBytes1,
+   TR::java_math_BigInteger_stripLeadingZeroBytes2,
+#ifdef OPENJ9_BUILD
+   TR::java_math_BigInteger_bitCount,
+   TR::java_math_BigInteger_bitLength,
+#endif // OPENJ9_BUILD
    TR::java_util_HashMap_get,
    TR::java_util_HashMap_findNonNullKeyEntry,
    TR::java_util_HashMap_putImpl,
@@ -416,10 +427,6 @@ static TR::RecognizedMethod canSkipArrayStoreChecks[] =
    TR::java_util_Vector_addElement,
    TR::java_util_Vector_contains,
    TR::java_util_Vector_subList,
-   TR::java_util_TreeMap_rbInsert,
-   TR::java_util_TreeMapUnboundedValueIterator_next,
-   TR::java_util_TreeMapSubMap_setLastKey,
-   TR::java_util_TreeMapSubMap_setFirstKey,
    TR::java_util_concurrent_ConcurrentHashMap_addCount,
    TR::java_util_concurrent_ConcurrentHashMap_tryPresize,
    TR::java_util_concurrent_ConcurrentHashMap_transfer,
@@ -459,6 +466,184 @@ J9::MethodSymbol::safeToSkipArrayStoreChecks()
    return false;
    }
 
+static TR::RecognizedMethod canSkipNonNullableArrayNullStoreCheck[] = {
+   TR::java_lang_invoke_CollectHandle_invokeExact,
+   TR::java_util_ArrayList_add,
+   TR::java_util_ArrayList_ensureCapacity,
+   TR::java_util_ArrayList_remove,
+   TR::java_util_ArrayList_set,
+   TR::java_util_Hashtable_get,
+   TR::java_util_Hashtable_put,
+   TR::java_util_Hashtable_clone,
+   TR::java_util_Hashtable_putAll,
+   TR::java_util_Hashtable_rehash,
+   TR::java_util_Hashtable_remove,
+   TR::java_util_Hashtable_contains,
+   TR::java_util_Hashtable_getEntry,
+   TR::java_util_Hashtable_getEnumeration,
+   TR::java_util_Hashtable_elements,
+   TR::java_util_HashtableHashEnumerator_hasMoreElements,
+   TR::java_util_HashtableHashEnumerator_nextElement,
+   TR::java_util_HashMap_rehash,
+   TR::java_util_HashMap_analyzeMap,
+   TR::java_util_HashMap_calculateCapacity,
+   TR::java_util_HashMap_findNullKeyEntry,
+   TR::java_util_HashMap_get,
+   TR::java_util_HashMap_getNode,
+   TR::java_util_HashMap_putImpl,
+   TR::java_util_HashMap_findNonNullKeyEntry,
+   TR::java_util_HashMap_resize,
+   TR::java_util_HashMap_prepareArray,
+   TR::java_util_HashMap_keysToArray,
+   TR::java_util_HashMap_valuesToArray,
+   TR::java_util_HashMapHashIterator_nextNode,
+   TR::java_util_HashMapHashIterator_init,
+   TR::java_util_Vector_addElement,
+   TR::java_util_Vector_contains,
+   TR::java_util_Vector_subList,
+   TR::java_util_concurrent_ConcurrentHashMap_addCount,
+   TR::java_util_concurrent_ConcurrentHashMap_tryPresize,
+   TR::java_util_concurrent_ConcurrentHashMap_transfer,
+   TR::java_util_concurrent_ConcurrentHashMap_fullAddCount,
+   TR::java_util_concurrent_ConcurrentHashMap_helpTransfer,
+   TR::java_util_concurrent_ConcurrentHashMap_initTable,
+   TR::java_util_concurrent_ConcurrentHashMap_tabAt,
+   TR::java_util_concurrent_ConcurrentHashMap_casTabAt,
+   TR::java_util_concurrent_ConcurrentHashMap_setTabAt,
+   TR::java_util_concurrent_ConcurrentHashMap_TreeBin_lockRoot,
+   TR::java_util_concurrent_ConcurrentHashMap_TreeBin_contendedLock,
+   TR::java_util_concurrent_ConcurrentHashMap_TreeBin_find,
+   TR::java_util_TreeMap_all,
+   TR::java_util_EnumMap_put,
+   TR::java_util_EnumMap_typeCheck,
+   TR::java_util_EnumMap__init_,
+   // TR::java_util_EnumMap__nec_, // Disable it for now because EnumMap.toArray explicitly stores null into array element
+   TR::java_util_HashMap_all,
+   // TR::java_util_ArrayList_all, // Disable it for now because ArrayList.toArray explicitly stores null into array element
+   TR::java_util_Hashtable_all,
+   // TR::java_util_concurrent_ConcurrentHashMap_all, // Disable it for now because ConcurrentHashMap.toArray explicitly stores null into array element
+   // TR::java_util_Vector_all, // Disable it for now because Vector.toArray explicitly stores null into array element
+
+   // The following list is identified after running sanity.functional tests
+   // TR::java_util_AbstractCollection_all, // Disable it for now because AbstractCollection.toArray explicitly stores null into array element
+   // TR::java_util_ArrayDeque_all, // Disable it for now because ArrayDeque.toArray explicitly stores null into array element
+   TR::java_util_ComparableTimSort_all,
+   // TR::java_util_IdentityHashMap_all, // Disable it for now because IdentityHashMap.toArray explicitly stores null into array element
+   // TR::java_util_ImmutableCollections_all, // Disable it for now because ImmutableCollections.toArray explicitly stores null into array element
+   TR::java_util_LinkedHashMap_all,
+   // TR::java_util_LinkedList_all, // Disable it for now because LinkedList.toArray explicitly stores null into array element
+   TR::java_util_Map_all,
+   TR::java_util_regex_Pattern_all,
+   TR::java_util_stream_Nodes_all,
+   TR::java_util_TimSort_all,
+   TR::java_util_WeakHashMap_all,
+
+   TR::java_lang_Class_all,
+
+   TR::unknownMethod
+};
+
+bool
+J9::MethodSymbol::safeToSkipNonNullableArrayNullStoreCheck()
+   {
+   TR::RecognizedMethod methodId = self()->getRecognizedMethod();
+   if (methodId == TR::unknownMethod)
+      return false;
+
+   for (int i = 0; canSkipNonNullableArrayNullStoreCheck[i] != TR::unknownMethod; ++i)
+      if (canSkipNonNullableArrayNullStoreCheck[i] == methodId)
+         return true;
+
+   return false;
+   }
+
+static TR::RecognizedMethod canSkipFlattenableArrayElementNonHelperCall[] = {
+   TR::java_lang_invoke_CollectHandle_invokeExact,
+   TR::java_util_ArrayList_add,
+   TR::java_util_ArrayList_ensureCapacity,
+   TR::java_util_ArrayList_remove,
+   TR::java_util_ArrayList_set,
+   TR::java_util_Hashtable_get,
+   TR::java_util_Hashtable_put,
+   TR::java_util_Hashtable_clone,
+   TR::java_util_Hashtable_putAll,
+   TR::java_util_Hashtable_rehash,
+   TR::java_util_Hashtable_remove,
+   TR::java_util_Hashtable_contains,
+   TR::java_util_Hashtable_getEntry,
+   TR::java_util_Hashtable_getEnumeration,
+   TR::java_util_Hashtable_elements,
+   TR::java_util_HashtableHashEnumerator_hasMoreElements,
+   TR::java_util_HashtableHashEnumerator_nextElement,
+   TR::java_util_HashMap_rehash,
+   TR::java_util_HashMap_analyzeMap,
+   TR::java_util_HashMap_calculateCapacity,
+   TR::java_util_HashMap_findNullKeyEntry,
+   TR::java_util_HashMap_get,
+   TR::java_util_HashMap_getNode,
+   TR::java_util_HashMap_putImpl,
+   TR::java_util_HashMap_findNonNullKeyEntry,
+   TR::java_util_HashMap_resize,
+   TR::java_util_HashMap_prepareArray,
+   TR::java_util_HashMap_keysToArray,
+   TR::java_util_HashMap_valuesToArray,
+   TR::java_util_HashMapHashIterator_nextNode,
+   TR::java_util_HashMapHashIterator_init,
+   TR::java_util_Vector_addElement,
+   TR::java_util_Vector_contains,
+   TR::java_util_Vector_subList,
+   TR::java_util_concurrent_ConcurrentHashMap_addCount,
+   TR::java_util_concurrent_ConcurrentHashMap_tryPresize,
+   TR::java_util_concurrent_ConcurrentHashMap_transfer,
+   TR::java_util_concurrent_ConcurrentHashMap_fullAddCount,
+   TR::java_util_concurrent_ConcurrentHashMap_helpTransfer,
+   TR::java_util_concurrent_ConcurrentHashMap_initTable,
+   TR::java_util_concurrent_ConcurrentHashMap_tabAt,
+   TR::java_util_concurrent_ConcurrentHashMap_casTabAt,
+   TR::java_util_concurrent_ConcurrentHashMap_setTabAt,
+   TR::java_util_concurrent_ConcurrentHashMap_TreeBin_lockRoot,
+   TR::java_util_concurrent_ConcurrentHashMap_TreeBin_contendedLock,
+   TR::java_util_concurrent_ConcurrentHashMap_TreeBin_find,
+   TR::java_util_TreeMap_all,
+   TR::java_util_EnumMap_put,
+   TR::java_util_EnumMap_typeCheck,
+   TR::java_util_EnumMap__init_,
+   // TR::java_util_EnumMap__nec_, // Disable it for now because EnumMap.toArray might deal with null-restricted arrays which are flattenable
+   TR::java_util_HashMap_all,
+   // TR::java_util_ArrayList_all, // Disable it for now because ArrayList.toArray might deal with null-restricted arrays which are flattenable
+   TR::java_util_Hashtable_all,
+   // TR::java_util_concurrent_ConcurrentHashMap_all, // Disable it for now because ConcurrentHashMap.toArray might deal with null-restricted arrays which are flattenable
+   // TR::java_util_Vector_all, // Disable it for now because Vector.toArray might deal with null-restricted arrays which are flattenable
+
+   // The following list is identified after running sanity.functional tests
+   // TR::java_util_AbstractCollection_all, // Disable it for now because AbstractCollection.toArray might deal with null-restricted arrays which are flattenable
+   // TR::java_util_ArrayDeque_all, // Disable it for now because ArrayDeque.toArray might deal with null-restricted arrays which are flattenable
+   // TR::java_util_IdentityHashMap_all, // Disable it for now because IdentityHashMap.toArray might deal with null-restricted arrays which are flattenable
+   // TR::java_util_ImmutableCollections_all, // Disable it for now because ImmutableCollections.toArray might deal with null-restricted arrays which are flattenable
+   // TR::java_util_LinkedList_all, // Disable it for now because LinkedList.toArray might deal with null-restricted arrays which are flattenable
+   TR::java_util_Map_all,
+   TR::java_util_regex_Pattern_all,
+   TR::java_util_stream_Nodes_all,
+   TR::java_util_WeakHashMap_all,
+
+   TR::java_lang_Class_all,
+
+   TR::unknownMethod
+};
+
+bool
+J9::MethodSymbol::safeToSkipFlattenableArrayElementNonHelperCall()
+   {
+   TR::RecognizedMethod methodId = self()->getRecognizedMethod();
+   if (methodId == TR::unknownMethod)
+      return false;
+
+   for (int i = 0; canSkipFlattenableArrayElementNonHelperCall[i] != TR::unknownMethod; ++i)
+      if (canSkipFlattenableArrayElementNonHelperCall[i] == methodId)
+         return true;
+
+   return false;
+   }
 
 // Which recognized methods are known to require no checking when lowering to TR::arraycopy
 //
@@ -538,10 +723,19 @@ static TR::RecognizedMethod canSkipZeroInitializationOnNewarrays[] =
    //TR::java_lang_String_toUpperCaseCore,
    TR::java_lang_String_split_str_int,
    TR::java_math_BigDecimal_toString,
+   TR::java_math_BigInteger_init_long,
+#ifdef OPENJ9_BUILD
+   TR::java_math_BigInteger_toByteArray,
+#endif // OPENJ9_BUILD
+   TR::java_math_BigInteger_stripLeadingZeroBytes1,
+   TR::java_math_BigInteger_stripLeadingZeroBytes2,
+   TR::java_lang_Integer_toString,
+   TR::java_lang_Long_toString,
    TR::java_lang_StringCoding_encode,
    TR::java_lang_StringCoding_decode,
    TR::java_lang_StringCoding_StringEncoder_encode,
    TR::java_lang_StringCoding_StringDecoder_decode,
+   TR::sun_misc_Unsafe_allocateUninitializedArray0,
    //TR::java_lang_StringBuilder_ensureCapacityImpl,
    //TR::java_lang_StringBuffer_ensureCapacityImpl,
    //TR::java_util_Arrays_copyOf,

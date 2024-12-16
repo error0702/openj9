@@ -1,5 +1,5 @@
-/*******************************************************************************
- * Copyright (c) 2009, 2018 IBM Corp. and others
+/*
+ * Copyright IBM Corp. and others 2009
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,10 +15,10 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
 package com.ibm.j9ddr.vm29.j9;
 
 import java.lang.reflect.Field;
@@ -230,8 +230,6 @@ public class BCNames {
 	public static final int JBifnonnull = 199;
 	public static final int JBgotow = 200;
 	public static final int JBbreakpoint = 202;
-	public static final int JBdefaultvalue;
-	public static final int JBwithfield;
 	public static final int JBiincw;
 	public static final int JBaload0getfield;
 	public static final int JBnewdup;
@@ -270,8 +268,6 @@ public class BCNames {
 	static {
 		switch (AlgorithmVersion.getVersionOf(AlgorithmVersion.BYTECODE_VERSION).getAlgorithmVersion()) {
 		case 0:
-			JBdefaultvalue = 224;
-			JBwithfield = 226;
 			JBiloadw = 203;
 			JBlloadw = 204;
 			JBfloadw = 205;
@@ -306,8 +302,6 @@ public class BCNames {
 			JBreturnFromJ2I = 251;
 			break;
 		case 1:
-			JBdefaultvalue = 203;
-			JBwithfield = 204;
 			JBiincw = 213;
 			JBaload0getfield = 215;
 			JBnewdup = 216;

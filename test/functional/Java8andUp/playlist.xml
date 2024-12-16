@@ -1,24 +1,24 @@
 <?xml version='1.0' encoding='UTF-8'?>
 <!--
-  Copyright (c) 2016, 2021 IBM Corp. and others
+Copyright IBM Corp. and others 2016
 
-  This program and the accompanying materials are made available under
-  the terms of the Eclipse Public License 2.0 which accompanies this
-  distribution and is available at https://www.eclipse.org/legal/epl-2.0/
-  or the Apache License, Version 2.0 which accompanies this distribution and
-  is available at https://www.apache.org/licenses/LICENSE-2.0.
+This program and the accompanying materials are made available under
+the terms of the Eclipse Public License 2.0 which accompanies this
+distribution and is available at https://www.eclipse.org/legal/epl-2.0/
+or the Apache License, Version 2.0 which accompanies this distribution and
+is available at https://www.apache.org/licenses/LICENSE-2.0.
 
-  This Source Code may also be made available under the following
-  Secondary Licenses when the conditions for such availability set
-  forth in the Eclipse Public License, v. 2.0 are satisfied: GNU
-  General Public License, version 2 with the GNU Classpath
-  Exception [1] and GNU General Public License, version 2 with the
-  OpenJDK Assembly Exception [2].
+This Source Code may also be made available under the following
+Secondary Licenses when the conditions for such availability set
+forth in the Eclipse Public License, v. 2.0 are satisfied: GNU
+General Public License, version 2 with the GNU Classpath
+Exception [1] and GNU General Public License, version 2 with the
+OpenJDK Assembly Exception [2].
 
-  [1] https://www.gnu.org/software/classpath/license.html
-  [2] http://openjdk.java.net/legal/assembly-exception.html
+[1] https://www.gnu.org/software/classpath/license.html
+[2] https://openjdk.org/legal/assembly-exception.html
 
-  SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
 -->
 <playlist xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../TKG/playlist.xsd">
 	<include>java8andUpSettings.mk</include>
@@ -157,6 +157,7 @@
 		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) \
 	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_JDK_HOME)$(D)lib$(D)tools.jar$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(Q) \
 	-Dcom.ibm.tools.attach.enable=yes \
+	-Dcom.ibm.tools.attach.logging=yes \
 	-Dcom.ibm.tools.attach.timeout=15000 \
 	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) -testnames AttachAPISanity \
 	-groups $(TEST_GROUP) \
@@ -181,6 +182,7 @@
 		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) \
 	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(Q) \
 	-Dcom.ibm.tools.attach.enable=yes \
+	-Dcom.ibm.tools.attach.logging=yes \
 	-Djdk.attach.allowAttachSelf=true \
 	-Dcom.ibm.tools.attach.timeout=15000 \
 	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) -testnames AttachAPISanity \
@@ -207,6 +209,7 @@
 	$(JAVA_COMMAND) $(JVM_OPTIONS) \
 	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_JDK_HOME)$(D)lib$(D)tools.jar$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(Q) \
 	-Dcom.ibm.tools.attach.enable=yes \
+	-Dcom.ibm.tools.attach.logging=yes \
 	-Dcom.ibm.tools.attach.timeout=15000 \
 	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) -testnames TestAttachAPI \
 	-groups $(TEST_GROUP) \
@@ -235,6 +238,7 @@
 		$(JAVA_COMMAND) $(JVM_OPTIONS) \
 	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(Q) \
 	-Dcom.ibm.tools.attach.enable=yes \
+	-Dcom.ibm.tools.attach.logging=yes \
 	-Dcom.ibm.tools.attach.timeout=15000 \
 	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) -testnames TestAttachAPI \
 	-groups $(TEST_GROUP) \
@@ -284,6 +288,7 @@
 		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) \
 	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(Q) \
 	-Dcom.ibm.tools.attach.enable=yes \
+	-Dcom.ibm.tools.attach.logging=yes \
 	-Djdk.attach.allowAttachSelf=true \
 	-Dcom.ibm.tools.attach.timeout=15000 \
 	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) -testnames TestAttachAPIEnabling \
@@ -315,6 +320,7 @@
 		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) \
 	-cp $(Q)$(RESOURCES_DIR)$(P)$(TEST_JDK_HOME)$(D)lib$(D)tools.jar$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(Q) \
 	-Dcom.ibm.tools.attach.enable=yes \
+	-Dcom.ibm.tools.attach.logging=yes \
 	-Dcom.ibm.tools.attach.timeout=15000 \
 	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) -testnames TestAttachErrorHandling \
 	-groups $(TEST_GROUP) \
@@ -345,6 +351,7 @@
 		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) \
 	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(Q) \
 	-Dcom.ibm.tools.attach.enable=yes \
+	-Dcom.ibm.tools.attach.logging=yes \
 	-Dcom.ibm.tools.attach.timeout=15000 \
 	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) -testnames TestAttachErrorHandling \
 	-groups $(TEST_GROUP) \
@@ -370,6 +377,7 @@
 	$(JAVA_COMMAND) $(JVM_OPTIONS) \
 	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_JDK_HOME)$(D)lib$(D)tools.jar$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(Q) \
 	-Dcom.ibm.tools.attach.enable=yes \
+	-Dcom.ibm.tools.attach.logging=yes \
 	-Dcom.ibm.tools.attach.timeout=15000 \
 	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) -testnames TestSunAttachClasses \
 	-groups $(TEST_GROUP) \
@@ -399,6 +407,7 @@
 	--add-opens=java.base/java.lang=ALL-UNNAMED \
 	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(Q) \
 	-Dcom.ibm.tools.attach.enable=yes \
+	-Dcom.ibm.tools.attach.logging=yes \
 	-Dcom.ibm.tools.attach.timeout=15000 \
 	-Djdk.attach.allowAttachSelf=true \
 	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) -testnames TestSunAttachClasses \
@@ -427,6 +436,7 @@
 		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) \
 	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_JDK_HOME)$(D)lib$(D)tools.jar$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(Q) \
 	-Dcom.ibm.tools.attach.enable=yes \
+	-Dcom.ibm.tools.attach.logging=yes \
 	-Dcom.ibm.tools.attach.timeout=15000 \
 	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) -testnames TestManagementAgent \
 	-groups $(TEST_GROUP) \
@@ -452,6 +462,7 @@
 	--add-opens=java.base/java.lang=ALL-UNNAMED \
 	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(Q) \
 	-Dcom.ibm.tools.attach.enable=yes \
+	-Dcom.ibm.tools.attach.logging=yes \
 	-Dcom.ibm.tools.attach.timeout=15000 \
 	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) -testnames TestManagementAgent \
 	-groups $(TEST_GROUP) \
@@ -477,6 +488,7 @@
 		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) \
 	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_JDK_HOME)$(D)lib$(D)tools.jar$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(Q) \
 	-Dcom.ibm.tools.attach.enable=yes \
+	-Dcom.ibm.tools.attach.logging=yes \
 	-Djdk.attach.allowAttachSelf=true \
 	-Dcom.ibm.tools.attach.timeout=15000 \
 	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) -testnames TestJps \
@@ -501,6 +513,7 @@
 		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) \
 	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(Q) \
 	-Dcom.ibm.tools.attach.enable=yes \
+	-Dcom.ibm.tools.attach.logging=yes \
 	-Djdk.attach.allowAttachSelf=true \
 	-Dcom.ibm.tools.attach.timeout=15000 \
 	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) -testnames TestJps \
@@ -526,6 +539,7 @@
 		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) \
 	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_JDK_HOME)$(D)lib$(D)tools.jar$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(Q) \
 	-Dcom.ibm.tools.attach.enable=yes \
+	-Dcom.ibm.tools.attach.logging=yes \
 	-Djdk.attach.allowAttachSelf=true \
 	-Dcom.ibm.tools.attach.timeout=15000 \
 	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) -testnames TestJstack \
@@ -550,9 +564,9 @@
 		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) \
 	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(Q) \
 	-Dcom.ibm.tools.attach.enable=yes \
+	-Dcom.ibm.tools.attach.logging=yes \
 	-Djdk.attach.allowAttachSelf=true \
 	-Dcom.ibm.tools.attach.timeout=15000 \
-	--add-exports jdk.jcmd/openj9.tools.attach.diagnostics.info=ALL-UNNAMED \
 	--add-exports java.base/openj9.internal.tools.attach.target=ALL-UNNAMED \
 	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) -testnames TestJstack \
 	-groups $(TEST_GROUP) \
@@ -577,6 +591,7 @@
 		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) \
 	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_JDK_HOME)$(D)lib$(D)tools.jar$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(Q) \
 	-Dcom.ibm.tools.attach.enable=yes \
+	-Dcom.ibm.tools.attach.logging=yes \
 	-Djdk.attach.allowAttachSelf=true \
 	-Dcom.ibm.tools.attach.timeout=15000 \
 	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) -testnames TestJmap \
@@ -601,9 +616,9 @@
 		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) \
 	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(Q) \
 	-Dcom.ibm.tools.attach.enable=yes \
+	-Dcom.ibm.tools.attach.logging=yes \
 	-Djdk.attach.allowAttachSelf=true \
 	-Dcom.ibm.tools.attach.timeout=15000 \
-	--add-exports jdk.jcmd/openj9.tools.attach.diagnostics.info=ALL-UNNAMED \
 	--add-exports jdk.attach/com.ibm.tools.attach.attacher=ALL-UNNAMED \
 	--add-exports java.base/openj9.internal.tools.attach.target=ALL-UNNAMED \
 	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) -testnames TestJmap \
@@ -629,6 +644,7 @@
 		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) \
 	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_JDK_HOME)$(D)lib$(D)tools.jar$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(Q) \
 	-Dcom.ibm.tools.attach.enable=yes \
+	-Dcom.ibm.tools.attach.logging=yes \
 	-Djdk.attach.allowAttachSelf=true \
 	-Dcom.ibm.tools.attach.timeout=15000 \
 	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) -testnames TestJcmd \
@@ -650,6 +666,7 @@
 		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) \
 	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_JDK_HOME)$(D)lib$(D)tools.jar$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(Q) \
 	-Dcom.ibm.tools.attach.enable=yes \
+	-Dcom.ibm.tools.attach.logging=yes \
 	-Djdk.attach.allowAttachSelf=true \
 	-Dcom.ibm.tools.attach.timeout=15000 \
 	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) -testnames TestJcmd \
@@ -674,6 +691,7 @@
 		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) \
 	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_JDK_HOME)$(D)lib$(D)tools.jar$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(Q) \
 	-Dcom.ibm.tools.attach.enable=yes \
+	-Dcom.ibm.tools.attach.logging=yes \
 	-Dcom.ibm.tools.attach.timeout=15000 \
 	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) -testnames TestJstat \
 	-groups $(TEST_GROUP) \
@@ -694,6 +712,7 @@
 		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) \
 	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_JDK_HOME)$(D)lib$(D)tools.jar$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(Q) \
 	-Dcom.ibm.tools.attach.enable=yes \
+	-Dcom.ibm.tools.attach.logging=yes \
 	-Dcom.ibm.tools.attach.timeout=15000 \
 	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) -testnames TestJstat \
 	-groups $(TEST_GROUP) \
@@ -928,7 +947,8 @@
 			<variation>-XX:+RestrictContended</variation>
 			<variation>-XX:-EnableContended</variation>
 		</variations>
-		<command>$(ADD_JVM_LIB_DIR_TO_LIBPATH) $(JAVA_COMMAND) $(JVM_OPTIONS) \
+		<command>$(ADD_JVM_LIB_DIR_TO_LIBPATH) \
+		$(JAVA_COMMAND) $(JVM_OPTIONS) \
 		-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(P)$(JVM_TEST_ROOT)$(D)InstrumentationAgent$(D)instrumentation.jar$(Q) \
 		-javaagent:$(Q)$(JVM_TEST_ROOT)$(D)functional$(D)InstrumentationAgent$(D)instrumentation.jar$(Q) \
 		org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) \
@@ -961,10 +981,11 @@
 			<variation>-XX:+RestrictContended</variation>
 			<variation>-XX:-EnableContended</variation>
 		</variations>
-		<command>$(ADD_JVM_LIB_DIR_TO_LIBPATH) $(JAVA_COMMAND) $(JVM_OPTIONS) \
+		<command>$(ADD_JVM_LIB_DIR_TO_LIBPATH) \
+		$(JAVA_COMMAND) $(JVM_OPTIONS) \
 		--add-exports=java.base/com.ibm.oti.vm=ALL-UNNAMED --add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.math=ALL-UNNAMED --add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.base/java.lang.ref=ALL-UNNAMED --add-exports=java.base/jdk.internal.vm.annotation=ALL-UNNAMED \
 		-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(P)$(JVM_TEST_ROOT)$(D)InstrumentationAgent$(D)instrumentation.jar$(Q) \
-		 -javaagent:$(Q)$(JVM_TEST_ROOT)$(D)functional$(D)InstrumentationAgent$(D)instrumentation.jar$(Q) \
+		-javaagent:$(Q)$(JVM_TEST_ROOT)$(D)functional$(D)InstrumentationAgent$(D)instrumentation.jar$(Q) \
 		org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) \
 		-testnames ContendedFieldsTests \
 		-groups $(TEST_GROUP) \
@@ -1013,7 +1034,8 @@
 			<variation>-XX:RecreateClassfileOnload</variation>
 			<variation>-XX:+CompactStrings</variation>
 		</variations>
-		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) -verbose:stacktrace -Djava.security.policy=$(Q)$(TEST_RESROOT)$(D)java.policy$(Q) \
+		<command>$(ADD_JVM_LIB_DIR_TO_LIBPATH) \
+	$(JAVA_COMMAND) $(JAVA_SECURITY_MANAGER) $(JVM_OPTIONS) -verbose:stacktrace -Djava.security.policy=$(Q)$(TEST_RESROOT)$(D)java.policy$(Q) \
 	-Drowset.provider.classname=org.openj9.resources.classloader.CustomSyncProvider \
 	--add-modules openj9.sharedclasses $(ADD_MODULE_JAVA_SE_EE) \
 	--add-exports java.base/com.ibm.oti.vm=ALL-UNNAMED \
@@ -1057,7 +1079,107 @@
 		<versions>
 			<version>11+</version>
 		</versions>
-		<aot>nonapplicable</aot>
+		<features>
+			<feature>AOT:nonapplicable</feature>
+		</features>
+		<types>
+			<type>native</type>
+		</types>
+		<impls>
+			<impl>openj9</impl>
+			<impl>ibm</impl>
+		</impls>
+	</test>
+	<test>
+		<testCaseName>JCL_Test_SM</testCaseName>
+		<variations>
+			<variation>NoOptions</variation>
+			<variation>-XX:RecreateClassfileOnload</variation>
+			<variation>-XX:+CompactStrings</variation>
+		</variations>
+		<command>$(JAVA_COMMAND) $(JAVA_SECURITY_MANAGER) $(JVM_OPTIONS) -verbose:stacktrace -Djava.security.policy=$(Q)$(TEST_RESROOT)$(D)java.policy$(Q) \
+	-Drowset.provider.classname=org.openj9.resources.classloader.CustomSyncProvider \
+	--add-modules openj9.sharedclasses $(ADD_MODULE_JAVA_SE_EE) \
+	--add-exports java.base/com.ibm.oti.vm=ALL-UNNAMED \
+	--add-exports java.base/com.ibm.oti.util=ALL-UNNAMED \
+	--add-exports java.base/jdk.internal.vm.annotation=ALL-UNNAMED \
+	--add-exports java.base/jdk.internal.misc=ALL-UNNAMED $(ADD_EXPORTS_JDK_INTERNAL_REFLECT) \
+	--add-exports java.base/com.ibm.jit.crypto=ALL-UNNAMED \
+	--add-exports java.base/com.ibm.oti.reflect=ALL-UNNAMED \
+	--add-exports java.base/sun.net.www.protocol.jrt=ALL-UNNAMED \
+	--add-opens=java.base/java.lang=ALL-UNNAMED \
+	--add-opens=java.base/java.security=ALL-UNNAMED \
+	$(ADD_EXPORTS_JDK_INTERNAL_ACCESS) \
+	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(P)$(TEST_RESROOT)$(D)TestResources.jar$(P)$(LIB_DIR)$(D)asm-all.jar$(JAXB_API_JAR)$(Q) \
+	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng_sm.xml$(Q) \
+	-testnames \
+	JCL_TEST_Java-Lang_SM,\
+	JCL_TEST_Java-Lang-Invoke_SM,\
+	JCL_TEST_Java-Lang_ClassLoader_SM,\
+	JCL_TEST_IBM-VM_SM \
+	-groups $(TEST_GROUP) \
+	-excludegroups $(DEFAULT_EXCLUDE); \
+	$(TEST_STATUS)</command>
+		<levels>
+			<level>sanity</level>
+		</levels>
+		<groups>
+			<group>functional</group>
+		</groups>
+		<versions>
+			<version>11</version>
+			<version>17</version>
+			<version>18</version>
+		</versions>
+		<impls>
+			<impl>openj9</impl>
+			<impl>ibm</impl>
+		</impls>
+	</test>
+	<test>
+		<testCaseName>JCL_Test_Thread</testCaseName>
+		<variations>
+			<variation>NoOptions</variation>
+			<variation>-XX:RecreateClassfileOnload</variation>
+			<variation>-XX:+CompactStrings</variation>
+		</variations>
+		<command>$(ADD_JVM_LIB_DIR_TO_LIBPATH) \
+	$(JAVA_COMMAND) $(JAVA_SECURITY_MANAGER) $(JVM_OPTIONS) -verbose:stacktrace -Djava.security.policy=$(Q)$(TEST_RESROOT)$(D)java.policy$(Q) \
+	-Drowset.provider.classname=org.openj9.resources.classloader.CustomSyncProvider \
+	--add-modules openj9.sharedclasses $(ADD_MODULE_JAVA_SE_EE) \
+	--add-exports java.base/com.ibm.oti.vm=ALL-UNNAMED \
+	--add-exports java.base/com.ibm.oti.util=ALL-UNNAMED \
+	--add-exports java.base/jdk.internal.vm.annotation=ALL-UNNAMED \
+	--add-exports java.base/jdk.internal.misc=ALL-UNNAMED $(ADD_EXPORTS_JDK_INTERNAL_REFLECT) \
+	--add-exports java.base/com.ibm.jit.crypto=ALL-UNNAMED \
+	--add-exports java.base/com.ibm.oti.reflect=ALL-UNNAMED \
+	--add-exports java.base/sun.net.www.protocol.jrt=ALL-UNNAMED \
+	--add-opens=java.base/java.lang=ALL-UNNAMED \
+	--add-opens=java.base/java.security=ALL-UNNAMED \
+	$(ADD_EXPORTS_JDK_INTERNAL_ACCESS) \
+	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(P)$(TEST_RESROOT)$(D)TestResources.jar$(P)$(LIB_DIR)$(D)asm-all.jar$(JAXB_API_JAR)$(Q) \
+	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng_thread.xml$(Q) \
+	-testnames \
+	JCL_TEST_Java-Lang_Tread \
+	-groups $(TEST_GROUP) \
+	-excludegroups $(DEFAULT_EXCLUDE); \
+	$(TEST_STATUS)</command>
+		<platformRequirements>^vm.hrt</platformRequirements>
+		<levels>
+			<level>sanity</level>
+		</levels>
+		<groups>
+			<group>functional</group>
+		</groups>
+		<versions>
+			<version>[11, 22]</version>
+		</versions>
+		<features>
+			<feature>AOT:nonapplicable</feature>
+		</features>
+		<types>
+			<type>native</type>
+		</types>
 		<impls>
 			<impl>openj9</impl>
 			<impl>ibm</impl>
@@ -1069,7 +1191,8 @@
 			<variation>NoOptions</variation>
 			<variation>-XX:RecreateClassfileOnload</variation>
 		</variations>
-		<command>$(ADD_JVM_LIB_DIR_TO_LIBPATH) $(JAVA_COMMAND) $(JVM_OPTIONS) -verbose:stacktrace -Djava.security.policy=$(Q)$(TEST_RESROOT)$(D)java.policy$(Q) \
+		<command>$(ADD_JVM_LIB_DIR_TO_LIBPATH) \
+	$(JAVA_COMMAND) $(JVM_OPTIONS) -verbose:stacktrace -Djava.security.policy=$(Q)$(TEST_RESROOT)$(D)java.policy$(Q) \
 	-Drowset.provider.classname=org.openj9.resources.classloader.CustomSyncProvider \
 	--add-modules openj9.sharedclasses $(ADD_MODULE_JAVA_SE_EE) \
 	--add-exports java.base/com.ibm.oti.vm=ALL-UNNAMED \
@@ -1098,7 +1221,9 @@
 		<versions>
 			<version>11+</version>
 		</versions>
-		<aot>nonapplicable</aot>
+		<features>
+			<feature>AOT:nonapplicable</feature>
+		</features>
 		<types>
 			<type>native</type>
 		</types>
@@ -1113,7 +1238,8 @@
 			<variation>-Xshareclasses:none</variation>
 			<variation>-Xshareclasses:none -XX:RecreateClassfileOnload</variation>
 		</variations>
-		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) -verbose:stacktrace -Djava.security.policy=$(Q)$(TEST_RESROOT)$(D)java.policy$(Q) \
+		<command>$(ADD_JVM_LIB_DIR_TO_LIBPATH) \
+	$(JAVA_COMMAND) $(JAVA_SECURITY_MANAGER) $(JVM_OPTIONS) -verbose:stacktrace -Djava.security.policy=$(Q)$(TEST_RESROOT)$(D)java.policy$(Q) \
 	-Drowset.provider.classname=org.openj9.resources.classloader.CustomSyncProvider \
 	--add-modules openj9.sharedclasses $(ADD_MODULE_JAVA_SE_EE) \
 	--add-exports java.base/com.ibm.oti.vm=ALL-UNNAMED \
@@ -1157,7 +1283,57 @@
 		<versions>
 			<version>11+</version>
 		</versions>
-		<aot>nonapplicable</aot>
+		<features>
+			<feature>AOT:nonapplicable</feature>
+		</features>
+		<types>
+			<type>native</type>
+		</types>
+		<impls>
+			<impl>openj9</impl>
+			<impl>ibm</impl>
+		</impls>
+	</test>
+	<test>
+		<testCaseName>JCL_Test_SM_none_SCC</testCaseName>
+		<variations>
+			<variation>-Xshareclasses:none</variation>
+			<variation>-Xshareclasses:none -XX:RecreateClassfileOnload</variation>
+		</variations>
+		<command>$(JAVA_COMMAND) $(JAVA_SECURITY_MANAGER) $(JVM_OPTIONS) -verbose:stacktrace -Djava.security.policy=$(Q)$(TEST_RESROOT)$(D)java.policy$(Q) \
+	-Drowset.provider.classname=org.openj9.resources.classloader.CustomSyncProvider \
+	--add-modules openj9.sharedclasses $(ADD_MODULE_JAVA_SE_EE) \
+	--add-exports java.base/com.ibm.oti.vm=ALL-UNNAMED \
+	--add-exports java.base/com.ibm.oti.util=ALL-UNNAMED \
+	--add-exports java.base/jdk.internal.vm.annotation=ALL-UNNAMED \
+	--add-exports java.base/jdk.internal.misc=ALL-UNNAMED $(ADD_EXPORTS_JDK_INTERNAL_REFLECT) \
+	--add-exports java.base/com.ibm.jit.crypto=ALL-UNNAMED \
+	--add-exports java.base/com.ibm.oti.reflect=ALL-UNNAMED \
+	--add-exports java.base/sun.net.www.protocol.jrt=ALL-UNNAMED \
+	--add-opens=java.base/java.lang=ALL-UNNAMED \
+	--add-opens=java.base/java.security=ALL-UNNAMED \
+	$(ADD_EXPORTS_JDK_INTERNAL_ACCESS) \
+	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(P)$(TEST_RESROOT)$(D)TestResources.jar$(P)$(LIB_DIR)$(D)asm-all.jar$(JAXB_API_JAR)$(Q) \
+	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng_sm.xml$(Q) \
+	-testnames \
+	JCL_TEST_Java-Lang_SM,\
+	JCL_TEST_Java-Lang-Invoke_SM,\
+	JCL_TEST_Java-Lang_ClassLoader_SM,\
+	JCL_TEST_IBM-VM_SM \
+	-groups $(TEST_GROUP) \
+	-excludegroups $(DEFAULT_EXCLUDE); \
+	$(TEST_STATUS)</command>
+		<levels>
+			<level>sanity</level>
+		</levels>
+		<groups>
+			<group>functional</group>
+		</groups>
+		<versions>
+			<version>11</version>
+			<version>17</version>
+			<version>18</version>
+		</versions>
 		<impls>
 			<impl>openj9</impl>
 			<impl>ibm</impl>
@@ -1169,7 +1345,8 @@
 			<variation>-Xshareclasses:none</variation>
 			<variation>-XX:RecreateClassfileOnload -Xshareclasses:none</variation>
 		</variations>
-		<command>$(ADD_JVM_LIB_DIR_TO_LIBPATH) $(JAVA_COMMAND) $(JVM_OPTIONS) -verbose:stacktrace -Djava.security.policy=$(Q)$(TEST_RESROOT)$(D)java.policy$(Q) \
+		<command>$(ADD_JVM_LIB_DIR_TO_LIBPATH) \
+	$(JAVA_COMMAND) $(JVM_OPTIONS) -verbose:stacktrace -Djava.security.policy=$(Q)$(TEST_RESROOT)$(D)java.policy$(Q) \
 	-Drowset.provider.classname=org.openj9.resources.classloader.CustomSyncProvider \
 	--add-modules openj9.sharedclasses $(ADD_MODULE_JAVA_SE_EE) \
 	--add-exports java.base/com.ibm.oti.vm=ALL-UNNAMED \
@@ -1198,7 +1375,9 @@
 		<versions>
 			<version>11+</version>
 		</versions>
-		<aot>nonapplicable</aot>
+		<features>
+			<feature>AOT:nonapplicable</feature>
+		</features>
 		<types>
 			<type>native</type>
 		</types>
@@ -1253,10 +1432,11 @@
 			<variation>-XX:RecreateClassfileOnload</variation>
 			<variation>-XX:+CompactStrings</variation>
 		</variations>
-		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) -verbose:stacktrace -Djava.security.policy=$(Q)$(TEST_RESROOT)$(D)java.policy$(Q) \
+		<command>$(ADD_JVM_LIB_DIR_TO_LIBPATH) \
+	$(JAVA_COMMAND) $(JVM_OPTIONS) -verbose:stacktrace -Djava.security.policy=$(Q)$(TEST_RESROOT)$(D)java.policy$(Q) \
 	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(P)$(TEST_RESROOT)$(D)TestResources.jar$(P)$(LIB_DIR)$(D)asm-all.jar$(Q) \
 	-Drowset.provider.classname=org.openj9.resources.classloader.CustomSyncProvider \
-	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) \
+	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng_sm.xml$(Q) \
 	-testnames \
 	JCL_TEST_Test-TypeAnnotation,\
 	JCL_TEST_Test-Annotation,\
@@ -1264,11 +1444,14 @@
 	JCL_TEST_Test-Annotation-ClassLoader,\
 	JCL_TEST_Test-Annotation-Package,\
 	JCL_TEST_Java-Lang_ClassLoader,\
+	JCL_TEST_Java-Lang_ClassLoader_SM,\
 	JCL_TEST_Test-Defects,\
 	JCL_TEST_Test-UnsafeFence,\
 	JCL_TEST_IBM-VM,\
 	JCL_TEST_Java-Lang,\
+	JCL_TEST_Java-Lang_SM,\
 	JCL_TEST_Java-Lang-Invoke,\
+	JCL_TEST_Java-Lang-Invoke_SM,\
 	JCL_TEST_Java-Lang-Ref,\
 	JCL_TEST_Java-Lang-Reflect,\
 	JCL_TEST_Java-Math,\
@@ -1290,7 +1473,9 @@
 			<impl>openj9</impl>
 			<impl>ibm</impl>
 		</impls>
-		<aot>nonapplicable</aot>
+		<features>
+			<feature>AOT:nonapplicable</feature>
+		</features>
 	</test>
 	<test>
 		<testCaseName>JCL_Test_SE80_Native</testCaseName>
@@ -1298,7 +1483,8 @@
 			<variation>NoOptions</variation>
 			<variation>-XX:RecreateClassfileOnload</variation>
 		</variations>
-		<command>$(ADD_JVM_LIB_DIR_TO_LIBPATH) $(JAVA_COMMAND) $(JVM_OPTIONS) -verbose:stacktrace -Djava.security.policy=$(Q)$(TEST_RESROOT)$(D)java.policy$(Q) \
+		<command>$(ADD_JVM_LIB_DIR_TO_LIBPATH) \
+	$(JAVA_COMMAND) $(JVM_OPTIONS) -verbose:stacktrace -Djava.security.policy=$(Q)$(TEST_RESROOT)$(D)java.policy$(Q) \
 	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(P)$(TEST_RESROOT)$(D)TestResources.jar$(P)$(LIB_DIR)$(D)asm-all.jar$(Q) \
 	-Drowset.provider.classname=org.openj9.resources.classloader.CustomSyncProvider \
 	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) \
@@ -1323,7 +1509,9 @@
 			<impl>openj9</impl>
 			<impl>ibm</impl>
 		</impls>
-		<aot>nonapplicable</aot>
+		<features>
+			<feature>AOT:nonapplicable</feature>
+		</features>
 	</test>
 	<test>
 		<testCaseName>JCL_Test_OutOfMemoryError_SE80</testCaseName>
@@ -1362,7 +1550,7 @@
 		</variations>
 		<command>$(MKDIR) -p $(REPORTDIR); \
 	cd $(REPORTDIR); \
-	$(JAVA_COMMAND) $(JVM_OPTIONS) -verbose:stacktrace \
+	$(JAVA_COMMAND) $(JAVA_SECURITY_MANAGER) $(JVM_OPTIONS) -verbose:stacktrace \
 	-Djava.security.policy=$(Q)$(TEST_RESROOT)$(D)java.policy$(Q) \
 	-Xbootclasspath/a:$(TEST_RESROOT)$(D)TestResources.jar \
 	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(P)$(TEST_RESROOT)$(D)TestResources.jar$(P)$(LIB_DIR)$(D)asm-all.jar$(Q) \
@@ -1371,7 +1559,6 @@
 	-groups $(TEST_GROUP) \
 	-excludegroups $(DEFAULT_EXCLUDE); \
 	$(TEST_STATUS)</command>
-		<platformRequirements>^vm.hrt</platformRequirements>
 		<levels>
 			<level>sanity</level>
 		</levels>
@@ -1379,7 +1566,41 @@
 			<group>functional</group>
 		</groups>
 		<versions>
-			<version>9+</version>
+			<version>11</version>
+			<version>17</version>
+			<version>18</version>
+		</versions>
+		<impls>
+			<impl>openj9</impl>
+			<impl>ibm</impl>
+		</impls>
+	</test>
+	<test>
+		<testCaseName>J9VMInternals_Test_SM</testCaseName>
+		<variations>
+			<variation>NoOptions</variation>
+		</variations>
+		<command>$(MKDIR) -p $(REPORTDIR); \
+	cd $(REPORTDIR); \
+	$(JAVA_COMMAND) $(JAVA_SECURITY_MANAGER) $(JVM_OPTIONS) -verbose:stacktrace \
+	-Djava.security.policy=$(Q)$(TEST_RESROOT)$(D)java.policy$(Q) \
+	-Xbootclasspath/a:$(TEST_RESROOT)$(D)TestResources.jar \
+	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(P)$(TEST_RESROOT)$(D)TestResources.jar$(P)$(LIB_DIR)$(D)asm-all.jar$(Q) \
+	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng_sm.xml$(Q) \
+	-testnames JCL_TEST_Java-Internals_SM \
+	-groups $(TEST_GROUP) \
+	-excludegroups $(DEFAULT_EXCLUDE); \
+	$(TEST_STATUS)</command>
+		<levels>
+			<level>sanity</level>
+		</levels>
+		<groups>
+			<group>functional</group>
+		</groups>
+		<versions>
+			<version>11</version>
+			<version>17</version>
+			<version>18</version>
 		</versions>
 		<impls>
 			<impl>openj9</impl>
@@ -1398,8 +1619,10 @@
 	-Djava.security.policy=$(Q)$(TEST_RESROOT)$(D)java.policy$(Q) \
 	-Xbootclasspath/a:$(TEST_RESROOT)$(D)TestResources.jar \
 	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(P)$(TEST_RESROOT)$(D)TestResources.jar$(P)$(LIB_DIR)$(D)asm-all.jar$(Q) \
-	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) \
-	-testnames JCL_TEST_Java-Internals \
+	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng_sm.xml$(Q) \
+	-testnames \
+	JCL_TEST_Java-Internals,\
+	JCL_TEST_Java-Internals_SM \
 	-groups $(TEST_GROUP) \
 	-excludegroups $(DEFAULT_EXCLUDE); \
 	$(TEST_STATUS)</command>
@@ -1424,6 +1647,12 @@
 -->
 	<test>
 		<testCaseName>JCL_TEST_Java-Security_SE80</testCaseName>
+		<disables>
+			<disable>
+				<comment>https://github.com/eclipse-openj9/openj9/issues/16900</comment>
+				<testflag>FIPS140_2</testflag>
+			</disable>
+		</disables>
 		<variations>
 			<variation>NoOptions</variation>
 		</variations>
@@ -1431,8 +1660,10 @@
 	-Djava.security.policy=$(Q)$(TEST_RESROOT)$(D)testacc.policy$(Q) \
 	-Xbootclasspath/a:$(TEST_RESROOT)$(D)TestResources.jar \
 	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(P)$(TEST_RESROOT)$(D)TestResources.jar$(P)$(LIB_DIR)$(D)asm-all.jar$(Q) \
-	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) \
-	-testnames JCL_TEST_Java-Security \
+	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng_sm.xml$(Q) \
+	-testnames \
+	JCL_TEST_Java-Security,\
+	JCL_TEST_Java-Security_SM \
 	-groups $(TEST_GROUP) \
 	-excludegroups $(DEFAULT_EXCLUDE); \
 	$(TEST_STATUS)</command>
@@ -1456,10 +1687,20 @@
 -->
 	<test>
 		<testCaseName>JCL_TEST_Java-Security</testCaseName>
+		<disables>
+			<disable>
+				<comment>https://github.com/eclipse-openj9/openj9/issues/16900</comment>
+				<testflag>FIPS140_2</testflag>
+			</disable>
+			<disable>
+				<comment>https://github.com/eclipse-openj9/openj9/issues/19116</comment>
+				<platform>.*aix.*</platform>
+			</disable>
+		</disables>
 		<variations>
 			<variation>NoOptions</variation>
 		</variations>
-		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) -verbose:stacktrace \
+		<command>$(JAVA_COMMAND) $(JAVA_SECURITY_MANAGER) $(JVM_OPTIONS) -verbose:stacktrace \
 	--add-modules openj9.sharedclasses $(ADD_MODULE_JAVA_SE_EE) \
 	--add-exports java.base/com.ibm.oti.vm=ALL-UNNAMED \
 	--add-exports java.base/com.ibm.oti.util=ALL-UNNAMED \
@@ -1486,6 +1727,40 @@
 		</groups>
 		<versions>
 			<version>9+</version>
+		</versions>
+		<impls>
+			<impl>openj9</impl>
+			<impl>ibm</impl>
+		</impls>
+	</test>
+	<test>
+		<testCaseName>JCL_TEST_Java-Security_SM</testCaseName>
+		<variations>
+			<variation>NoOptions</variation>
+		</variations>
+		<command>$(JAVA_COMMAND) $(JAVA_SECURITY_MANAGER) $(JVM_OPTIONS) -verbose:stacktrace \
+	--add-modules openj9.sharedclasses $(ADD_MODULE_JAVA_SE_EE) \
+	--add-exports java.base/com.ibm.oti.util=ALL-UNNAMED \
+	--add-opens=java.base/java.lang=ALL-UNNAMED \
+	--add-opens=java.base/java.security=ALL-UNNAMED \
+	-Djava.security.policy=$(Q)$(TEST_RESROOT)$(D)testacc.policy$(Q) \
+	-Xbootclasspath/a:$(TEST_RESROOT)$(D)TestResources.jar \
+	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(P)$(TEST_RESROOT)$(D)TestResources.jar$(P)$(LIB_DIR)$(D)asm-all.jar$(Q) \
+	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng_sm.xml$(Q) \
+	-testnames JCL_TEST_Java-Security_SM \
+	-groups $(TEST_GROUP) \
+	-excludegroups $(DEFAULT_EXCLUDE); \
+	$(TEST_STATUS)</command>
+		<levels>
+			<level>sanity</level>
+		</levels>
+		<groups>
+			<group>functional</group>
+		</groups>
+		<versions>
+			<version>11</version>
+			<version>17</version>
+			<version>18</version>
 		</versions>
 		<impls>
 			<impl>openj9</impl>
@@ -1524,7 +1799,7 @@
 	<test>
 		<testCaseName>JCL_Test_JITHelpers</testCaseName>
 		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) \
-	--add-opens=java.base/java.lang=ALL-UNNAMED  \
+	--add-opens=java.base/java.lang=ALL-UNNAMED \
 	--add-exports=java.base/com.ibm.jit=ALL-UNNAMED \
 	--add-opens=java.base/com.ibm.jit=ALL-UNNAMED -Xbootclasspath/a:$(Q)$(TEST_RESROOT)$(D)TestResources.jar$(Q) \
 	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(Q) \
@@ -1607,7 +1882,8 @@
 			<variation>Mode351 -Xjit:noJitUntilMain,count=0,optlevel=warm</variation>
 			<variation>Mode610 -Xjit:noJitUntilMain,count=0,optlevel=warm</variation>
 		</variations>
-		<command>$(ADD_JVM_LIB_DIR_TO_LIBPATH) $(JAVA_COMMAND) $(JVM_OPTIONS) \
+		<command>$(ADD_JVM_LIB_DIR_TO_LIBPATH) \
+	$(JAVA_COMMAND) $(JVM_OPTIONS) \
 	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(Q) \
 	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) \
 	-testnames \
@@ -1722,7 +1998,8 @@
 			<variation>Mode600</variation>
 			<variation>Mode619</variation>
 		</variations>
-		<command>$(ADD_JVM_LIB_DIR_TO_LIBPATH) $(JAVA_COMMAND) $(JVM_OPTIONS) \
+		<command>$(ADD_JVM_LIB_DIR_TO_LIBPATH) \
+	$(JAVA_COMMAND) $(JVM_OPTIONS) \
 	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(Q) \
 	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) \
 	-testnames TestArrayCopy \
@@ -1749,7 +2026,8 @@
 			<variation>Mode600</variation>
 			<variation>Mode619</variation>
 		</variations>
-		<command>$(ADD_JVM_LIB_DIR_TO_LIBPATH) $(JAVA_COMMAND) $(JVM_OPTIONS) -Xshareclasses:none \
+		<command>$(ADD_JVM_LIB_DIR_TO_LIBPATH) \
+	$(JAVA_COMMAND) $(JVM_OPTIONS) -Xshareclasses:none \
 	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(Q) \
 	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) \
 	-testnames TestArrayCopy \
@@ -1775,7 +2053,8 @@
 			<variation>Mode600</variation>
 			<variation>Mode619</variation>
 		</variations>
-		<command>$(ADD_JVM_LIB_DIR_TO_LIBPATH) $(JAVA_COMMAND) $(JVM_OPTIONS) -Xshareclasses:none \
+		<command>$(ADD_JVM_LIB_DIR_TO_LIBPATH) \
+	$(JAVA_COMMAND) $(JVM_OPTIONS) -Xshareclasses:none \
 	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(Q) \
 	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) \
 	-testnames TestArrayCopy \
@@ -1895,7 +2174,8 @@
 			<variation>Mode351</variation>
 			<variation>Mode551</variation>
 		</variations>
-		<command>$(ADD_JVM_LIB_DIR_TO_LIBPATH) $(JAVA_COMMAND) $(JVM_OPTIONS) \
+		<command>$(ADD_JVM_LIB_DIR_TO_LIBPATH) \
+	$(JAVA_COMMAND) $(JVM_OPTIONS) \
 	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(Q) \
 	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) \
 	-testnames jniOnLoadExceptions \
@@ -1924,7 +2204,8 @@
 			<variation>Mode610</variation>
 			<variation>Mode551</variation>
 		</variations>
-		<command>$(ADD_JVM_LIB_DIR_TO_LIBPATH) $(JAVA_COMMAND) $(JVM_OPTIONS) \
+		<command>$(ADD_JVM_LIB_DIR_TO_LIBPATH) \
+	$(JAVA_COMMAND) $(JVM_OPTIONS) \
 	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(Q) \
 	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) \
 	-testnames badUTF8inJNI \
@@ -1948,7 +2229,8 @@
 	</test>
 	<test>
 		<testCaseName>pthreadDestructor</testCaseName>
-		<command>$(ADD_JVM_LIB_DIR_TO_LIBPATH) $(JAVA_COMMAND) $(JVM_OPTIONS) \
+		<command>$(ADD_JVM_LIB_DIR_TO_LIBPATH) \
+	$(JAVA_COMMAND) $(JVM_OPTIONS) \
 	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(Q) \
 	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) \
 	-testnames pthreadDestructor \
@@ -1960,7 +2242,7 @@
 			<variation>Mode610</variation>
 		</variations>
 		<!-- OpenJ9 issue 1421, failed on zos:
-		z/OS documentation indicates the destructor supplied 
+		z/OS documentation indicates the destructor supplied
 		with pthread_key_create() may not be run on thread exit.
 		-->
 		<platformRequirements>^arch.arm,^os.zos</platformRequirements>
@@ -2190,7 +2472,8 @@
 	</test>
 	<test>
 		<testCaseName>reattachAfterExit</testCaseName>
-		<command>$(ADD_JVM_LIB_DIR_TO_LIBPATH) $(JAVA_COMMAND) $(JVM_OPTIONS) \
+		<command>$(ADD_JVM_LIB_DIR_TO_LIBPATH) \
+	$(JAVA_COMMAND) $(JVM_OPTIONS) \
 	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(Q) \
 	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) \
 	-testnames reattachAfterExit \
@@ -2394,7 +2677,8 @@
 			<variation>Mode110</variation>
 			<variation>Mode610</variation>
 		</variations>
-		<command>$(ADD_JVM_LIB_DIR_TO_LIBPATH) $(JAVA_COMMAND) $(JVM_OPTIONS) \
+		<command>$(ADD_JVM_LIB_DIR_TO_LIBPATH) \
+	$(JAVA_COMMAND) $(JVM_OPTIONS) \
 	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(Q) \
 	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) \
 	-testnames testStringInterning \
@@ -2529,7 +2813,8 @@
 	</test>
 	<test>
 		<testCaseName>loadLegacyLibrary</testCaseName>
-		<command>$(ADD_JVM_LIB_DIR_TO_LIBPATH) $(JAVA_COMMAND) $(JVM_OPTIONS) \
+		<command>$(ADD_JVM_LIB_DIR_TO_LIBPATH) \
+			$(JAVA_COMMAND) $(JVM_OPTIONS) \
 			-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(Q) \
 			org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) \
 			-testnames loadLegacyLibrary \
@@ -2554,7 +2839,8 @@
 	</test>
 	<test>
 		<testCaseName>classRelationshipVerifierTests</testCaseName>
-		<command>$(ADD_JVM_LIB_DIR_TO_LIBPATH) $(JAVA_COMMAND) $(JVM_OPTIONS) \
+		<command>$(ADD_JVM_LIB_DIR_TO_LIBPATH) \
+			$(JAVA_COMMAND) $(JVM_OPTIONS) \
 			-XX:+ClassRelationshipVerifier \
 			-cp $(Q)$(LIB_DIR)$(D)asm-all.jar$(P)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(Q) \
 			org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) \
@@ -2579,7 +2865,8 @@
 	</test>
 	<test>
 		<testCaseName>LoadClassWithUTF8PkgNameTest</testCaseName>
-		<command>$(ADD_JVM_LIB_DIR_TO_LIBPATH) $(JAVA_COMMAND) $(JVM_OPTIONS) \
+		<command>$(ADD_JVM_LIB_DIR_TO_LIBPATH) \
+			$(JAVA_COMMAND) $(JVM_OPTIONS) \
 			-cp $(Q)$(LIB_DIR)$(D)asm-all.jar$(P)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(Q) \
 			org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) \
 			-testnames LoadClassWithUTF8PkgNameTest \
@@ -2621,7 +2908,8 @@
 	</test>
 	<test>
 		<testCaseName>RuntimeAnnotationTests</testCaseName>
-		<command>$(ADD_JVM_LIB_DIR_TO_LIBPATH) $(JAVA_COMMAND) $(JVM_OPTIONS) \
+		<command>$(ADD_JVM_LIB_DIR_TO_LIBPATH) \
+			$(JAVA_COMMAND) $(JVM_OPTIONS) \
 			$(ADD_EXPORTS_JDK_INTERNAL_REFLECT) $(ADD_EXPORTS_JDK_INTERNAL_MISC) $(ADD_EXPORTS_JDK_INTERNAL_ACCESS) \
 			-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(Q) \
 			org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) \
@@ -2646,7 +2934,8 @@
 	</test>
 	<test>
 		<testCaseName>ConstantPoolTests</testCaseName>
-		<command>$(ADD_JVM_LIB_DIR_TO_LIBPATH) $(JAVA_COMMAND) $(JVM_OPTIONS) \
+		<command>$(ADD_JVM_LIB_DIR_TO_LIBPATH) \
+			$(JAVA_COMMAND) $(JVM_OPTIONS) \
 			$(ADD_EXPORTS_JDK_INTERNAL_REFLECT) $(ADD_EXPORTS_JDK_INTERNAL_MISC) $(ADD_EXPORTS_JDK_INTERNAL_ACCESS) \
 			-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(Q) \
 			org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) \

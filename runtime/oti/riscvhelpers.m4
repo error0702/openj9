@@ -1,4 +1,4 @@
-dnl Copyright (c) 2021, 2021 IBM Corp. and others
+dnl Copyright IBM Corp. and others 2021
 dnl
 dnl This program and the accompanying materials are made available under
 dnl the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,9 +14,11 @@ dnl Exception [1] and GNU General Public License, version 2 with the
 dnl OpenJDK Assembly Exception [2].
 dnl
 dnl [1] https://www.gnu.org/software/classpath/license.html
-dnl [2] http://openjdk.java.net/legal/assembly-exception.html
+dnl [2] https://openjdk.org/legal/assembly-exception.html
 dnl
-dnl SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+dnl SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+
+.cfi_sections .eh_frame, .debug_frame
 
 include(jilvalues.m4)
 
@@ -25,29 +27,37 @@ ifelse(eval(CINTERP_STACK_SIZE % 16),0,,{ERROR stack size CINTERP_STACK_SIZE is 
 
 define({M},{$2{(}$1{)}})
 
-
 define({ALen},{8})
 
+dnl
+dnl See J9::RV::PrivateLinkageProperties::PrivateLinkageProperties() in RVPrivateLinkage.cpp
+dnl Following definitions must be kept in sync with private linkage.
+dnl
 define({J9VMTHREAD},{s10})
 define({J9SP},{s11})
+define({J9VTABLEINDEX},{t3})
 
 define({FUNC_LABEL},{$1})
 
 define({DECLARE_PUBLIC},{
     .globl FUNC_LABEL($1)
-    .type FUNC_LABEL($1),function
-})
+    .type FUNC_LABEL($1),function})
 
-define({DECLARE_EXTERN},{.extern $1})
+define({DECLARE_EXTERN},{.extern FUNC_LABEL($1)})
 
 define({START_PROC},{
     .text
-    DECLARE_PUBLIC($1)
+    .globl FUNC_LABEL($1)
+    .type FUNC_LABEL($1),function
     .align 2
 FUNC_LABEL($1):
-})
+    .cfi_startproc
+    pushdef({CURRENT_PROC},{$1})})
 
-define({END_PROC})
+define({END_PROC},{
+    .cfi_endproc
+    .size   FUNC_LABEL(CURRENT_PROC), .-FUNC_LABEL(CURRENT_PROC)
+    popdef({CURRENT_PROC})})
 
 define({BRANCH_SYMBOL},{FUNC_LABEL($1)})
 
@@ -145,6 +155,11 @@ define({GPR_SAVE_INDEX},{
 })
 define({GPR_SAVE_OFFSET},{eval(J9TR_cframe_preservedGPRs+(($1)*ALen))})
 define({GPR_SAVE_SLOT},{M(sp, GPR_SAVE_OFFSET(GPR_SAVE_INDEX($1)))})
+define({GPR_SAVE},{sd $1, GPR_SAVE_SLOT($1)
+    .cfi_rel_offset $1, GPR_SAVE_OFFSET(GPR_SAVE_INDEX($1))})
+define({GPR_RESTORE},{ld $1, GPR_SAVE_SLOT($1)
+    .cfi_same_value $1})
+
 define({FPR_SAVE_INDEX},{
     ifelse(eval(FPR_NUMBER_$1 >= FPR_NUMBER_fs0 && FPR_NUMBER_$1 <= FPR_NUMBER_fs1),1,
         eval(FPR_NUMBER_$1-8),
@@ -156,6 +171,10 @@ define({FPR_SAVE_INDEX},{
 })
 define({FPR_SAVE_OFFSET},{eval(J9TR_cframe_preservedFPRs+(($1)*8))})
 define({FPR_SAVE_SLOT},{M(sp, FPR_SAVE_OFFSET(FPR_SAVE_INDEX($1)))})
+define({FPR_SAVE},{fsd $1, FPR_SAVE_SLOT($1)
+    .cfi_rel_offset $1, FPR_SAVE_OFFSET(FPR_SAVE_INDEX($1))})
+define({FPR_RESTORE},{fld $1, FPR_SAVE_SLOT($1)
+    .cfi_same_value $1})
 
 define({JIT_GPR_SAVE_OFFSET},{eval(J9TR_cframe_jitGPRs+(($1)*ALen))})
 define({JIT_GPR_SAVE_SLOT},{M(sp, JIT_GPR_SAVE_OFFSET(GPR_NUMBER($1)))})
@@ -205,7 +224,7 @@ define({SAVE_C_VOLATILE_REGS},{
     sd  a5,  JIT_GPR_SAVE_SLOT(a5)
     sd  a6,  JIT_GPR_SAVE_SLOT(a6)
     sd  a7,  JIT_GPR_SAVE_SLOT(a7)
-    
+
     sd  t3,  JIT_GPR_SAVE_SLOT(t3)
     sd  t4,  JIT_GPR_SAVE_SLOT(t4)
     sd  t5,  JIT_GPR_SAVE_SLOT(t5)
@@ -250,7 +269,7 @@ define({RESTORE_C_VOLATILE_REGS},{
     ld  a5,  JIT_GPR_SAVE_SLOT(a5)
     ld  a6,  JIT_GPR_SAVE_SLOT(a6)
     ld  a7,  JIT_GPR_SAVE_SLOT(a7)
-    
+
     ld  t3,  JIT_GPR_SAVE_SLOT(t3)
     ld  t4,  JIT_GPR_SAVE_SLOT(t4)
     ld  t5,  JIT_GPR_SAVE_SLOT(t5)
@@ -327,7 +346,7 @@ define({RESTORE_ALL_REGS},{
     RESTORE_C_NONVOLATILE_REGS
 })
 
-dnl Note, that s10 (vmthread) & s11 (java sp) are not 
+dnl Note, that s10 (vmthread) & s11 (java sp) are not
 dnl saved / restored
 
 define({SAVE_PRESERVED_REGS},{
@@ -341,11 +360,11 @@ define({SAVE_PRESERVED_REGS},{
     sd  s6,  JIT_GPR_SAVE_SLOT(s6)
     sd  s7,  JIT_GPR_SAVE_SLOT(s7)
     sd  s8,  JIT_GPR_SAVE_SLOT(s8)
-    sd  s9,  JIT_GPR_SAVE_SLOT(s9)
+    sd  s9,  JIT_GPR_SAVE_SLOT(s9)                  # save preserved regs (end)
 })
 
 define({RESTORE_PRESERVED_REGS},{
-    ld  s0,  JIT_GPR_SAVE_SLOT(s0)
+    ld  s0,  JIT_GPR_SAVE_SLOT(s0)                  # restore preserved regs
     ld  s1,  JIT_GPR_SAVE_SLOT(s1)
 
     ld  s2,  JIT_GPR_SAVE_SLOT(s2)
@@ -355,7 +374,7 @@ define({RESTORE_PRESERVED_REGS},{
     ld  s6,  JIT_GPR_SAVE_SLOT(s6)
     ld  s7,  JIT_GPR_SAVE_SLOT(s7)
     ld  s8,  JIT_GPR_SAVE_SLOT(s8)
-    ld  s9,  JIT_GPR_SAVE_SLOT(s9)
+    ld  s9,  JIT_GPR_SAVE_SLOT(s9)                  # restore preserved regs (end)
 })
 
 define({BRANCH_VIA_VMTHREAD},{
@@ -364,9 +383,9 @@ define({BRANCH_VIA_VMTHREAD},{
 })
 
 define({SWITCH_TO_JAVA_STACK},{
-    ld J9SP,M(J9VMTHREAD, J9TR_VMThread_sp)
+    ld J9SP,M(J9VMTHREAD, J9TR_VMThread_sp)         # restore Java SP from VMThread
 })
 
 define({SWITCH_TO_C_STACK},{
-    sd J9SP,M(J9VMTHREAD, J9TR_VMThread_sp)
+    sd J9SP,M(J9VMTHREAD, J9TR_VMThread_sp)         # save Java SP to VMThread
 })

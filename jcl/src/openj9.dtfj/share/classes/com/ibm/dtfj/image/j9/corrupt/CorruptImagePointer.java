@@ -1,6 +1,6 @@
 /*[INCLUDE-IF Sidecar18-SE]*/
-/*******************************************************************************
- * Copyright (c) 1991, 2017 IBM Corp. and others
+/*
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,10 +16,10 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
 package com.ibm.dtfj.image.j9.corrupt;
 
 import java.util.Properties;
@@ -34,21 +34,21 @@ import com.ibm.dtfj.image.j9.CorruptData;
 /**
  * Class to represent a corrupt pointer and can be used to populate a corrupt data exception.
  * It will throw exceptions if an attempt is made to read data using it.
- *  
+ *
  * @author Adam Pilkington
  *
  */
 public class CorruptImagePointer implements ImagePointer {
 	private long address = 0;
 	private ImageAddressSpace memory = null;
-	
+
 	public CorruptImagePointer(long address, ImageAddressSpace memory) {
 		this.address = address;
 		this.memory = memory;
 	}
-	
+
 	public ImagePointer add(long offset) {
-		return memory.getPointer(address + offset);		
+		return memory.getPointer(address + offset);
 	}
 
 	public long getAddress() {
@@ -58,7 +58,7 @@ public class CorruptImagePointer implements ImagePointer {
 	public ImageAddressSpace getAddressSpace() {
 		return memory;
 	}
-	
+
 	public String toString() {
 		return "0x" + Long.toHexString(address);
 	}
@@ -102,7 +102,7 @@ public class CorruptImagePointer implements ImagePointer {
 	public boolean isShared() throws DataUnavailable {
 		throw new DataUnavailable();
 	}
-	
+
 	public Properties getProperties() {
 		return new Properties();
 	}

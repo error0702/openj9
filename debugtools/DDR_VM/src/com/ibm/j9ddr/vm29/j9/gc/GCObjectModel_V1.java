@@ -1,5 +1,5 @@
-/*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+/*
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,10 +15,10 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
 package com.ibm.j9ddr.vm29.j9.gc;
 
 import com.ibm.j9ddr.CorruptDataException;
@@ -51,22 +51,22 @@ class GCObjectModel_V1 extends GCObjectModel
 	private J9ClassPointer atomicMarkableReferenceClass;
 	private VoidPointer tenureBase;
 	private UDATA tenureSize;
-	
+
 	// TODO : these will be real soon
 	private static final long OBJECT_HEADER_REMEMBERED_BITS;
-//	private static final long OBJECT_HEADER_REMEMBERED_BITS_SHIFT;
-//	private static final long STATE_NOT_REMEMBERED;
+	// private static final long OBJECT_HEADER_REMEMBERED_BITS_SHIFT;
+	// private static final long STATE_NOT_REMEMBERED;
 	private static final long STATE_REMEMBERED;
-	
+
 	/*
 	 * Object alignment in the heap was 8 for years but
 	 * now we are supporting run-time value for it to have selection between 8 and 16
 	 * to support 4-bit compressed references.
 	 * However DDR should have ability to handle old cores
-	 * so we need hard coded value for object alignment 
+	 * so we need hard coded value for object alignment
 	 */
 	private static final long OBSOLETE_OBJECT_ALIGNMENT_IN_BYTES = 8;
-	
+
 	static
 	{
 		OBJECT_HEADER_REMEMBERED_BITS = OBJECT_HEADER_AGE_MASK & ~J9_GC_ARRAYLET_LAYOUT_MASK;
@@ -74,9 +74,9 @@ class GCObjectModel_V1 extends GCObjectModel
 //		STATE_NOT_REMEMBERED = 0;
 		STATE_REMEMBERED = J9_OBJECT_HEADER_REMEMBERED_BITS_TO_SET & OBJECT_HEADER_REMEMBERED_BITS;
 	}
-	
+
 	/* Do not instantiate. Use the factory */
-	protected GCObjectModel_V1() throws CorruptDataException 
+	protected GCObjectModel_V1() throws CorruptDataException
 	{
 		GC_ObjectModelPointer imageObjectModel = getExtensions().objectModel();
 		vm = GCBase.getJavaVM();
@@ -88,13 +88,13 @@ class GCObjectModel_V1 extends GCObjectModel
 	}
 
 	@Override
-	public U32 getAge(J9ObjectPointer object) throws CorruptDataException 
+	public U32 getAge(J9ObjectPointer object) throws CorruptDataException
 	{
-		return J9ObjectHelper.flags(object).bitAnd(OBJECT_HEADER_AGE_MASK).rightShift((int)OBJECT_HEADER_AGE_SHIFT);
+		return J9ObjectHelper.flags(object).bitAnd(OBJECT_HEADER_AGE_MASK).rightShift((int) OBJECT_HEADER_AGE_SHIFT);
 	}
 
 	@Override
-	public UDATA getConsumedSizeInBytesWithHeader(J9ObjectPointer object) throws CorruptDataException 
+	public UDATA getConsumedSizeInBytesWithHeader(J9ObjectPointer object) throws CorruptDataException
 	{
 		UDATA size = getSizeInBytesWithHeader(object);
 		if (hasBeenMoved(object)) {
@@ -106,35 +106,35 @@ class GCObjectModel_V1 extends GCObjectModel
 	}
 
 	@Override
-	public UDATA getClassShape(J9ObjectPointer object) throws CorruptDataException 
+	public UDATA getClassShape(J9ObjectPointer object) throws CorruptDataException
 	{
 		return getClassShape(J9ObjectHelper.clazz(object));
 	}
 
 	@Override
-	public UDATA getSizeInBytesDeadObject(J9ObjectPointer object) throws CorruptDataException 
+	public UDATA getSizeInBytesHoleObject(J9ObjectPointer object) throws CorruptDataException
 	{
-		if (isSingleSlotDeadObject(object)) {
-			return getSizeInBytesSingleSlotDeadObject(object);
+		if (isSingleSlotHoleObject(object)) {
+			return getSizeInBytesSingleSlotHoleObject(object);
 		}
-		return getSizeInBytesMultiSlotDeadObject(object);
+		return getSizeInBytesMultiSlotHoleObject(object);
 	}
 
 	@Override
-	public UDATA getSizeInBytesMultiSlotDeadObject(J9ObjectPointer object) throws CorruptDataException 
+	public UDATA getSizeInBytesMultiSlotHoleObject(J9ObjectPointer object) throws CorruptDataException
 	{
 		return GCHeapLinkedFreeHeader.fromJ9Object(object).getSize();
 	}
 
 	@Override
-	public UDATA getSizeInBytesSingleSlotDeadObject(J9ObjectPointer object) 
+	public UDATA getSizeInBytesSingleSlotHoleObject(J9ObjectPointer object)
 	{
 		// TODO : this is sort of bogus
 		return new UDATA(UDATA.SIZEOF);
 	}
 
 	@Override
-	public long getObjectAlignmentInBytes() 
+	public long getObjectAlignmentInBytes()
 	{
 		long result = 0;
 		try {
@@ -144,7 +144,7 @@ class GCObjectModel_V1 extends GCObjectModel
 			 * However there is another possible case that core is generated very early at Java
 			 * startup time and slot has not been set properly yet
 			 * To handle this we might need to initialize this slot to UDATA_MAX as soon as J9JavaVM structure is created
-			 * to recognize as special case here 
+			 * to recognize as special case here
 			 */
 			if (0 == result) {
 				/* slot in J9JavaVM exist, but it is 0 - assume this is a transitional core */
@@ -160,8 +160,8 @@ class GCObjectModel_V1 extends GCObjectModel
 		return result;
 	}
 
-@Override
-	public UDATA getSizeInBytesWithHeader(J9ObjectPointer object) throws CorruptDataException 
+	@Override
+	public UDATA getSizeInBytesWithHeader(J9ObjectPointer object) throws CorruptDataException
 	{
 		if (isIndexable(object)) {
 			return indexableObjectModel.getSizeInBytesWithHeader(J9IndexableObjectPointer.cast(object));
@@ -170,27 +170,45 @@ class GCObjectModel_V1 extends GCObjectModel
 		}
 	}
 
-@Override
-public UDATA getTotalFootprintInBytesWithHeader(J9ObjectPointer object) throws CorruptDataException {
-	if (isIndexable(object)) {
-		return adjustSizeInBytes(indexableObjectModel.getTotalFootprintInBytesWithHeader(J9IndexableObjectPointer.cast(object)));
-	} else {
-		return adjustSizeInBytes(mixedObjectModel.getSizeInBytesWithHeader(object));
+	@Override
+	public UDATA getTotalFootprintInBytesWithHeader(J9ObjectPointer object) throws CorruptDataException {
+		if (isIndexable(object)) {
+			return adjustSizeInBytes(indexableObjectModel.getTotalFootprintInBytesWithHeader(J9IndexableObjectPointer.cast(object)));
+		} else {
+			return adjustSizeInBytes(mixedObjectModel.getSizeInBytesWithHeader(object));
+		}
 	}
-}
 
-@Override
-	public boolean isDeadObject(J9ObjectPointer object) throws CorruptDataException 
+	@Override
+	public boolean isHoleObject(J9ObjectPointer object) throws CorruptDataException
 	{
 		return J9ObjectHelper.flags(object).allBitsIn(J9_GC_OBJ_HEAP_HOLE);
 	}
 
 	@Override
-	public boolean isIndexable(J9ObjectPointer object) throws CorruptDataException 
+	public boolean isDarkMatterObject(J9ObjectPointer object) throws CorruptDataException {
+		try {
+			if (J9ObjectHelper.clazz(object).classDepthAndFlags().anyBitsIn(J9AccClassDying)) {
+				// If an object's class's classDepthAndFlags includes J9AccClassDying,
+				// then the class has been unloaded and this object is left as dark matter
+				// for potential future clean up, so we can treat it as dead.
+				// See https://github.com/eclipse-openj9/openj9/issues/10537
+				return true;
+			}
+		} catch (CorruptDataException e) {
+			// If there was something wrong checking the object's class, then just
+			// treat it as a non-dark matter object which can then be further
+			// reviewed by the user if needed.
+		}
+		return false;
+	}
+
+	@Override
+	public boolean isIndexable(J9ObjectPointer object) throws CorruptDataException
 	{
 		return isIndexable(J9ObjectHelper.clazz(object));
 	}
-	
+
 	@Override
 	public boolean isIndexable(J9ClassPointer clazz) throws CorruptDataException
 	{
@@ -198,10 +216,10 @@ public UDATA getTotalFootprintInBytesWithHeader(J9ObjectPointer object) throws C
 	}
 
 	@Override
-	public boolean isOld(J9ObjectPointer object) throws CorruptDataException 
+	public boolean isOld(J9ObjectPointer object) throws CorruptDataException
 	{
 		VoidPointer topOfTenure = tenureBase.addOffset(tenureSize);
-		return object.gte(tenureBase) && object.lt(topOfTenure); 
+		return object.gte(tenureBase) && object.lt(topOfTenure);
 	}
 
 	@Override
@@ -212,7 +230,7 @@ public UDATA getTotalFootprintInBytesWithHeader(J9ObjectPointer object) throws C
 	}
 
 	@Override
-	public boolean isSingleSlotDeadObject(J9ObjectPointer object) throws CorruptDataException 
+	public boolean isSingleSlotHoleObject(J9ObjectPointer object) throws CorruptDataException
 	{
 		return J9ObjectHelper.flags(object).bitAnd(J9_GC_OBJ_HEAP_HOLE_MASK).eq(J9_GC_SINGLE_SLOT_HOLE);
 	}
@@ -221,11 +239,11 @@ public UDATA getTotalFootprintInBytesWithHeader(J9ObjectPointer object) throws C
 	public UDATA adjustSizeInBytes(UDATA sizeInBytes)
 	{
 		long bytes = sizeInBytes.longValue();
-		if (!J9BuildFlags.env_data64 || J9ObjectHelper.compressObjectReferences) {
+		if (!J9BuildFlags.J9VM_ENV_DATA64 || J9ObjectHelper.compressObjectReferences) {
 			bytes = (bytes + (ObjectModel.getObjectAlignmentInBytes() - 1)) & ~(ObjectModel.getObjectAlignmentInBytes() - 1);
 		}
 
-		if (J9BuildFlags.gc_minimumObjectSize) {
+		if (J9BuildFlags.J9VM_GC_MINIMUM_OBJECT_SIZE) {
 			if (bytes < J9_GC_MINIMUM_OBJECT_SIZE) {
 				bytes = J9_GC_MINIMUM_OBJECT_SIZE;
 			}
@@ -253,16 +271,15 @@ public UDATA getTotalFootprintInBytesWithHeader(J9ObjectPointer object) throws C
 	@Override
 	public long getScanType(J9ObjectPointer object) throws CorruptDataException
 	{
-		long result;
 		J9ClassPointer clazz = J9ObjectHelper.clazz(object);
 		return getScanType(clazz);
 	}
 
-	private long getScanType(J9ClassPointer clazz) throws CorruptDataException 
+	private long getScanType(J9ClassPointer clazz) throws CorruptDataException
 	{
 		long result;
 		long shape = getClassShape(clazz).longValue();
-		
+
 		if (shape == OBJECT_HEADER_SHAPE_MIXED) {
 			if (J9ClassHelper.classFlags(clazz).anyBitsIn(J9AccClassReferenceMask)) {
 				result = SCAN_REFERENCE_MIXED_OBJECT;
@@ -277,7 +294,7 @@ public UDATA getTotalFootprintInBytesWithHeader(J9ObjectPointer object) throws C
 			(shape == OBJECT_HEADER_SHAPE_DOUBLES)
 			|| (shape == OBJECT_HEADER_SHAPE_BYTES)
 			|| (shape == OBJECT_HEADER_SHAPE_WORDS)
-			|| (shape == OBJECT_HEADER_SHAPE_LONGS)) 
+			|| (shape == OBJECT_HEADER_SHAPE_LONGS))
 		{
 			/* Must be a primitive array*/
 			result = SCAN_PRIMITIVE_ARRAY_OBJECT;
@@ -289,8 +306,8 @@ public UDATA getTotalFootprintInBytesWithHeader(J9ObjectPointer object) throws C
 
 	private long getSpecialClassScanType(J9ClassPointer clazz) throws CorruptDataException
 	{
-		long result = SCAN_MIXED_OBJECT;
-		
+		long result;
+
 		if (clazz.eq(classClass)) {
 			result = SCAN_CLASS_OBJECT;
 		} else if (classLoaderClass.notNull() && J9ClassHelper.isSameOrSuperClassOf(classLoaderClass, clazz)) {
@@ -306,9 +323,9 @@ public UDATA getTotalFootprintInBytesWithHeader(J9ObjectPointer object) throws C
 	@Override
 	public I32 getObjectHashCode(J9ObjectPointer object) throws CorruptDataException
 	{
-		I32 result = new I32(0);
-		
-		if (J9BuildFlags.gc_modronCompaction || J9BuildFlags.gc_generational) {
+		I32 result;
+
+		if (J9BuildFlags.J9VM_GC_MODRON_COMPACTION || J9BuildFlags.J9VM_GC_GENERATIONAL) {
 			if (hasBeenMoved(object)) {
 				result = I32Pointer.cast(object).addOffset(getHashcodeOffset(object).longValue()).at(0);
 			} else {
@@ -320,11 +337,10 @@ public UDATA getTotalFootprintInBytesWithHeader(J9ObjectPointer object) throws C
 		return result;
 	}
 
-
 	@Override
 	public boolean hasBeenHashed(J9ObjectPointer object) throws CorruptDataException
 	{
-		if (J9BuildFlags.interp_flagsInClassSlot) {
+		if (J9BuildFlags.J9VM_INTERP_FLAGS_IN_CLASS_SLOT) {
 			return J9ObjectHelper.flags(object).allBitsIn(OBJECT_HEADER_HAS_BEEN_HASHED_MASK_IN_CLASS);
 		} else {
 			return J9ObjectHelper.flags(object).allBitsIn(OBJECT_HEADER_HAS_BEEN_HASHED);
@@ -334,7 +350,7 @@ public UDATA getTotalFootprintInBytesWithHeader(J9ObjectPointer object) throws C
 	@Override
 	public boolean hasBeenMoved(J9ObjectPointer object) throws CorruptDataException
 	{
-		if (J9BuildFlags.interp_flagsInClassSlot) {
+		if (J9BuildFlags.J9VM_INTERP_FLAGS_IN_CLASS_SLOT) {
 			return J9ObjectHelper.flags(object).allBitsIn(OBJECT_HEADER_HAS_BEEN_MOVED_IN_CLASS);
 		} else {
 			return J9ObjectHelper.flags(object).allBitsIn(OBJECT_HEADER_HAS_BEEN_MOVED);
@@ -344,7 +360,7 @@ public UDATA getTotalFootprintInBytesWithHeader(J9ObjectPointer object) throws C
 	@Override
 	public UDATA getHashcodeOffset(J9ObjectPointer object) throws CorruptDataException
 	{
-		UDATA offset = new UDATA(0);
+		UDATA offset;
 		if (isIndexable(object)) {
 			offset = indexableObjectModel.getHashcodeOffset(J9IndexableObjectPointer.cast(object));
 		} else {
@@ -366,7 +382,7 @@ public UDATA getTotalFootprintInBytesWithHeader(J9ObjectPointer object) throws C
 	@Override
 	public UDATA getClassShape(J9ClassPointer clazz) throws CorruptDataException
 	{
-		return new UDATA((J9ClassHelper.classFlags(clazz).longValue() >> J9AccClassRAMShapeShift) & OBJECT_HEADER_SHAPE_MASK);		
+		return new UDATA((J9ClassHelper.classFlags(clazz).longValue() >> J9AccClassRAMShapeShift) & OBJECT_HEADER_SHAPE_MASK);
 	}
 
 	@Override

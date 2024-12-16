@@ -1,5 +1,5 @@
-/*******************************************************************************
- * Copyright (c) 2001, 2021 IBM Corp. and others
+/*
+ * Copyright IBM Corp. and others 2001
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,10 +15,10 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
 package org.openj9.test.vmArguments;
 
 import static org.openj9.test.util.StringPrintStream.logStackTrace;
@@ -115,7 +115,7 @@ public class VmArgumentTests {
 	private static final String  MAPOPT_XJIT_COUNT_EQUALS = "-Xjit:count="+MIXED_MODE_THRESHOLD_VALUE;
 
 	private static final String JAVA_COMPILER = "JAVA_COMPILER";
-	private static final String JAVA_COMPILER_VALUE=System.getProperty("java.compiler");
+	private static final String JAVA_COMPILER_VALUE = System.getProperty(VersionCheck.major() < 21 ? "java.compiler" : "openj9.compiler");
 	private static final String SYSPROP_DJAVA_COMPILER_EQUALS = "-Djava.compiler="+JAVA_COMPILER_VALUE;
 
 	private static final boolean isIBM;
@@ -499,7 +499,12 @@ public class VmArgumentTests {
 			env.put(IBM_JAVA_OPTIONS, ibmJavaOptionsArg);
 
 			actualArguments = runAndGetArgumentList(pb);
-			final String[] expectedArguments = new String[] {MAPOPT_XJIT_COUNT_EQUALS, SYSPROP_DJAVA_COMPILER_EQUALS, VMOPT_XRS, ibmJavaOptionsArg};
+			final String[] expectedArguments;
+			if (VersionCheck.major() < 21) {
+				expectedArguments = new String[] {MAPOPT_XJIT_COUNT_EQUALS, SYSPROP_DJAVA_COMPILER_EQUALS, VMOPT_XRS, ibmJavaOptionsArg};
+			} else {
+				expectedArguments = new String[] {MAPOPT_XJIT_COUNT_EQUALS, VMOPT_XRS, ibmJavaOptionsArg};
+			}
 			HashMap<String, Integer> argumentPositions = checkArguments(actualArguments, expectedArguments);
 			checkArgumentSequence(expectedArguments, argumentPositions, true);
 			/* mapped options in environment variables should come before other non-implicit arguments */
@@ -1313,7 +1318,7 @@ public class VmArgumentTests {
 							":/opt/IBM/WebSphere/AppServer80/lib/urlprotocols.jar:/opt/IBM/WebSphere/AppServer80/deploytool/itp/batchboot.jar:/opt/IBM/WebSphere/AppServer80/deploytool/itp/batch2.jar" +
 							":/opt/IBM/WebSphere/AppServer80/java/lib/tools.jar"+":"+CLASSPATH;
 
-			String[] initalCmdLineArgs = {"-Declipse.security",
+			String[] initialCmdLineArgs = {"-Declipse.security",
 					"-Dosgi.install.area=/opt/IBM/WebSphere/AppServer80",
 					"-Dosgi.configuration.area=/opt/IBM/WebSphere/AppServer80/profiles/AppSrv01/servers/server1/configuration",
 					"-Djava.awt.headless=true",
@@ -1339,10 +1344,9 @@ public class VmArgumentTests {
 					"-Dcom.ibm.security.jgss.debug=off",
 					"-Dcom.ibm.security.krb5.Krb5Debug=off",
 					"-Djava.library.path=/opt/IBM/WebSphere/AppServer80/lib/native/linux/x86_64/:/opt/IBM/WebSphere/AppServer80/java/jre/lib/amd64/default:/opt/IBM/WebSphere/AppServer80/java/jre/lib/amd64:/opt/IBM/WebSphere/AppServer80/lib/native/linux/x86_64/:/opt/IBM/WebSphere/AppServer80/bin:.:/usr/lib:",
-					"-Djava.security.auth.login.config=/opt/IBM/WebSphere/AppServer80/profiles/AppSrv01/properties/wsjaas.conf",
-			"-Djava.security.policy=/opt/IBM/WebSphere/AppServer80/profiles/AppSrv01/properties/server.policy"};
+					"-Djava.security.auth.login.config=/opt/IBM/WebSphere/AppServer80/profiles/AppSrv01/properties/wsjaas.conf"};
 
-			String[] initalExpectedArgs = {"-Declipse.security",
+			String[] initialExpectedArgs = {"-Declipse.security",
 					"-Dosgi.install.area=/opt/IBM/WebSphere/AppServer80",
 					"-Dosgi.configuration.area=/opt/IBM/WebSphere/AppServer80/profiles/AppSrv01/servers/server1/configuration",
 					"-Djava.awt.headless=true",
@@ -1367,27 +1371,41 @@ public class VmArgumentTests {
 					"-Dcom.ibm.security.jgss.debug=off",
 					"-Dcom.ibm.security.krb5.Krb5Debug=off",
 					"-Djava.library.path=/opt/IBM/WebSphere/AppServer80/lib/native/linux/x86_64/:/opt/IBM/WebSphere/AppServer80/java/jre/lib/amd64/default:/opt/IBM/WebSphere/AppServer80/java/jre/lib/amd64:/opt/IBM/WebSphere/AppServer80/lib/native/linux/x86_64/:/opt/IBM/WebSphere/AppServer80/bin:.:/usr/lib:",
-					"-Djava.security.auth.login.config=/opt/IBM/WebSphere/AppServer80/profiles/AppSrv01/properties/wsjaas.conf",
-			"-Djava.security.policy=/opt/IBM/WebSphere/AppServer80/profiles/AppSrv01/properties/server.policy"};
+					"-Djava.security.auth.login.config=/opt/IBM/WebSphere/AppServer80/profiles/AppSrv01/properties/wsjaas.conf"};
 
-
-			/*
-			 * This test should only run for Java 1.8.0. For Java
-			 * 1.9.0 and above, we do not support java.ext.dirs property.
-			 */
 			String[] cmdLineArgs;
 			String[] expectedArgs;
-			if (isJava8) {
-				cmdLineArgs = new String[initalCmdLineArgs.length + 1];
-				System.arraycopy(initalCmdLineArgs, 0, cmdLineArgs, 0, initalCmdLineArgs.length);
-				cmdLineArgs[initalCmdLineArgs.length] = "-Djava.ext.dirs=/opt/IBM/WebSphere/AppServer80/tivoli/tam:/opt/IBM/WebSphere/AppServer80/java/jre/lib/ext";
+			if (VersionCheck.major() < 19) {
+				final String policy = "-Djava.security.policy=/opt/IBM/WebSphere/AppServer80/profiles/AppSrv01/properties/server.policy";
+				if (isJava8) {
+					/*
+					 * This test should only run for Java 1.8.0. For Java
+					 * 1.9.0 and above, we do not support java.ext.dirs property.
+					 */
+					final String dirs = "-Djava.ext.dirs=/opt/IBM/WebSphere/AppServer80/tivoli/tam:/opt/IBM/WebSphere/AppServer80/java/jre/lib/ext";
 
-				expectedArgs = new String[initalExpectedArgs.length + 1];
-				System.arraycopy(initalExpectedArgs, 0, expectedArgs, 0, initalExpectedArgs.length);
-				expectedArgs[initalExpectedArgs.length] = "-Djava.ext.dirs=/opt/IBM/WebSphere/AppServer80/tivoli/tam:/opt/IBM/WebSphere/AppServer80/java/jre/lib/ext";
+					cmdLineArgs = new String[initialCmdLineArgs.length + 2];
+					System.arraycopy(initialCmdLineArgs, 0, cmdLineArgs, 0, initialCmdLineArgs.length);
+					cmdLineArgs[initialCmdLineArgs.length] = policy;
+					cmdLineArgs[initialCmdLineArgs.length + 1] = dirs;
+
+					expectedArgs = new String[initialExpectedArgs.length + 2];
+					System.arraycopy(initialExpectedArgs, 0, expectedArgs, 0, initialExpectedArgs.length);
+					expectedArgs[initialExpectedArgs.length] = policy;
+					expectedArgs[initialExpectedArgs.length + 1] = dirs;
+				} else {
+					cmdLineArgs = new String[initialCmdLineArgs.length + 1];
+					System.arraycopy(initialCmdLineArgs, 0, cmdLineArgs, 0, initialCmdLineArgs.length);
+					cmdLineArgs[initialCmdLineArgs.length] = policy;
+
+					expectedArgs = new String[initialExpectedArgs.length + 1];
+					System.arraycopy(initialExpectedArgs, 0, expectedArgs, 0, initialExpectedArgs.length);
+					expectedArgs[initialExpectedArgs.length] = policy;
+				}
 			} else {
-				cmdLineArgs = initalCmdLineArgs.clone();
-				expectedArgs = initalExpectedArgs.clone();
+				/* SecurityManager and related classes have been removed. */
+				cmdLineArgs = initialCmdLineArgs.clone();
+				expectedArgs = initialExpectedArgs.clone();
 			}
 
 			try {
@@ -1598,7 +1616,7 @@ public class VmArgumentTests {
 	private ProcessRunner runProcess(ProcessBuilder pb) {
 		List<String> cmd = pb.command();
 
-		dumpStrings(cmd);
+		logStrings(cmd);
 		ProcessRunner pr;
 		try {
 			pr = ProcessRunner.runAndGetOutputs(pb);
@@ -1612,12 +1630,11 @@ public class VmArgumentTests {
 			return null;
 		}
 		if (0 != pr.getExitStatus()) {
-			logger.debug("---------------------------------\nstdout");
+			System.out.println("---------------------------------\nstdout");
 			dumpStrings(pr.getStdout());
-			ArrayList<String> errLines = stderrReader.getOutputLines();
-			logger.debug("---------------------------------\nstderr");
+			System.out.println("---------------------------------\nstderr");
 			dumpStrings(pr.getStderr());
-			fail("Target process failed");
+			fail("Target process failed, " + pr.getExitStatus());
 
 		}
 		return pr;
@@ -1627,9 +1644,15 @@ public class VmArgumentTests {
 		return !l.startsWith(USERARG_TAG);
 	}
 
-	private void dumpStrings(List<String> cmd) {
+	private static void logStrings(List<String> cmd) {
 		for (String s: cmd) {
 			logger.debug(s);
+		}
+	}
+
+	private static void dumpStrings(List<String> cmd) {
+		for (String s: cmd) {
+			System.out.println(s);
 		}
 	}
 
@@ -1644,7 +1667,7 @@ public class VmArgumentTests {
 		try {
 			List<String> cmd = pb.command();
 
-			dumpStrings(cmd);
+			logStrings(cmd);
 			Process p = pb.start();
 			int rc = p.waitFor();
 			return rc;

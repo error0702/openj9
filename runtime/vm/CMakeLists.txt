@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2017, 2021 IBM Corp. and others
+# Copyright IBM Corp. and others 2017
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
 # OpenJDK Assembly Exception [2].
 #
 # [1] https://www.gnu.org/software/classpath/license.html
-# [2] http://openjdk.java.net/legal/assembly-exception.html
+# [2] https://openjdk.org/legal/assembly-exception.html
 #
-# SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+# SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
 ################################################################################
 
 omr_add_tracegen(j9vm.tdf)
@@ -52,15 +52,23 @@ if(OMR_ARCH_POWER AND OMR_OS_AIX)
 		]]
 	endif()
 elseif(OMR_OS_ZOS)
-	# TODO need to handle optimized debug info
-	list(APPEND interp_flags_to_remove "-O3" "-g" "-qdebug=nohook")
+	if(OMR_TOOLCONFIG STREQUAL "openxl")
+		# Hooks are not implemented in Open XL. The default debug compiles in Open XL will be NOHOOK
+		# equivalent.
+		list(APPEND interp_flags_to_remove "-O3" "-g")
 
-	list(APPEND interp_new_flags
-		-O2
-		"\"-Wc,TBYDBG(-qdebug=MRABIG)\""
-		"\"-Wc,TBYDBG(-qdebug=lincomm:ptranl:tfbagg)\""
-		"\"-Wc,FEDBG(-qxflag=InlineDespiteVolatileInArgs)\""
-	)
+		list(APPEND interp_new_flags -O2)
+	else()
+		# TODO need to handle optimized debug info
+		list(APPEND interp_flags_to_remove "-O3" "-g" "-qdebug=nohook")
+
+		list(APPEND interp_new_flags
+			-O2
+			"\"-Wc,TBYDBG(-qdebug=MRABIG)\""
+			"\"-Wc,TBYDBG(-qdebug=lincomm:ptranl:tfbagg)\""
+			"\"-Wc,FEDBG(-qxflag=InlineDespiteVolatileInArgs)\""
+		)
+	endif()
 endif()
 
 if(interp_flags_to_remove)
@@ -80,6 +88,7 @@ endif()
 
 set(main_sources
 	annsup.c
+	ArrayCopyHelpers.cpp
 	AsyncMessageHandler.cpp
 	bchelper.c
 	bindnatv.cpp
@@ -94,6 +103,7 @@ set(main_sources
 	description.c
 	dllsup.c
 	drophelp.c
+	EnsureHashedConfig.cpp
 	exceptiondescribe.c
 	exceptionsupport.c
 	extendedMessageNPE.cpp
@@ -133,6 +143,8 @@ set(main_sources
 	jvminitcommon.c
 	jvmrisup.c
 	KeyHashTable.c
+	LayoutFFITypeHelpers.cpp
+	LayoutFFITypeTable.cpp
 	leconditionexceptionsup.c
 	linearswalk.c
 	lockwordconfig.c
@@ -146,9 +158,10 @@ set(main_sources
 	ObjectFieldInfo.cpp
 	ObjectMonitor.cpp
 	OutOfLineINL_com_ibm_jit_JITHelpers.cpp
-	OutOfLineINL_java_lang_invoke_NativeMethodHandle.cpp
 	OutOfLineINL_jdk_internal_misc_Unsafe.cpp
-	OutOfLineINL_jdk_internal_foreign_abi_ProgrammableInvoker.cpp
+	OutOfLineINL_openj9_internal_foreign_abi_InternalDowncallHandler.cpp
+	OutOfLineINL_openj9_internal_foreign_abi_InternalUpcallHandler.cpp
+	OutOfLineINL_openj9_internal_foreign_abi_UpCallMHMetaData.cpp
 	ownedmonitors.c
 	profilingbc.c
 	rasdump.c
@@ -163,8 +176,11 @@ set(main_sources
 	stringhelpers.cpp
 	swalk.c
 	threadhelp.cpp
-	threadpark.c
+	threadpark.cpp
 	throwexception.c
+	UpcallExceptionHandler.cpp
+	UpcallThunkMem.cpp
+	UpcallVMHelpers.cpp
 	ValueTypeHelpers.cpp
 	visible.c
 	VMAccess.cpp
@@ -175,8 +191,9 @@ set(main_sources
 	vmphases.c
 	vmprops.c
 	vmruntimestate.c
+	VMSnapshotImpl.cpp
 	vmthinit.c
-	vmthread.c
+	vmthread.cpp
 	xcheck.c
 
 	${CMAKE_CURRENT_BINARY_DIR}/ut_j9vm.c
@@ -184,7 +201,21 @@ set(main_sources
 
 if(J9VM_OPT_CRIU_SUPPORT)
 	list(APPEND main_sources
-		criuhelpers.cpp
+		CRIUHelpers.cpp
+	)
+endif()
+
+if(J9VM_OPT_JFR)
+	list(APPEND main_sources
+		jfr.cpp
+		JFRConstantPoolTypes.cpp
+		JFRChunkWriter.cpp
+	)
+endif()
+
+if(NOT JAVA_SPEC_VERSION LESS 19)
+	list(APPEND main_sources
+		ContinuationHelpers.cpp
 	)
 endif()
 
@@ -257,10 +288,14 @@ if(OMR_ARCH_X86)
 			xa64/stackswap.m4
 			xa64/unsafeHelper.m4
 		)
-		target_sources(j9vm PRIVATE unsafeHelper.s)
+		target_sources(j9vm PRIVATE
+			unsafeHelper.s
+			xa64/UpcallThunkGen.cpp
+		)
 	elseif(OMR_OS_WINDOWS)
 		if(OMR_ENV_DATA64)
 			j9vm_gen_asm(wa64/stackswap.m4)
+			target_sources(j9vm PRIVATE wa64/UpcallThunkGen.cpp)
 		else()
 			j9vm_gen_asm(wi32/stackswap.m4)
 			target_sources(j9vm PRIVATE
@@ -286,10 +321,16 @@ elseif(OMR_ARCH_POWER)
 		if(NOT (OMR_ENV_DATA64 AND OMR_ENV_LITTLE_ENDIAN))
 			message(SEND_ERROR "Only PPC64 LE is currently supported")
 		endif()
-		target_sources(j9vm PRIVATE xl64/unsafeHelper.s)
+		target_sources(j9vm PRIVATE
+			xl64/unsafeHelper.s
+			xl64/UpcallThunkGen.cpp
+		)
 	elseif(OMR_OS_AIX)
 		if(OMR_ENV_DATA64)
-			target_sources(j9vm PRIVATE ap64/unsafeHelper.s)
+			target_sources(j9vm PRIVATE
+				ap64/unsafeHelper.s
+				ap64/UpcallThunkGen.cpp
+			)
 		else()
 			target_sources(j9vm PRIVATE ap32/unsafeHelper.s)
 		endif()
@@ -305,13 +346,19 @@ elseif(OMR_ARCH_S390)
 	target_sources(j9vm PRIVATE zcinterp.s)
 	if(OMR_OS_LINUX)
 		if(OMR_ENV_DATA64)
-			target_sources(j9vm PRIVATE xz64/unsafeHelper.s)
+			target_sources(j9vm PRIVATE
+				xz64/unsafeHelper.s
+				xz64/UpcallThunkGen.cpp
+			)
 		else()
 			target_sources(j9vm PRIVATE xz31/unsafeHelper.s)
 		endif()
 	elseif(OMR_OS_ZOS)
 		if(OMR_ENV_DATA64)
-			target_sources(j9vm PRIVATE mz64/unsafeHelper.s)
+			target_sources(j9vm PRIVATE
+				mz64/unsafeHelper.s
+				mz64/UpcallThunkGen.cpp
+			)
 		else()
 			target_sources(j9vm PRIVATE
 				mz31/unsafeHelper.s
@@ -335,7 +382,10 @@ elseif(OMR_ARCH_AARCH64)
 	target_sources(j9vm PRIVATE arm64cinterp.s)
 	if(OMR_OS_LINUX OR OMR_OS_OSX)
 		j9vm_gen_asm(xr64/unsafeHelper.m4)
-		target_sources(j9vm PRIVATE unsafeHelper.s)
+		target_sources(j9vm PRIVATE
+			unsafeHelper.s
+			xr64/UpcallThunkGen.cpp
+			)
 	else()
 		message(SEND_ERROR "Unsupported OS")
 	endif()

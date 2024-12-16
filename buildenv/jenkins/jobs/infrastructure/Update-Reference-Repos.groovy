@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2019, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2019
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 SETUP_LABEL = params.SETUP_LABEL
 if (!SETUP_LABEL) {
@@ -56,7 +56,7 @@ timeout(time: 6, unit: 'HOURS') {
                         branches: [[name: scm.branches[0].name]],
                         doGenerateSubmoduleConfigurations: false,
                         extensions: [[$class: 'CloneOption',
-                                      reference: "${HOME}/openjdk_cache"]],
+                                      reference: get_cache_dir()]],
                         submoduleCfg: [],
                         userRemoteConfigs: [remoteConfigParameters]]
 
@@ -64,10 +64,16 @@ timeout(time: 6, unit: 'HOURS') {
                 variableFile.parse_variables_file()
                 variableFile.set_user_credentials()
 
+                def defaultRepos = [] // extensions, OpenJ9 and OMR repos
+                defaultRepos.addAll(get_openjdk_repos(VARIABLES.openjdk, true))
+                defaultRepos.add([name: "openj9", url: VARIABLES.openj9.get('default').get('repoUrl')])
+                defaultRepos.add([name: "omr", url: VARIABLES.omr.get('default').get('repoUrl')])
+
                 def buildNodes = jenkins.model.Jenkins.instance.getLabel(LABEL).getNodes()
                 def todoNodes = []
                 def setupNodesNames = []
                 def buildNodesNames = []
+                def builtInLabel = 'master || built-in' //"master" label could be removed after built-in-node-migration
 
                 if (UPDATE_SETUP_NODES) {
                     // update openj9 repo cache on nodes that have SETUP_LABEL
@@ -79,8 +85,8 @@ timeout(time: 6, unit: 'HOURS') {
                     }
 
                     //add Jenkins Manager node if todoNodes does not contain it already
-                    if (todoNodes.intersect(jenkins.model.Jenkins.instance.getLabel('master').getNodes()).isEmpty()) {
-                        todoNodes.addAll(jenkins.model.Jenkins.instance.getLabel('master').getNodes())
+                    if (todoNodes.intersect(jenkins.model.Jenkins.instance.getLabel(builtInLabel).getNodes()).isEmpty()) {
+                        todoNodes.addAll(jenkins.model.Jenkins.instance.getLabel(builtInLabel).getNodes())
                     }
 
                     for (sNode in todoNodes) {
@@ -90,15 +96,16 @@ timeout(time: 6, unit: 'HOURS') {
                         }
 
                         def sNodeName = sNode.getDisplayName()
-                        if (sNodeName == 'Jenkins') {
-                            sNodeName = 'master'
+                        if (!sNode.toComputer().name) {
+                            sNodeName = builtInLabel
                         }
+
                         setupNodesNames.add(sNodeName)
 
                         jobs["${sNodeName}"] = {
                             node("${sNodeName}") {
                                 stage("${sNodeName} - Update Reference Repo") {
-                                    refresh(sNodeName, "${HOME}/openjdk_cache", [[name: "openj9", url: VARIABLES.openj9.get('default').get('repoUrl')]], true)
+                                    refresh(sNodeName, get_cache_dir(), defaultRepos, true)
                                 }
                             }
                         }
@@ -116,7 +123,7 @@ timeout(time: 6, unit: 'HOURS') {
                         def nodeName = aNode.getDisplayName()
                         buildNodesNames.add(nodeName)
 
-                        def osLabels = ['sw.os.aix', 'sw.os.linux', 'sw.os.osx', 'sw.os.windows']
+                        def osLabels = ['sw.os.aix', 'sw.os.linux', 'sw.os.mac', 'sw.os.windows']
                         def foundLabel = false
                         def nodeLabels = aNode.getLabelString().tokenize(' ')
                         for (osLabel in osLabels) {
@@ -140,8 +147,8 @@ timeout(time: 6, unit: 'HOURS') {
                         }
 
                         if (jenkins.model.Jenkins.instance.getLabel(SETUP_LABEL).getNodes().contains(aNode)) {
-                            // add OpenJ9 repo
-                            repos.add([name: "openj9", url: VARIABLES.openj9.get('default').get('repoUrl')])
+                            // add OpenJ9, OMR and extension repos
+                            repos.addAll(defaultRepos)
                             setupNodesNames.add(aNode)
                         }
 
@@ -151,7 +158,7 @@ timeout(time: 6, unit: 'HOURS') {
                         jobs["${nodeName}"] = {
                             node("${nodeName}") {
                                 stage("${nodeName} - Update Reference Repo") {
-                                    refresh(nodeName, "${HOME}/openjdk_cache", repos, foundLabel)
+                                    refresh(nodeName, get_cache_dir(), repos, foundLabel)
                                 }
                             }
                         }
@@ -166,7 +173,13 @@ timeout(time: 6, unit: 'HOURS') {
             }
         }
 
-        parallel jobs
+        if (params.PARALLEL) {
+            parallel jobs
+        } else {
+            jobs.each{ key, value ->
+                value()
+            }
+        }
     }
 }
 
@@ -228,4 +241,11 @@ def get_openjdk_repos(openJdkMap, useDefault) {
         }
     }
     return repos
+}
+
+/*
+ * Returns the location of the Git reference repository.
+ */
+def get_cache_dir() {
+    return (params.REPO_CACHE_DIR ?: "${HOME}/openjdk_cache")
 }

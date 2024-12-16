@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2000, 2021 IBM Corp. and others
+# Copyright IBM Corp. and others 2000
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
 # OpenJDK Assembly Exception [2].
 #
 # [1] https://www.gnu.org/software/classpath/license.html
-# [2] http://openjdk.java.net/legal/assembly-exception.html
+# [2] https://openjdk.org/legal/assembly-exception.html
 #
-# SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+# SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
 #
 
 # Externalised messages for the RASdump module.
@@ -398,8 +398,7 @@ J9NLS_DMP_USER_REQUESTED_DUMP_STR=User requested %1$s dump using '%2$s' through 
 J9NLS_DMP_USER_REQUESTED_DUMP_STR.explanation=The JVM will write a dump in response to a request through an API, such as JVMTI, or through the -Xtrace:trigger option.
 J9NLS_DMP_USER_REQUESTED_DUMP_STR.system_action=The JVM attempts to write the dump. A second message is produced when the dump is complete.
 J9NLS_DMP_USER_REQUESTED_DUMP_STR.user_response=Review the dump and take appropriate action.
-
-# javacore.txt is not translatable
+J9NLS_DMP_USER_REQUESTED_DUMP_STR.sample_input_1=java
 J9NLS_DMP_USER_REQUESTED_DUMP_STR.sample_input_2=javacore.txt
 J9NLS_DMP_USER_REQUESTED_DUMP_STR.sample_input_3=JVMTI
 J9NLS_DMP_USER_REQUESTED_DUMP_STR.link=dita:///diag/tools/dump_agents.dita
@@ -512,6 +511,7 @@ J9NLS_DMP_TOO_MANY_DUMP_OPTIONS=The number of dump options must be less than %d,
 J9NLS_DMP_TOO_MANY_DUMP_OPTIONS.explanation=The number of -Xdump: options exceeds the VM limit
 J9NLS_DMP_TOO_MANY_DUMP_OPTIONS.system_action=The JVM exits.
 J9NLS_DMP_TOO_MANY_DUMP_OPTIONS.user_response=Combine dump types, event types, and filters using '+' into a single option
+J9NLS_DMP_TOO_MANY_DUMP_OPTIONS.sample_input_1=128
 J9NLS_DMP_TOO_MANY_DUMP_OPTIONS.link=
 # END NON-TRANSLATABLE
 
@@ -520,6 +520,8 @@ J9NLS_DMP_EXIT_SHUTDOWN=VM is shutting down. Reason: %2$.*1$s
 J9NLS_DMP_EXIT_SHUTDOWN.explanation=User requested to exit
 J9NLS_DMP_EXIT_SHUTDOWN.system_action=The JVM exits.
 J9NLS_DMP_EXIT_SHUTDOWN.user_response=This exit was requested by the user.
+J9NLS_DMP_EXIT_SHUTDOWN.sample_input_1=19
+J9NLS_DMP_EXIT_SHUTDOWN.sample_input_2=Cannot keep running
 J9NLS_DMP_EXIT_SHUTDOWN.link=
 # END NON-TRANSLATABLE
 
@@ -584,9 +586,12 @@ J9NLS_DMP_JIT_RECOMPILING_METHOD=JIT dump is recompiling %.*s.%.*s%.*s
 J9NLS_DMP_JIT_RECOMPILING_METHOD.explanation=The dump is recompiling the specified method signature.
 J9NLS_DMP_JIT_RECOMPILING_METHOD.system_action=The JVM continues.
 J9NLS_DMP_JIT_RECOMPILING_METHOD.user_response=Diagnostic information, provide this information to your service representative.
-J9NLS_DMP_JIT_RECOMPILING_METHOD.sample_input_1=java/lang/String
-J9NLS_DMP_JIT_RECOMPILING_METHOD.sample_input_2=equals
-J9NLS_DMP_JIT_RECOMPILING_METHOD.sample_input_3=(Ljava/lang/Object;)Z
+J9NLS_DMP_JIT_RECOMPILING_METHOD.sample_input_1=16
+J9NLS_DMP_JIT_RECOMPILING_METHOD.sample_input_2=java/lang/String
+J9NLS_DMP_JIT_RECOMPILING_METHOD.sample_input_3=6
+J9NLS_DMP_JIT_RECOMPILING_METHOD.sample_input_4=equals
+J9NLS_DMP_JIT_RECOMPILING_METHOD.sample_input_5=21
+J9NLS_DMP_JIT_RECOMPILING_METHOD.sample_input_6=(Ljava/lang/Object;)Z
 J9NLS_DMP_JIT_RECOMPILING_METHOD.link=
 
 # END NON-TRANSLATABLE
@@ -598,4 +603,18 @@ J9NLS_DMP_JIT_TRACE_IL_CRASHED_THREAD.system_action=The JVM continues.
 J9NLS_DMP_JIT_TRACE_IL_CRASHED_THREAD.user_response=Diagnostic information, provide this information to your service representative.
 J9NLS_DMP_JIT_TRACE_IL_CRASHED_THREAD.link=
 
+# END NON-TRANSLATABLE
+
+J9NLS_DMP_PROCESSING_DETAILED_EVENT_TIME=Processing dump event \"%1$s\", detail \"%3$.*2$s\", exception \"%5$.*4$s\" at %6$s - please wait.
+# START NON-TRANSLATABLE
+J9NLS_DMP_PROCESSING_DETAILED_EVENT_TIME.explanation=A dump event has occurred and is being handled.
+J9NLS_DMP_PROCESSING_DETAILED_EVENT_TIME.system_action=The JVM generates dumps as configured for the event by the -Xdump option.
+J9NLS_DMP_PROCESSING_DETAILED_EVENT_TIME.user_response=No response is required.
+J9NLS_DMP_PROCESSING_DETAILED_EVENT_TIME.sample_input_1=throw
+J9NLS_DMP_PROCESSING_DETAILED_EVENT_TIME.sample_input_2=9
+J9NLS_DMP_PROCESSING_DETAILED_EVENT_TIME.sample_input_3=#00000000
+J9NLS_DMP_PROCESSING_DETAILED_EVENT_TIME.sample_input_4=12
+J9NLS_DMP_PROCESSING_DETAILED_EVENT_TIME.sample_input_5=No such file
+J9NLS_DMP_PROCESSING_DETAILED_EVENT_TIME.sample_input_6=20220919.114434
+J9NLS_DMP_PROCESSING_DETAILED_EVENT_TIME.link=dita:///diag/tools/dump_agents.dita
 # END NON-TRANSLATABLE

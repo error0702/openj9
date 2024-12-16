@@ -1,6 +1,6 @@
 
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,9 +16,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "j9port.h"
@@ -34,6 +34,9 @@ MM_MarkJavaStats::clear()
 
 	_ownableSynchronizerCandidates = 0;
 	_ownableSynchronizerCleared = 0;
+
+	_continuationCandidates = 0;
+	_continuationCleared = 0;
 
 	_weakReferenceStats.clear();
 	_softReferenceStats.clear();
@@ -59,6 +62,9 @@ MM_MarkJavaStats::merge(MM_MarkJavaStats* statsToMerge)
 
 	_ownableSynchronizerCandidates += statsToMerge->_ownableSynchronizerCandidates;
 	_ownableSynchronizerCleared += statsToMerge->_ownableSynchronizerCleared;
+
+	_continuationCandidates += statsToMerge->_continuationCandidates;
+	_continuationCleared += statsToMerge->_continuationCleared;
 
 	_weakReferenceStats.merge(&statsToMerge->_weakReferenceStats);
 	_softReferenceStats.merge(&statsToMerge->_softReferenceStats);

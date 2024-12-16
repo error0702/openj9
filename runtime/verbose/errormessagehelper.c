@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2015, 2020 IBM Corp. and others
+ * Copyright IBM Corp. and others 2015
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "errormessage_internal.h"
@@ -356,8 +356,8 @@ prepareVerificationTypeBuffer(StackMapFrame* stackMapFrame, MethodContextInfo* m
 		cpInfo.bytes = (U_8*)methodInfo->signature.bytes;
 		cpInfo.slot1 = (U_32)methodInfo->signature.length;
 
-		/* Calls isInitOrClinitImpl() to determine whether the method is either "<init>" or "<clinit>".
-		 * It returns 1) 0 if name is a normal name 2) 1 if '<init>' or 3) 2 if '<clinit>'
+		/* Calls isInitOrClinitImpl() to determine whether the method is "<init>" or "<clinit>".
+		 * It returns 0 if name is a normal name, CFR_METHOD_NAME_INIT if '<init>' or CFR_METHOD_NAME_CLINIT if '<clinit>'
 		 */
 		if (CFR_METHOD_NAME_INIT == bcvIsInitOrClinit(&cpInfo)) {
 			vrfyType = CFR_STACKMAP_TYPE_INIT_OBJECT;  /* "this" of an <init> method (cfreader.h) */
@@ -532,7 +532,27 @@ decodeConstuctedStackMapFrameData(StackMapFrame* stackMapFrame, U_8* nextStackma
 	VerificationTypeInfo* currentVerificationTypeEntry = stackMapFrame->entries;
 	U_16 maxStack = methodInfo->maxStack;
 	U_16 maxLocals = methodInfo->maxLocals;
-	IDATA lastIndex = stackBaseIndex - 1;
+	/* The layout of 'locals' and 'stack' in each stackmap frame of a constructed stackmaps looks as follows:
+	 * +-----------------------+------------------+
+	 * |         locals        |     stack        |
+	 * +-----------------------+------------------+
+	 * 0                      | |
+	 *                lastIndex stackBaseIndex
+	 * It shows that stackBaseIndex points to the 1st element of 'stack' while lastIndex points to
+	 * the last element of 'locals'.
+	 *
+	 * Initially, both stackBaseIndex and stackTopIndex are set to -1 by default before the stackmaps
+	 * are constructed internally against the class bytecode (class version <= 50) via simulateStack(),
+	 * in which case both 'locals' and 'stack' are empty in each stackmap frame of the stackmaps.
+	 * (See the code of initializing stackmaps in j9bcv_verifyBytecodes() at bcverify.c)
+	 *
+	 * Thus, there are 3 cases in terms of a given stackmap frame of the constructed stackmaps:
+	 * 1)if stackBaseIndex == -1(which means that both 'locals' and 'stack' are empty), lastIndex is -1.
+	 * 2)if stackBaseIndex == 0 (which means that there is 1 element in 'locals'), lastIndex is 0.
+	 * 3)if stackBaseIndex >= 1 (which means that there is at least 1 element in 'locals'),
+	 *   lastIndex is (stackBaseIndex - 1).
+	 */
+	IDATA lastIndex = (stackBaseIndex >= 1) ? (stackBaseIndex - 1) : stackBaseIndex;
 	IDATA slot = 0;
 	IDATA dataTypeCode = DATATYPE_1_SLOT;
 	BOOLEAN nonTopFound = FALSE;
@@ -629,8 +649,11 @@ convertBcvToCfrType(MethodContextInfo* methodInfo, StackMapFrame* stackMapFrame,
 		break;
 	case BCV_OBJECT_OR_ARRAY:
 	default:
-		*currentVerificationTypeEntry = pushVerificationTypeInfo(methodInfo, stackMapFrame, *currentVerificationTypeEntry, CFR_STACKMAP_TYPE_OBJECT, INDEX_CLASSNAMELIST, bcvType);
-		break;
+		{
+			U_8 objTypeTag = CFR_STACKMAP_TYPE_OBJECT;
+			*currentVerificationTypeEntry = pushVerificationTypeInfo(methodInfo, stackMapFrame, *currentVerificationTypeEntry, objTypeTag, INDEX_CLASSNAMELIST, bcvType);
+			break;
+		}
 	}
 
 	/* Set to out-of-memory if unable to allocate memory for data type in the verification type buffer  */
@@ -799,6 +822,7 @@ releaseVerificationTypeBuffer(StackMapFrame* stackMapFrame, MethodContextInfo* m
 	if (NULL != stackMapFrame->entries) {
 		PORT_ACCESS_FROM_PORT(methodInfo->portLib);
 		j9mem_free_memory(stackMapFrame->entries);
+		stackMapFrame->entries = NULL;
 	}
 }
 
@@ -858,7 +882,7 @@ mapDataTypeToUTF8String(J9UTF8Ref* dataType, StackMapFrame* stackMapFrame, Metho
 			dataType->bytes = methodInfo->signature.bytes + typeValue;
 			dataType->length = typeLength;
 			/* Ignore 'L' and ';' to get the full string of argument in signature */
-			if ('L' == *dataType->bytes) {
+			if (IS_CLASS_SIGNATURE(*dataType->bytes)) {
 				dataType->bytes += 1;
 				dataType->length -= 2;
 			}

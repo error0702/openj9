@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #ifndef CHTABLE_INCL
@@ -418,7 +418,8 @@ class TR_CHTable
 
    void commitVirtualGuard(TR_VirtualGuard *info, List<TR_VirtualGuardSite> &sites,
                            TR_PersistentCHTable *table, TR::Compilation *comp);
-   void commitOSRVirtualGuards(TR::Compilation *comp, TR::list<TR_VirtualGuard*> &vguards);
+   void commitOSRVirtualGuards(
+      TR::Compilation *comp, const TR::Compilation::GuardSet &vguards);
 #if defined(J9VM_OPT_JITSERVER)
    CHTableCommitData computeDataForCHTableCommit(TR::Compilation *comp);
 #endif
@@ -515,7 +516,7 @@ class TR_PersistentFieldInfo : public TR_Link<TR_PersistentFieldInfo>
                           int32_t sigLength = -1,
                           TR_PersistentFieldInfo *next = NULL,
                           uint8_t b = VALID_BUT_NOT_ALWAYS_INITIALIZED,
-                          char *c = 0,
+                          const char *c = 0,
                           int32_t numChars = -1)
 
       : TR_Link<TR_PersistentFieldInfo>(next),
@@ -704,7 +705,7 @@ class TR_PersistentArrayFieldInfo : public TR_PersistentFieldInfo
                                int32_t *dimensionInfo = NULL,
                                uint8_t b1 = VALID_BUT_NOT_ALWAYS_INITIALIZED,
                                uint8_t b2 = VALID_BUT_NOT_ALWAYS_INITIALIZED,
-                               char *c = "",
+                               const char *c = "",
                                int32_t numChars = -1)
       : TR_PersistentFieldInfo(sig, sigLength, next, b2, c, numChars),
         _numDimensions(numDimensions),

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 /**
@@ -280,6 +280,10 @@ static intptr_t getS390Description(struct J9PortLibrary *portLibrary, J9Processo
 static intptr_t getRISCV64Description(struct J9PortLibrary *portLibrary, J9ProcessorDesc *desc);
 #endif /* defined(RISCV64) */
 
+#if defined(J9AARCH64)
+static intptr_t getAArch64Description(struct J9PortLibrary *portLibrary, J9ProcessorDesc *desc);
+#endif /* defined(J9AARCH64) */
+
 #if (defined(LINUXPPC) || defined(AIXPPC))
 static J9ProcessorArchitecture mapPPCProcessor(const char *processorName);
 static void setFeature(J9ProcessorDesc *desc, uint32_t feature);
@@ -445,6 +449,8 @@ j9sysinfo_get_processor_description(struct J9PortLibrary *portLibrary, J9Process
 		rc = getS390Description(portLibrary, desc);
 #elif defined(RISCV64)
 		rc = getRISCV64Description(portLibrary, desc);
+#elif defined(J9AARCH64)
+		rc = getAArch64Description(portLibrary, desc);
 #endif
 	}
 
@@ -1224,11 +1230,21 @@ getS390Description(struct J9PortLibrary *portLibrary, J9ProcessorDesc *desc)
 static intptr_t
 getRISCV64Description(struct J9PortLibrary *portLibrary, J9ProcessorDesc *desc)
 {
-	desc->processor = PROCESOR_RISCV64_UNKNOWN;
+	desc->processor = PROCESSOR_RISCV64_UNKNOWN;
 	desc->physicalProcessor = desc->processor;
 	return 0;
 }
 #endif /* defined(RISCV64) */
+
+#if defined(J9AARCH64)
+static intptr_t
+getAArch64Description(struct J9PortLibrary *portLibrary, J9ProcessorDesc *desc)
+{
+	desc->processor = PROCESSOR_AARCH64_UNKNOWN;
+	desc->physicalProcessor = desc->processor;
+	return 0;
+}
+#endif /* defined(J9AARCH64) */
 
 BOOLEAN
 j9sysinfo_processor_has_feature(struct J9PortLibrary *portLibrary, J9ProcessorDesc *desc, uint32_t feature)

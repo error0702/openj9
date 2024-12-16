@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2018 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #ifndef bytecodewalk_h
@@ -61,10 +61,10 @@
 32bit type => [8 bits arity] [ 19 bits class index] [5 tag bits]
 
 tag bits:
-	special (new / init / ret)
-	base / object
-	base type array / regular object, array
-	null
+	base type or top of stack (clear bit means object or array)
+	base type array or null
+	special init object ("this" for <init>)
+	special new object (PC offset in upper 28 bits)
 
 base types: (in the 19bit class index field)
 	int

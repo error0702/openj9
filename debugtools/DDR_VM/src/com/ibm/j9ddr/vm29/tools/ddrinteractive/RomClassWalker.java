@@ -1,5 +1,5 @@
-/*******************************************************************************
- * Copyright (c) 2001, 2021 IBM Corp. and others
+/*
+ * Copyright IBM Corp. and others 2001
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,10 +15,10 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
 package com.ibm.j9ddr.vm29.tools.ddrinteractive;
 
 import static com.ibm.j9ddr.vm29.structure.J9ConstantPool.J9CPTYPE_ANNOTATION_UTF8;
@@ -68,12 +68,15 @@ import com.ibm.j9ddr.vm29.j9.walkers.LocalVariableTable;
 import com.ibm.j9ddr.vm29.j9.walkers.LocalVariableTableIterator;
 import com.ibm.j9ddr.vm29.pointer.I32Pointer;
 import com.ibm.j9ddr.vm29.pointer.I64Pointer;
+import com.ibm.j9ddr.vm29.pointer.Pointer;
 import com.ibm.j9ddr.vm29.pointer.PointerPointer;
 import com.ibm.j9ddr.vm29.pointer.SelfRelativePointer;
 import com.ibm.j9ddr.vm29.pointer.StructurePointer;
 import com.ibm.j9ddr.vm29.pointer.U16Pointer;
 import com.ibm.j9ddr.vm29.pointer.U32Pointer;
 import com.ibm.j9ddr.vm29.pointer.U8Pointer;
+import com.ibm.j9ddr.vm29.pointer.VoidPointer;
+import com.ibm.j9ddr.vm29.pointer.generated.J9BuildFlags;
 import com.ibm.j9ddr.vm29.pointer.generated.J9EnclosingObjectPointer;
 import com.ibm.j9ddr.vm29.pointer.generated.J9ExceptionHandlerPointer;
 import com.ibm.j9ddr.vm29.pointer.generated.J9ExceptionInfoPointer;
@@ -158,7 +161,7 @@ public class RomClassWalker extends ClassWalker {
 		allSlotsInROMFieldsSectionDo();
 		allSlotsInCPShapeDescriptionDo();
 		allSlotsInOptionalInfoDo();
-
+		allSlotsInVarHandleMethodTypeLookupTableDo();
 		allSlotsInStaticSplitMethodRefIndexesDo();
 		allSlotsInSpecialSplitMethodRefIndexesDo();
 	}
@@ -488,7 +491,6 @@ public class RomClassWalker extends ClassWalker {
 				|| (bc == JBputstatic)
 				|| (bc == JBgetfield)
 				|| (bc == JBputfield)
-				|| (bc == JBwithfield)
 				|| (bc == JBinvokevirtual)
 				|| (bc == JBinvokespecial)
 				|| (bc == JBinvokestatic)
@@ -497,7 +499,6 @@ public class RomClassWalker extends ClassWalker {
 				|| (bc == JBinvokedynamic)
 				|| (bc == JBinvokeinterface)
 				|| (bc == JBnew)
-				|| (bc == JBdefaultvalue)
 				|| (bc == JBnewdup)
 				|| (bc == JBanewarray)
 				|| (bc == JBcheckcast)
@@ -748,6 +749,17 @@ public class RomClassWalker extends ClassWalker {
 				classWalkerCallback.addSlot(clazz, SlotType.J9_SRP, cursor, "optionalInjectedInterfaces");
 				cursor = cursor.add(1);
 			}
+
+			if (J9ROMClassHelper.hasLoadableDescriptorsAttribute(romClass)) {
+				classWalkerCallback.addSlot(clazz, SlotType.J9_SRP, cursor, "loadableDescriptorsAttributeSRP");
+				loadableDescriptorsAttributeDo(U32Pointer.cast(cursor.get()));
+				cursor = cursor.add(1);
+			}
+		}
+		if (J9ROMClassHelper.hasImplicitCreationAttribute(romClass)) {
+			classWalkerCallback.addSlot(clazz, SlotType.J9_SRP, cursor, "implicitCreationAttributeSRP");
+			implicitCreationAttributeDo(U32Pointer.cast(cursor.get()));
+			cursor = cursor.add(1);
 		}
 		classWalkerCallback.addSection(clazz, optionalInfo, cursor.getAddress() - optionalInfo.getAddress(), "optionalInfo", true);
 	}
@@ -762,6 +774,29 @@ public class RomClassWalker extends ClassWalker {
 			classWalkerCallback.addSection(clazz, cursor, count.longValue(), "intermediateClassDataSection", true);
 		}
 	}
+
+	void allSlotsInVarHandleMethodTypeLookupTableDo() throws CorruptDataException
+	{
+		if (J9BuildFlags.J9VM_OPT_METHOD_HANDLE && !J9BuildFlags.J9VM_OPT_OPENJDK_METHODHANDLE) {
+			try {
+				int count = romClass.varHandleMethodTypeCount().intValue();
+
+				if (count > 0) {
+					Pointer cursorVoidEA = romClass.varHandleMethodTypeLookupTableEA();
+					VoidPointer cursorVoid = SelfRelativePointer.cast(cursorVoidEA).get();
+					U16Pointer cursor = U16Pointer.cast(cursorVoid);
+
+					classWalkerCallback.addSection(clazz, cursor, count * U16.SIZEOF, "varHandleMethodTypeLookupTable", true);
+					for (int i = 0; i < count; i++) {
+						classWalkerCallback.addSlot(clazz, SlotType.J9_U16, cursor.add(i), "cpIndex");
+					}
+				}
+			} catch (NoSuchFieldException e) {
+				throw new CorruptDataException(e);
+			}
+		}
+	}
+
 	void allSlotsInStaticSplitMethodRefIndexesDo() throws CorruptDataException
 	{
 		int count = romClass.staticSplitMethodRefCount().intValue();
@@ -981,6 +1016,34 @@ public class RomClassWalker extends ClassWalker {
 			attribute = attribute.add(1);
 		}
 		classWalkerCallback.addSection(clazz, attributeStart, attribute.getAddress() - attributeStart.getAddress(), "permittedSubclass", true);
+	}
+
+	void loadableDescriptorsAttributeDo(U32Pointer attribute) throws CorruptDataException
+	{
+		if (attribute.isNull()) {
+			return;
+		}
+		U32Pointer attributeStart = attribute;
+		classWalkerCallback.addSlot(clazz, SlotType.J9_U32, attribute, "numberLoadableDescriptors");
+		for (int i = 0, numLoadableDescriptors = attribute.at(0).intValue(); i < numLoadableDescriptors; i++) {
+			attribute = attribute.add(1);
+			classWalkerCallback.addSlot(clazz, SlotType.J9_ROM_UTF8, attribute, "loadableDescriptorName");
+		}
+		attribute = attribute.add(1);
+		classWalkerCallback.addSection(clazz, attributeStart,
+			attribute.getAddress() - attributeStart.getAddress(),
+			"loadableDescriptorsAttribute", true);
+	}
+
+	void implicitCreationAttributeDo(U32Pointer attribute) throws CorruptDataException
+	{
+		if (attribute.isNull()) {
+			return;
+		}
+		U32Pointer attributeStart = attribute;
+		classWalkerCallback.addSlot(clazz, SlotType.J9_U32, attribute, "implicitCreationFlags");
+		attribute = attribute.add(1);
+		classWalkerCallback.addSection(clazz, attributeStart, attribute.getAddress() - attributeStart.getAddress(), "implicitCreationAttribute", true);
 	}
 
 	int allSlotsInAnnotationDo(U32Pointer annotation, String annotationSectionName) throws CorruptDataException

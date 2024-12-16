@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2018
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,21 +15,19 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #ifndef CLIENT_STREAM_H
 #define CLIENT_STREAM_H
 
 #include "compile/CompilationTypes.hpp"
+#include "control/CompilationRuntime.hpp"
 #include "ilgen/J9IlGeneratorMethodDetails.hpp"
 #include "net/RawTypeConvert.hpp"
 #include "net/CommunicationStream.hpp"
-
-class SSLOutputStream;
-class SSLInputStream;
 
 namespace JITServer
 {
@@ -67,7 +65,8 @@ public:
 
        Returns 0 if successful;; Otherwise, returns -1.
    */
-   static int static_init(TR::PersistentInfo *info);
+   static int static_init(TR::CompilationInfo *compInfo);
+   static void freeSSLContext();
 
    explicit ClientStream(TR::PersistentInfo *info);
    virtual ~ClientStream()

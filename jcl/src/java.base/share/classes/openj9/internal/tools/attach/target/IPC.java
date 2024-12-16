@@ -1,6 +1,6 @@
-/*[INCLUDE-IF Sidecar18-SE]*/
-/*******************************************************************************
- * Copyright (c) 2009, 2021 IBM Corp. and others
+/*[INCLUDE-IF JAVA_SPEC_VERSION >= 8]*/
+/*
+ * Copyright IBM Corp. and others 2009
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,11 +16,13 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
 package openj9.internal.tools.attach.target;
+
+import com.ibm.oti.vm.VM;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -53,6 +55,7 @@ import static openj9.internal.tools.attach.target.DiagnosticProperties.OPENJ9_DI
 public class IPC {
 
 	private static final String JAVA_IO_TMPDIR = "java.io.tmpdir"; //$NON-NLS-1$
+	private static final String COM_IBM_TOOLS_ATTACH_USE_FILELOCK_WATCHDOG = "com.ibm.tools.attach.useFileLockWatchdog"; //$NON-NLS-1$
 	/**
 	 * Successful return code from natives.
 	 */
@@ -76,28 +79,52 @@ public class IPC {
 	public static final String PROPERTY_DIAGNOSTICS_ERRORTYPE = OPENJ9_DIAGNOSTICS_PREFIX + "errortype"; //$NON-NLS-1$
 	public static final String PROPERTY_DIAGNOSTICS_ERRORMSG = OPENJ9_DIAGNOSTICS_PREFIX + "errormsg"; //$NON-NLS-1$
 	/**
+	 * True if operating system is Linux.
+	 */
+	public static final boolean isLinux;
+	/**
 	 * True if operating system is Windows.
 	 */
 	public static final boolean isWindows;
-
 	/**
 	 * True if operating system is z/OS.
 	 */
 	public static final boolean isZOS;
 
+	/**
+	 * Controls use of the FileLockWatchdogTask.
+	 * Setting -Dcom.ibm.tools.attach.useFileLockWatchdog=[true|false] takes
+	 * precedence, if no such system property is specified, always set false on
+	 * z/OS, defaults to true on non-z/OS platforms.
+	 */
+	public static final boolean useFileLockWatchdog;
+
 	static {
-		String osName = com.ibm.oti.vm.VM.getVMLangAccess().internalGetProperties().getProperty("os.name"); //$NON-NLS-1$
+		Properties props = VM.internalGetProperties();
+		String osName = props.getProperty("os.name"); //$NON-NLS-1$
 		boolean tempIsZos = false;
 		boolean tempIsWindows = false;
+		boolean tempIsLinux = false;
 		if (null != osName) {
 			if (osName.equalsIgnoreCase("z/OS")) { //$NON-NLS-1$
 				tempIsZos = true;
 			} else if (osName.startsWith("Windows")) { //$NON-NLS-1$
 				tempIsWindows = true;
+			} else if (osName.startsWith("Linux")) { //$NON-NLS-1$
+				tempIsLinux = true;
 			}
 		}
 		isZOS = tempIsZos;
 		isWindows = tempIsWindows;
+		isLinux = tempIsLinux;
+
+		String propUseFileLockWatchdog = props.getProperty(COM_IBM_TOOLS_ATTACH_USE_FILELOCK_WATCHDOG);
+		if (propUseFileLockWatchdog == null) {
+			// no system property com.ibm.tools.attach.useFileLockWatchdog is specified
+			useFileLockWatchdog = !isZOS;
+		} else {
+			useFileLockWatchdog = "true".equalsIgnoreCase(propUseFileLockWatchdog); //$NON-NLS-1$
+		}
 	}
 
 	private static Random randomGen; /* Cleanup. this is used by multiple threads */
@@ -325,7 +352,7 @@ public class IPC {
 		String tmpDir = getTempDirImpl();
 		if (null == tmpDir) {
 			logMessage("Could not get system temporary directory. Trying " + JAVA_IO_TMPDIR); //$NON-NLS-1$
-			tmpDir = com.ibm.oti.vm.VM.getVMLangAccess().internalGetProperties().getProperty(JAVA_IO_TMPDIR);
+			tmpDir = VM.internalGetProperties().getProperty(JAVA_IO_TMPDIR);
 		}
 		return tmpDir;
 	}

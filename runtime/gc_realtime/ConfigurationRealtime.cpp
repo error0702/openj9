@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 /**
@@ -27,6 +27,7 @@
 
 #include "omr.h"
 #include "omrcfg.h"
+#include "modronnls.h"
 
 #include "ConfigurationRealtime.hpp"
 
@@ -106,7 +107,17 @@ MM_ConfigurationRealtime::tearDown(MM_EnvironmentBase* env)
 MM_Heap *
 MM_ConfigurationRealtime::createHeapWithManager(MM_EnvironmentBase *env, uintptr_t heapBytesRequested, MM_HeapRegionManager *regionManager)
 {
-	return MM_HeapVirtualMemory::newInstance(env, env->getExtensions()->heapAlignment, heapBytesRequested, regionManager);
+	MM_GCExtensionsBase *extensions = env->getExtensions();
+
+#if defined(J9VM_GC_SPARSE_HEAP_ALLOCATION)
+	PORT_ACCESS_FROM_ENVIRONMENT(env);
+
+	if (extensions->isVirtualLargeObjectHeapRequested) {
+		j9nls_printf(PORTLIB, J9NLS_WARNING, J9NLS_GC_OPTIONS_VIRTUAL_LARGE_OBJECT_HEAP_NOT_SUPPORTED_WARN, "metronome");
+	}
+#endif /* defined(J9VM_GC_SPARSE_HEAP_ALLOCATION) */
+
+	return MM_HeapVirtualMemory::newInstance(env, extensions->heapAlignment, heapBytesRequested, regionManager);
 }
 
 MM_MemorySpace *
@@ -228,7 +239,7 @@ MM_ConfigurationRealtime::newInstance(MM_EnvironmentBase *env)
 }
 
 MM_GlobalCollector *
-MM_ConfigurationRealtime::createGlobalCollector(MM_EnvironmentBase *env)
+MM_ConfigurationRealtime::createCollectors(MM_EnvironmentBase *env)
 {
 	return MM_RealtimeGC::newInstance(env);
 }

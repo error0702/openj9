@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2008, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2008
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "j9protos.h"
@@ -79,6 +79,9 @@ jitGetClassInClassloaderFromUTF8(J9VMThread *vmStruct, J9ClassLoader *classLoade
 }
 
 /**
+ * This function returns the class associated to a static field ref at a particular cpIndex in a constant pool.
+ * The class entry will be resolved with resolveStaticFieldRef if it is not already resolved.
+ *
  * @param vmStruct, the current J9VMThread
  * @param constantPool, the constant pool that the cpIndex is referring to
  * @param fieldIndex, the index of an entry in a constant pool, pointing at a static field ref.
@@ -95,6 +98,11 @@ jitGetClassOfFieldFromCP(J9VMThread *vmStruct, J9ConstantPool *constantPool, UDA
 
 	/* romConstantPool is a J9ROMConstantPoolItem */
 	ramRefWrapper = ((J9RAMStaticFieldRef*) constantPool) + fieldIndex;
+
+	if (!J9RAMSTATICFIELDREF_IS_RESOLVED(ramRefWrapper)) {
+	   vmStruct->javaVM->internalVMFunctions->resolveStaticFieldRef(vmStruct, NULL, constantPool, fieldIndex, J9_RESOLVE_FLAG_JIT_COMPILE_TIME, NULL);
+	}
+
 	if (J9RAMSTATICFIELDREF_IS_RESOLVED(ramRefWrapper)) {
 		J9Class *classWrapper = J9RAMSTATICFIELDREF_CLASS(ramRefWrapper);
 		UDATA initStatus = classWrapper->initializeStatus;
@@ -202,9 +210,6 @@ jitParseSignature (const J9UTF8 *signature, U_8 *paramBuffer, UDATA *paramElemen
 			state = returnValue;
 		} else {
 			switch (*sigChar) {
-			case 'Q':
-                                /* VALHALLA_TODO:  Need to return a J9_NATIVE_TYPE_VALUE for 'Q' in future */
-                                /* FALLTHROUGH */
 			case 'L': next = J9_NATIVE_TYPE_OBJECT; break;
 			case '[': 
 				next = J9_NATIVE_TYPE_OBJECT; 
@@ -231,7 +236,7 @@ jitParseSignature (const J9UTF8 *signature, U_8 *paramBuffer, UDATA *paramElemen
 			case 'V': next = J9_NATIVE_TYPE_VOID; break;
 			}
 			
-			if ('L' == *sigChar || 'Q' == *sigChar) {
+			if ('L' == *sigChar) {
 				/* flush the name of the class */
 				while (';' != *sigChar) {
 					++sigChar;

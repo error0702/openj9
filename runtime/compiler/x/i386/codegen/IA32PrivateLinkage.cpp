@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "codegen/IA32PrivateLinkage.hpp"
@@ -384,15 +384,7 @@ TR::Register *J9::X86::I386::PrivateLinkage::pushIntegerWordArg(TR::Node *child)
                {
                // Must pass symbol reference so that aot can put out a relocation for it
                //
-               TR::Instruction *instr = generateImmSymInstruction(TR::InstOpCode::PUSHImm4, child, (uintptr_t)sym->getStaticAddress(), symRef, cg());
-
-               // HCR register the class passed as a parameter
-               //
-               if ((sym->isClassObject() || sym->isAddressOfClassObject())
-                   && cg()->wantToPatchClassPointer((TR_OpaqueClassBlock*)sym->getStaticAddress(), child))
-                  {
-                  comp()->getStaticHCRPICSites()->push_front(instr);
-                  }
+               generateImmSymInstruction(TR::InstOpCode::PUSHImm4, child, (uintptr_t)sym->getStaticAddress(), symRef, cg());
                }
 
             cg()->decReferenceCount(child);
@@ -606,7 +598,7 @@ void J9::X86::I386::PrivateLinkage::buildIPIC(
    if (useLastITableCache)
       {
       if (breakBeforeIPICUsingLastITable)
-         generateInstruction(TR::InstOpCode::bad, site.getCallNode(), cg());
+         generateInstruction(TR::InstOpCode::INT3, site.getCallNode(), cg());
       if (numIPicSlotsBeforeLastITable)
          numIPicSlots = atoi(numIPicSlotsBeforeLastITable);
    }
@@ -695,7 +687,9 @@ void J9::X86::I386::PrivateLinkage::buildVirtualOrComputedCall(
       uint8_t *thunk)
    {
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(fe());
-   bool resolvedSite = !(site.getSymbolReference()->isUnresolved() || fej9->forceUnresolvedDispatch());
+   bool resolvedSite = !site.getSymbolReference()->isUnresolved()
+      && fej9->isResolvedVirtualDispatchGuaranteed(comp());
+
    if (site.getSymbolReference()->getSymbol()->castToMethodSymbol()->isComputed())
       {
       // TODO:JSR292: Try to avoid the explicit VFT load
@@ -706,6 +700,8 @@ void J9::X86::I386::PrivateLinkage::buildVirtualOrComputedCall(
       }
    else if (resolvedSite && site.resolvedVirtualShouldUseVFTCall())
       {
+      // There are no J2I thunks on x86-32, so no J2I thunk validation is needed
+
       if (entryLabel)
          generateLabelInstruction(TR::InstOpCode::label, site.getCallNode(), entryLabel, cg());
 

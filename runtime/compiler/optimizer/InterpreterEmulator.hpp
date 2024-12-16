@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 /*
@@ -344,7 +344,12 @@ class InterpreterEmulator : public TR_ByteCodeIteratorWithState<TR_J9ByteCode, J
       /*
        * \brief refine invokestatic callee method based on operands when possible
        */
-      void refineResolvedCalleeForInvokestatic(TR_ResolvedMethod *&callee, TR::KnownObjectTable::Index & mcsIndex, TR::KnownObjectTable::Index & mhIndex, bool & isIndirectCall);
+      void refineResolvedCalleeForInvokestatic(
+         TR_ResolvedMethod *&callee,
+         TR::KnownObjectTable::Index & mcsIndex,
+         TR::KnownObjectTable::Index & mhIndex,
+         bool & isIndirectCall,
+         TR_OpaqueClassBlock *&receiverClass);
       /*
        * \brief refine invokevirtual callee method based on operands when possible
        */
@@ -432,6 +437,7 @@ class InterpreterEmulator : public TR_ByteCodeIteratorWithState<TR_J9ByteCode, J
        */
       void mergeOperandArray(OperandArray *first, OperandArray *second);
 
+      TR::RequiredConst &addRequiredConst(TR::AnyConst value);
 
       TR_LogTracer *_tracer;
       TR_EstimateCodeSize *_ecs;

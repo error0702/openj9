@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include <string.h>
@@ -84,8 +84,7 @@ static UDATA classLoaderRegisterLibrary(void *voidVMThread, J9ClassLoader *class
 static BOOLEAN isAbsolutePath (const char *path);
 static J9ClassLoader* findLoadedSharedLibrary(J9VMThread* vmThread, const char* sharedLibraryName, J9NativeLibrary** libraryPtr);
 static void freeSharedLibrary(J9VMThread *vmThread, J9ClassLoader* classLoader, J9NativeLibrary* library);
-static UDATA    openNativeLibrary (J9JavaVM* vm, J9ClassLoader * classLoader, const char * libName, char * libraryPath, J9NativeLibrary** libraryPtr, openFunc_t openFunction, void* userData, char* errorBuffer, UDATA bufferLength);
-static char * getBootLibraryPath(JavaVMInitArgs *vmInitArgs);
+static UDATA openNativeLibrary(J9JavaVM *vm, J9ClassLoader *classLoader, const char *libName, const char *libraryPath, J9NativeLibrary **libraryPtr, openFunc_t openFunction, void *userData, char *errorBuffer, UDATA bufferLength);
 static void reportError(char* errorBuffer, const char* message, UDATA bufferLength);
 
 /* Callbacks used in library management */
@@ -160,8 +159,8 @@ sendLifecycleEventCallback(struct J9VMThread* vmThread, struct J9NativeLibrary* 
 			if (0 == vmThread->javaVM->javaVM31) {
 				queryJavaVM31(vmThread->javaVM);
 			}
-			args[0]= &ffi_type_sint32;
-			args[1]= &ffi_type_sint32;
+			args[0] = &ffi_type_uint32;
+			args[1] = &ffi_type_uint32;
 			values[0] = (void*)&(vmThread->javaVM->javaVM31);
 			values[1] = (void*)&nullSecondParam;
 
@@ -214,22 +213,22 @@ sendLifecycleEventCallback(struct J9VMThread* vmThread, struct J9NativeLibrary* 
  * \return
  */
 static UDATA   
-openNativeLibrary(J9JavaVM* vm, J9ClassLoader * classLoader, const char * libName, char * libraryPath, J9NativeLibrary** libraryPtr, openFunc_t openFunction, void* userData, char* errorBuffer, UDATA bufferLength)
+openNativeLibrary(J9JavaVM *vm, J9ClassLoader *classLoader, const char *libName, const char *libraryPath, J9NativeLibrary **libraryPtr, openFunc_t openFunction, void *userData, char *errorBuffer, UDATA bufferLength)
 {
-	UDATA result;
+	UDATA result = 0;
 	/* systemClassLoader always uses immediate symbol resolution, others determined by vmargs or defaults. */
 	UDATA lazy = ((classLoader != vm->systemClassLoader)
-				  && (vm->extendedRuntimeFlags & J9_EXTENDED_RUNTIME_LAZY_SYMBOL_RESOLUTION)) ? J9PORT_SLOPEN_LAZY : 0;
+		&& (vm->extendedRuntimeFlags & J9_EXTENDED_RUNTIME_LAZY_SYMBOL_RESOLUTION)) ? J9PORT_SLOPEN_LAZY : 0;
 
 #if defined(J9VM_INTERP_MINIMAL_JNI)
 	char *fullPath = NULL;
 	char *fullPathPtr = libName;
 #else
-	char fullPath[MAX_PATH_SIZE + 1];
+	char fullPath[MAX_PATH_SIZE + 1] = {0};
 	char *fullPathPtr = fullPath;
 	UDATA fullPathBufferLength = MAX_PATH_SIZE;
-	char c;
-	char *search;
+	char c = 0;
+	const char *search = NULL;
 	UDATA expectedPathLength = 0;
 	PORT_ACCESS_FROM_JAVAVM(vm);
 
@@ -366,32 +365,9 @@ reportError(char* errorBuffer, const char* message, UDATA bufferLength) {
  * \return One of the LOAD_* constants returned by \sa openNativeLibrary()
  */
 UDATA
-registerNativeLibrary(J9VMThread * vmThread, J9ClassLoader * classLoader, const char * libName, char * libraryPath, J9NativeLibrary** libraryPtr, char* errorBuffer, UDATA bufferLength)
+registerNativeLibrary(J9VMThread *vmThread, J9ClassLoader *classLoader, const char *libName, const char *libraryPath, J9NativeLibrary **libraryPtr, char *errorBuffer, UDATA bufferLength)
 {
 	return openNativeLibrary(vmThread->javaVM, classLoader, libName, libraryPath, libraryPtr, classLoaderRegisterLibrary, vmThread, errorBuffer, bufferLength);
-}
-
-/**
- * Look for the boot library path system property starting
- * at the bottom of the vmInitArgs->options array
- *
- * @return	The string corresponding to the "com.ibm.oti.vm.bootstrap.library.path"
- *          or NULL
- */
-static char *
-getBootLibraryPath(JavaVMInitArgs *vmInitArgs)
-{
-	char * bootLibraryPath = NULL;
-	jint count = vmInitArgs->nOptions;
-
-	for ( count = (vmInitArgs->nOptions - 1) ; count >= 0 ; count-- ) {
-		JavaVMOption* option = &(vmInitArgs->options[count]);
-		bootLibraryPath = getDefineArgument(option->optionString, "com.ibm.oti.vm.bootstrap.library.path");
-		if (bootLibraryPath){
-			break;
-		}
-	}
-	return bootLibraryPath;
 }
 
 /**
@@ -405,7 +381,7 @@ getBootLibraryPath(JavaVMInitArgs *vmInitArgs)
 UDATA
 registerBootstrapLibrary(J9VMThread *vmThread, const char *libName, J9NativeLibrary **libraryPtr, UDATA suppressError)
 {
-	char *bootLibraryPath = NULL;
+	const char *bootLibraryPath = NULL;
 	UDATA result = 0;
 	char errorBuffer[512] = {0};
 	JavaVMInitArgs *vmInitArgs = (JavaVMInitArgs *) vmThread->javaVM->vmArgsArray->actualVMArgs;
@@ -413,7 +389,7 @@ registerBootstrapLibrary(J9VMThread *vmThread, const char *libName, J9NativeLibr
 	Trc_VM_registerBootstrapLibrary_Entry(vmThread, libName, (NULL == libraryPtr) ? NULL : *libraryPtr);
 	/* Look for the boot library path system property */
 	if (NULL != vmInitArgs) {
-		bootLibraryPath = getBootLibraryPath(vmInitArgs);
+		bootLibraryPath = getDefinedArgumentFromJavaVMInitArgs(vmInitArgs, "com.ibm.oti.vm.bootstrap.library.path");
 	}
 	Assert_VM_mustNotHaveVMAccess(vmThread);
 	result = registerNativeLibrary(vmThread, vmThread->javaVM->systemClassLoader, libName, bootLibraryPath, libraryPtr, errorBuffer, sizeof(errorBuffer));
@@ -674,6 +650,9 @@ classLoaderRegisterLibrary(void *voidVMThread, J9ClassLoader *classLoader, const
 					if (NULL != libraryPtr) {
 						*libraryPtr = newNativeLibrary;
 					}
+#if defined(J9VM_OPT_JAVA_OFFLOAD_SUPPORT)
+					newNativeLibrary->doSwitching = validateLibrary(javaVM, logicalName, newNativeLibrary->handle, JNI_TRUE);
+#endif /* defined(J9VM_OPT_JAVA_OFFLOAD_SUPPORT) */
 				} else {
 					/* Return value is not 1.8 (or above); could mean either of 2 things:
 					 * 1. JNI_OnLoad_L /was/ defined, but didn't return 1.8 (or above).  Eg. a 
@@ -735,11 +714,11 @@ classLoaderRegisterLibrary(void *voidVMThread, J9ClassLoader *classLoader, const
 		if (NULL != libraryPtr) {
 			*libraryPtr = newNativeLibrary;
 		}
-#ifdef J9VM_OPT_JAVA_OFFLOAD_SUPPORT
+#if defined(J9VM_OPT_JAVA_OFFLOAD_SUPPORT)
 		if (J9NATIVELIB_LOAD_OK == rc) {
-			validateLibrary(javaVM, newNativeLibrary);
+			newNativeLibrary->doSwitching = validateLibrary(javaVM, newNativeLibrary->name, newNativeLibrary->handle, JNI_FALSE);
 		}
-#endif
+#endif /* defined(J9VM_OPT_JAVA_OFFLOAD_SUPPORT) */
 		RELEASE_CLASS_LOADER_BLOCKS_MUTEX(javaVM);
 
 		/* Call JNI_OnLoad to get the required JNI version, only if the library has not
@@ -889,3 +868,52 @@ initializeNativeLibrary(J9JavaVM * javaVM, J9NativeLibrary* library)
 	library->flags = 0;
 	return 0;
 }
+
+
+#if defined(J9VM_ZOS_3164_INTEROPERABILITY) && (JAVA_SPEC_VERSION >= 17)
+/*
+ * Utility function used by NativeLibraries to invoke JNI_OnLoad or JNI_OnUnload
+ * functions in 31-bit native interoperability targets. This requires mapping to
+ * the corresponding 31-bit JavaVM object handle, along with invoking CEL4RO31
+ * (via ffi) to the corresponding target function.
+ *
+ * \param vm The J9JavaVM pointer passed as first parameter to JNI_OnXLoad function
+ * \param handle The target function pointer to invoke - should be a 31-bit interop target
+ * \param isOnLoad JNI_TRUE if invoking JNI_OnLoad, JNI_FALSE if invoking JNI_OnUnload
+ * \param reserved The reserved second parameter to JNI_OnXLoad function
+ * \return the return value for JNI_OnLoad, or 0 for JNI_OnUnload
+ */
+I_32
+invoke31BitJNI_OnXLoad(J9JavaVM *vm, void *handle, jboolean isOnLoad, void *reserved)
+{
+	I_32 result = JNI_VERSION_1_1;
+
+	if (J9_IS_31BIT_INTEROP_TARGET(handle)) {
+		ffi_type *args[2];
+		void *values[2];
+		U_32 nullSecondParam = 0;
+		UDATA returnValue = 0;
+		ffi_cif cif;
+
+		if (0 == vm->javaVM31) {
+			queryJavaVM31(vm);
+		}
+		args[0] = &ffi_type_uint32;
+		args[1] = &ffi_type_uint32;
+		values[0] = (void *)&(vm->javaVM31);
+		values[1] = (void *)&nullSecondParam;
+
+		if (isOnLoad) {
+			if (FFI_OK == ffi_prep_cif(&cif, FFI_CEL4RO31, 2, &ffi_type_sint32, args)) {
+				ffi_call(&cif, FFI_FN(handle), &returnValue, values);
+				result = (I_32)(IDATA)returnValue;
+			}
+		} else {
+			if (FFI_OK == ffi_prep_cif(&cif, FFI_CEL4RO31, 2, &ffi_type_void, args)) {
+				ffi_call(&cif, FFI_FN(handle), NULL, values);
+			}
+		}
+	}
+	return result;
+}
+#endif /* defined(J9VM_ZOS_3164_INTEROPERABILITY) && (JAVA_SPEC_VERSION >= 17) */

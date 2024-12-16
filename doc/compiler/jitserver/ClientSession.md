@@ -1,5 +1,5 @@
 <!--
-Copyright (c) 2018, 2021 IBM Corp. and others
+Copyright IBM Corp. and others 2018
 
 This program and the accompanying materials are made available under
 the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@ Exception [1] and GNU General Public License, version 2 with the
 OpenJDK Assembly Exception [2].
 
 [1] https://www.gnu.org/software/classpath/license.html
-[2] http://openjdk.java.net/legal/assembly-exception.html
+[2] https://openjdk.org/legal/assembly-exception.html
 
-SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
 -->
 
 # JITServer Client Sessions
@@ -30,9 +30,12 @@ Some of the most commonly used items in the client session data are the cached R
 
 ## Adding new items to the client session
 
-1. Modify the relevant structure (`ClientSessionData`, `ClassInfo`, or `J9MethodInfo`) to contain your data. See below for information about what goes where.
+1. Modify the relevant structure (`ClientSessionData`, `ClassInfo`, or `J9MethodInfo`) by adding a new field and change the constructor to initialize the new field. See below for information about what goes where.
 2. Modify ClassInfoTuple (add to end)
-3. Modify cacheRemoteROMClass packRemoteROMClassInfo
+3. Modify `enum ClassInfoDataType`
+4. Modify `JITServerHelpers::cacheRemoteROMClass` and `JITServerHelpers::packRemoteROMClassInfo`
+5. Modify `JITServerHelpers::getROMClassData`to return the new field when asked
+6. Update the version `MINOR_NUMBER` for JITServer
 
 ## `ClientSessionData`
 

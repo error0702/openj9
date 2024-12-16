@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2017, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2017
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #if !defined(MARKINGDELEGATE_HPP_)
@@ -52,6 +52,7 @@ private:
 	bool _collectStringConstantsEnabled;
 	bool _shouldScanUnfinalizedObjects;
 	bool _shouldScanOwnableSynchronizerObjects;
+	bool _shouldScanContinuationObjects;
 #if defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING)
 	MM_MarkMap *_markMap;							/**< This is set when dynamic class loading is enabled, NULL otherwise */
 	volatile bool _anotherClassMarkPass;			/**< Used in completeClassMark for another scanning request*/
@@ -71,6 +72,15 @@ private:
 	fomrobject_t *setupReferenceObjectScanner(MM_EnvironmentBase *env, omrobjectptr_t objectPtr, MM_MarkingSchemeScanReason reason);
 	uintptr_t setupPointerArrayScanner(MM_EnvironmentBase *env, omrobjectptr_t objectPtr, MM_MarkingSchemeScanReason reason, uintptr_t *sizeToDo, uintptr_t *slotsToDo);
 
+	/**
+	 * Set permanent ClassLoader Marked.
+	 *
+	 * @param env environment for calling thread
+	 * @param classLoader ClassLoader to be set marked
+	 */
+	void markPermanentClassloader(MM_EnvironmentBase *env, J9ClassLoader *classLoader);
+
+
 protected:
 
 public:
@@ -81,6 +91,7 @@ public:
 		, _collectStringConstantsEnabled(false)
 		, _shouldScanUnfinalizedObjects(false)
 		, _shouldScanOwnableSynchronizerObjects(false)
+		, _shouldScanContinuationObjects(false)
 #if defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING)
 		, _markMap(NULL)
 		, _anotherClassMarkPass(false)
@@ -111,16 +122,24 @@ public:
 
 	void startRootListProcessing(MM_EnvironmentBase *env);
 
-	uintptr_t setupIndexableScanner(MM_EnvironmentBase *env, omrobjectptr_t objectPtr, MM_MarkingSchemeScanReason reason, uintptr_t *sizeToDo, uintptr_t *sizeInElementsToDo, fomrobject_t **basePtr, uintptr_t *flags) { return 0; }
+	uintptr_t
+	setupIndexableScanner(MM_EnvironmentBase *env, omrobjectptr_t objectPtr, MM_MarkingSchemeScanReason reason, uintptr_t *sizeToDo, uintptr_t *sizeInElementsToDo, fomrobject_t **basePtr, uintptr_t *flags)
+	{
+		return 0;
+	}
+
+	void doStackSlot(MM_EnvironmentBase *env, omrobjectptr_t objectPtr, omrobjectptr_t *slotPtr);
+	void scanContinuationNativeSlots(MM_EnvironmentBase *env, omrobjectptr_t objectPtr);
 
 	MMINLINE GC_ObjectScanner *
 	getObjectScanner(MM_EnvironmentBase *env, omrobjectptr_t objectPtr, void *scannerSpace, MM_MarkingSchemeScanReason reason, uintptr_t *sizeToDo)
 	{
 		J9Class *clazz = J9GC_J9OBJECT_CLAZZ(objectPtr, env);
-		UDATA const referenceSize = env->compressObjectReferences() ? sizeof(uint32_t) : sizeof(uintptr_t);
+		uintptr_t const referenceSize = env->compressObjectReferences() ? sizeof(uint32_t) : sizeof(uintptr_t);
 
 		/* object class must have proper eye catcher */
-		Assert_MM_true((UDATA)0x99669966 == clazz->eyecatcher);
+		/* TODO: should define J9CLASS_EYECATCHER */
+		Assert_MM_true((uintptr_t)0x99669966 == clazz->eyecatcher);
 
 		GC_ObjectScanner *objectScanner = NULL;
 		switch(_extensions->objectModel.getScanType(objectPtr)) {
@@ -130,6 +149,11 @@ public:
 		case GC_ObjectModel::SCAN_OWNABLESYNCHRONIZER_OBJECT:
 		case GC_ObjectModel::SCAN_CLASS_OBJECT:
 		case GC_ObjectModel::SCAN_CLASSLOADER_OBJECT:
+			objectScanner = GC_MixedObjectScanner::newInstance(env, objectPtr, scannerSpace, 0);
+			*sizeToDo = referenceSize + ((GC_MixedObjectScanner *)objectScanner)->getBytesRemaining();
+			break;
+		case GC_ObjectModel::SCAN_CONTINUATION_OBJECT:
+			scanContinuationNativeSlots(env, objectPtr);
 			objectScanner = GC_MixedObjectScanner::newInstance(env, objectPtr, scannerSpace, 0);
 			*sizeToDo = referenceSize + ((GC_MixedObjectScanner *)objectScanner)->getBytesRemaining();
 			break;
@@ -201,16 +225,27 @@ public:
 		return _shouldScanOwnableSynchronizerObjects;
 	}
 
+	MMINLINE bool
+	shouldScanContinuationObjects()
+	{
+		return _shouldScanContinuationObjects;
+	}
+
 	MMINLINE void
 	shouldScanOwnableSynchronizerObjects(bool shouldScanOwnableSynchronizerObjects)
 	{
 		_shouldScanOwnableSynchronizerObjects = shouldScanOwnableSynchronizerObjects;
 	}
+	MMINLINE void
+	shouldScanContinuationObjects(bool shouldScanContinuationObjects)
+	{
+		_shouldScanContinuationObjects = shouldScanContinuationObjects;
+	}
 
 	void scanClass(MM_EnvironmentBase *env, J9Class *clazz);
 
 	bool processReference(MM_EnvironmentBase *env, omrobjectptr_t objectPtr);
-	void processReferenceList(MM_EnvironmentBase *env, MM_HeapRegionDescriptorStandard* region, omrobjectptr_t headOfList, MM_ReferenceStats *referenceStats);
+	void processReferenceList(MM_EnvironmentBase *env, MM_HeapRegionDescriptorStandard *region, omrobjectptr_t headOfList, MM_ReferenceStats *referenceStats);
 
 	void handleWorkPacketOverflowItem(MM_EnvironmentBase *env, omrobjectptr_t objectPtr)
 	{
@@ -230,5 +265,11 @@ public:
 	MMINLINE bool isDynamicClassUnloadingEnabled() { return NULL != _markMap; }
 #endif /* defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING) */
 };
+
+typedef struct StackIteratorData4MarkingDelegate {
+	MM_MarkingDelegate *markingDelegate;
+	MM_EnvironmentBase *env;
+	omrobjectptr_t fromObject;
+} StackIteratorData4MarkingDelegate;
 
 #endif /* MARKINGDELEGATE_HPP_ */

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2017, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2017
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 def get_shas(OPENJDK_REPO, OPENJDK_BRANCH, OPENJ9_REPO, OPENJ9_BRANCH, OMR_REPO, OMR_BRANCH, VENDOR_TEST_REPOS_MAP=null, VENDOR_TEST_BRANCHES_MAP=null, VENDOR_TEST_SHAS_MAP=null) {
@@ -219,7 +219,7 @@ def build(BUILD_JOB_NAME, OPENJDK_REPO, OPENJDK_BRANCH, OPENJDK_SHA, OPENJ9_REPO
     }
 }
 
-def test(JOB_NAME, UPSTREAM_JOB_NAME, UPSTREAM_JOB_NUMBER, NODE, OPENJ9_REPO, OPENJ9_BRANCH, OPENJ9_SHA, VENDOR_TEST_REPOS, VENDOR_TEST_BRANCHES, VENDOR_TEST_SHAS, VENDOR_TEST_DIRS, USER_CREDENTIALS_ID, CUSTOMIZED_SDK_URL, ARTIFACTORY_CREDS, TEST_FLAG, BUILD_IDENTIFIER, ghprbGhRepository, ghprbActualCommit, GITHUB_SERVER, ADOPTOPENJDK_REPO, ADOPTOPENJDK_BRANCH, PARALLEL, extraTestLabels, keepReportDir, buildList, NUM_MACHINES, OPENJDK_REPO, OPENJDK_BRANCH, USE_TESTENV_PROPERTIES) {
+def test(JOB_NAME, UPSTREAM_JOB_NAME, UPSTREAM_JOB_NUMBER, NODE, OPENJ9_REPO, OPENJ9_BRANCH, OPENJ9_SHA, VENDOR_TEST_REPOS, VENDOR_TEST_BRANCHES, VENDOR_TEST_SHAS, VENDOR_TEST_DIRS, USER_CREDENTIALS_ID, CUSTOMIZED_SDK_URL, ARTIFACTORY_CREDS, TEST_FLAG, BUILD_IDENTIFIER, ghprbGhRepository, ghprbActualCommit, GITHUB_SERVER, ADOPTOPENJDK_REPO, ADOPTOPENJDK_BRANCH, PARALLEL, extraTestLabels, keepReportDir, buildList, NUM_MACHINES, OPENJDK_REPO, OPENJDK_BRANCH, USE_TESTENV_PROPERTIES, GENERATE_JOBS, DYNAMIC_COMPILE) {
     stage ("${JOB_NAME}") {
         def testParams = []
         testParams.addAll([string(name: 'LABEL', value: NODE),
@@ -241,13 +241,17 @@ def test(JOB_NAME, UPSTREAM_JOB_NAME, UPSTREAM_JOB_NUMBER, NODE, OPENJ9_REPO, OP
             string(name: 'BUILD_IDENTIFIER', value: BUILD_IDENTIFIER),
             string(name: 'PARALLEL', value: PARALLEL),
             string(name: 'NUM_MACHINES', value: NUM_MACHINES),
-            booleanParam(name: 'USE_TESTENV_PROPERTIES', value: USE_TESTENV_PROPERTIES)])
+            booleanParam(name: 'USE_TESTENV_PROPERTIES', value: USE_TESTENV_PROPERTIES),
+            booleanParam(name: 'GENERATE_JOBS', value: GENERATE_JOBS),
+            booleanParam(name: 'DYNAMIC_COMPILE', value: DYNAMIC_COMPILE)])
         if (ARTIFACTORY_CREDS) {
             testParams.addAll([string(name: 'CUSTOMIZED_SDK_URL', value: CUSTOMIZED_SDK_URL),
+                string(name: 'SDK_RESOURCE', value: 'customized'),
                 string(name: 'CUSTOMIZED_SDK_URL_CREDENTIAL_ID', value: ARTIFACTORY_CREDS)])
         } else {
             testParams.addAll([string(name: 'UPSTREAM_JOB_NAME', value: UPSTREAM_JOB_NAME),
-            string(name: 'UPSTREAM_JOB_NUMBER', value: "${UPSTREAM_JOB_NUMBER}")])
+                string(name: 'SDK_RESOURCE', value: 'upstream'),
+                string(name: 'UPSTREAM_JOB_NUMBER', value: "${UPSTREAM_JOB_NUMBER}")])
         }
         // If BUILD_LIST is set, pass it, otherwise don't pass it in order to pickup the default in the test job config.
         if (buildList) {
@@ -419,26 +423,39 @@ def workflow(SDK_VERSION, SPEC, SHAS, OPENJDK_REPO, OPENJDK_BRANCH, OPENJ9_REPO,
             def extraTestLabels = target['extraTestLabels']
             def keepReportDir = target['keepReportDir']
             def buildList = target['buildList']
+
             echo "Test:'${id}' testFlag:'${testFlag}' extraTestLabels:'${extraTestLabels}', keepReportDir:'${keepReportDir}'"
 
             def testJobName = get_test_job_name(id, SPEC, SDK_VERSION, BUILD_IDENTIFIER)
 
             def PARALLEL = "None"
-
             def NUM_MACHINES = ""
+            def DYNAMIC_COMPILE = false
             if (testJobName.contains("functional")) {
                 PARALLEL = "Dynamic"
                 NUM_MACHINES = "2"
-            } else if (testJobName.contains("sanity.system") || testJobName.contains("extended.system")) {
+                if (!SPEC.contains("valhalla")) {
+                    DYNAMIC_COMPILE = true
+                }
+            } else if (testJobName.contains("sanity.system") || testJobName.contains("extended.system") || testJobName.contains("sanity.openjdk")) {
                 PARALLEL = "Dynamic"
                 NUM_MACHINES = "3"
             } else if (testJobName.contains("special.system")) {
                 PARALLEL = "Dynamic"
                 NUM_MACHINES = "5"
-            } else if (testJobName.contains("jck_s390x_zos")) {
+            } else if (testJobName.contains("external")) {
+                DYNAMIC_COMPILE = true
+            } else if (testJobName.contains("sanity.jck")) {
                 PARALLEL = "Dynamic"
                 NUM_MACHINES = "4"
+            } else if (testJobName.contains("extended.jck")) {
+                PARALLEL = "Dynamic"
+                NUM_MACHINES = "8"
             }
+
+            // generate child test jobs
+            def GENERATE_JOBS = params.AUTOMATIC_GENERATION ? params.AUTOMATIC_GENERATION.toBoolean() : false
+
             testJobs[id] = {
                 if (params.ghprbPullId) {
                     cancel_running_builds(testJobName, BUILD_IDENTIFIER)
@@ -446,7 +463,7 @@ def workflow(SDK_VERSION, SPEC, SHAS, OPENJDK_REPO, OPENJDK_BRANCH, OPENJ9_REPO,
                 if (ARTIFACTORY_CREDS) {
                     cleanup_artifactory(ARTIFACTORY_MANUAL_CLEANUP, testJobName, ARTIFACTORY_SERVER, ARTIFACTORY_REPO, ARTIFACTORY_NUM_ARTIFACTS)
                 }
-                jobs[id] = test(testJobName, BUILD_JOB_NAME, jobs["build"].getNumber(), TEST_NODE, OPENJ9_REPO, OPENJ9_BRANCH, SHAS['OPENJ9'], VENDOR_TEST_REPOS, VENDOR_TEST_BRANCHES, VENDOR_TEST_SHAS, VENDOR_TEST_DIRS, USER_CREDENTIALS_ID, CUSTOMIZED_SDK_URL, ARTIFACTORY_CREDS, testFlag, BUILD_IDENTIFIER, ghprbGhRepository, ghprbActualCommit, GITHUB_SERVER, ADOPTOPENJDK_REPO, ADOPTOPENJDK_BRANCH, PARALLEL, extraTestLabels, keepReportDir, buildList, NUM_MACHINES, OPENJDK_REPO, OPENJDK_BRANCH, USE_TESTENV_PROPERTIES)
+                jobs[id] = test(testJobName, BUILD_JOB_NAME, jobs["build"].getNumber(), TEST_NODE, OPENJ9_REPO, OPENJ9_BRANCH, SHAS['OPENJ9'], VENDOR_TEST_REPOS, VENDOR_TEST_BRANCHES, VENDOR_TEST_SHAS, VENDOR_TEST_DIRS, USER_CREDENTIALS_ID, CUSTOMIZED_SDK_URL, ARTIFACTORY_CREDS, testFlag, BUILD_IDENTIFIER, ghprbGhRepository, ghprbActualCommit, GITHUB_SERVER, ADOPTOPENJDK_REPO, ADOPTOPENJDK_BRANCH, PARALLEL, extraTestLabels, keepReportDir, buildList, NUM_MACHINES, OPENJDK_REPO, OPENJDK_BRANCH, USE_TESTENV_PROPERTIES, GENERATE_JOBS, DYNAMIC_COMPILE)
             }
         }
         if (params.AUTOMATIC_GENERATION != 'false') {
@@ -606,7 +623,8 @@ def generate_test_jobs(TESTS, SPEC, ARTIFACTORY_SERVER, ARTIFACTORY_REPO) {
             string(name: 'ARTIFACTORY_SERVER', value: ARTIFACTORY_SERVER),
             string(name: 'ARTIFACTORY_REPO', value: ARTIFACTORY_REPO),
             string(name: 'BUILDS_TO_KEEP', value: DISCARDER_NUM_BUILDS),
-            booleanParam(name: 'AUTO_DETECT', value: auto_detect)
+            booleanParam(name: 'AUTO_DETECT', value: auto_detect),
+            booleanParam(name: 'LIGHT_WEIGHT_CHECKOUT', value: true)
         ]
         build job: 'Test_Job_Auto_Gen', parameters: parameters, propagate: false
     }
@@ -782,7 +800,7 @@ def move_spec_suffix_to_id(spec, id) {
     def spec_id = [:]
     spec_id['spec'] = spec
     spec_id['id'] = id
-    for (suffix in ['aot', 'cm', 'jit', 'valhalla', 'uma', 'ojdk292', 'vt_standard']) {
+    for (suffix in ['aot', 'cm', 'jit', 'ojdk292', 'uma', 'valhalla', 'vt_standard']) {
         if (spec.contains("_${suffix}")) {
             spec_id['spec'] = spec - "_${suffix}"
             spec_id['id'] = "${suffix}_" + id

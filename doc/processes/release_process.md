@@ -1,5 +1,5 @@
 <!--
-Copyright (c) 2018, 2022 IBM Corp. and others
+Copyright IBM Corp. and others 2018
 
 This program and the accompanying materials are made available under
 the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@ Exception [1] and GNU General Public License, version 2 with the
 OpenJDK Assembly Exception [2].
 
 [1] https://www.gnu.org/software/classpath/license.html
-[2] http://openjdk.java.net/legal/assembly-exception.html
+[2] https://openjdk.org/legal/assembly-exception.html
 
-SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
 -->
 
 # Eclipse OpenJ9 Release Process
@@ -101,11 +101,11 @@ Note, detecting regressions will be difficult in the open project
 given the limited hardware resources available.  Work is being done at
 Adoptium to enable performance testing.
 
+## Deprecation
+See [Eclipse OpenJ9 Deprecation Process](deprecation.md).
+
 # Release Process
 
-1. Create an issue to track the release and record the information required
-above, including the SHAs and tags.  This information will mostly be duplicated
-with the Eclipse release plan.
 1. Pick a candidate OpenJ9 level to mark as the initial release candidate.  This
 should be a level that has successfully passed the nightly testing builds at
 both OpenJ9 and IBM. Given these builds may target a range of SHAs, a
@@ -118,9 +118,8 @@ result in a `v0.8.0-release` branch with a `openj9-0.8.0-m1` tag.  These branche
 are not intended as development branches and no continued support will be done on
 them.  They are merely points in time.
 1. The Extensions repos should have been branched for each of the releases.
-Update the Extensions branches to pull the tagged levels from the `openj9`
-& `openj9-omr` release branches.
-1. Rebuild the tagged levels and ensure they pass the quality bar defined by
+Update the Extensions branches to pull the `openj9` & `openj9-omr` release branches.
+1. Rebuild the branches and ensure they pass the quality bar defined by
 Adoptium. These builds need to have extra configure options which will
  identify them as release builds.  These options are`--with-milestone=fcs`
  (JDK8 - don't use the default option for an internal build) or
@@ -138,9 +137,7 @@ determination can be made to either:
 will be `openj9-0.8.0`.
 1. Create the [github release](https://help.github.com/articles/creating-releases/)
 corresponding to the tagged level.  The release should link to the Eclipse Release
-document, and the release issue.
-1. Open an Eclipse Bugzilla requesting the branch be marked `protected` to prevent
-commits after the release is complete.
+document.
 1. Remove the `doc:releasenote` tag from items that were included in the release
 notes.
 

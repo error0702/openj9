@@ -1,4 +1,4 @@
-dnl Copyright (c) 2019, 2021 IBM Corp. and others
+dnl Copyright IBM Corp. and others 2019
 dnl
 dnl This program and the accompanying materials are made available under
 dnl the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,9 +14,9 @@ dnl Exception [1] and GNU General Public License, version 2 with the
 dnl OpenJDK Assembly Exception [2].
 dnl
 dnl [1] https://www.gnu.org/software/classpath/license.html
-dnl [2] http://openjdk.java.net/legal/assembly-exception.html
+dnl [2] https://openjdk.org/legal/assembly-exception.html
 dnl
-dnl SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+dnl SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
 
 include(arm64helpers.m4)
 
@@ -36,7 +36,7 @@ define({CALL_SLOW_PATH_ONLY_HELPER_NO_RETURN_VALUE},{
 	ret x0
 .L_done_$1:
 	RESTORE_ALL_REGS
-	RESTORE_FPLR
+	RESTORE_LR
 	SWITCH_TO_JAVA_STACK
 })
 
@@ -46,7 +46,7 @@ define({CALL_SLOW_PATH_ONLY_HELPER_NO_EXCEPTION_NO_RETURN_VALUE},{
 	str x30,[J9VMTHREAD,{#}J9TR_VMThread_jitReturnAddress]
 	CALL_C_WITH_VMTHREAD(old_slow_$1)
 	RESTORE_ALL_REGS
-	RESTORE_FPLR
+	RESTORE_LR
 	SWITCH_TO_JAVA_STACK
 })
 
@@ -165,10 +165,11 @@ define({OLD_DUAL_MODE_HELPER_NO_RETURN_VALUE},{
 
 define({NEW_DUAL_MODE_HELPER},{
 	DECLARE_EXTERN(fast_$1)
-	START_PROC($1)
-	SAVE_FPLR
+	BEGIN_HELPER($1)
 	CALL_DIRECT(fast_$1)
 	cbz x0,.L_done_$1
+	ldr x30,JIT_GPR_SAVE_SLOT(30)
+	str x30,[J9VMTHREAD,{#}J9TR_VMThread_jitReturnAddress]
 	SWITCH_TO_C_STACK
 	SAVE_C_NONVOLATILE_REGS
 	mov x1,x0
@@ -188,10 +189,11 @@ define({NEW_DUAL_MODE_HELPER},{
 
 define({NEW_DUAL_MODE_HELPER_NO_RETURN_VALUE},{
 	DECLARE_EXTERN(fast_$1)
-	START_PROC($1)
-	SAVE_FPLR
+	BEGIN_HELPER($1)
 	CALL_DIRECT(fast_$1)
 	cbz x0,.L_done_$1
+	ldr x30,JIT_GPR_SAVE_SLOT(30)
+	str x30,[J9VMTHREAD,{#}J9TR_VMThread_jitReturnAddress]
 	SWITCH_TO_C_STACK
 	SAVE_C_NONVOLATILE_REGS
 	mov x1,x0
@@ -244,6 +246,35 @@ START_PROC($1)
 END_PROC($1)
 })
 
+dnl Helpers that are at a method invocation point.
+dnl
+dnl See definition of SAVE_C_VOLATILE_REGS in arm64helpers.m4
+dnl for details.
+
+define({METHOD_INVOCATION})
+
+PICBUILDER_DUAL_MODE_HELPER(jitLookupInterfaceMethod,3)
+PICBUILDER_SLOW_PATH_ONLY_HELPER(jitResolveInterfaceMethod,2)
+PICBUILDER_SLOW_PATH_ONLY_HELPER(jitResolveSpecialMethod,3)
+PICBUILDER_SLOW_PATH_ONLY_HELPER(jitResolveStaticMethod,3)
+PICBUILDER_SLOW_PATH_ONLY_HELPER(jitResolveVirtualMethod,2)
+SLOW_PATH_ONLY_HELPER(jitInduceOSRAtCurrentPC,0)
+SLOW_PATH_ONLY_HELPER(jitInduceOSRAtCurrentPCAndRecompile,0)
+SLOW_PATH_ONLY_HELPER(jitRetranslateMethod,3)
+
+dnl jitStackOverflow is special case in that the frame size argument
+dnl is implicit (in the register file) rather than being passed as
+dnl an argument in the usual way.
+
+SLOW_PATH_ONLY_HELPER_NO_RETURN_VALUE(jitStackOverflow,0)
+
+dnl Helpers that are not at a method invocation point.
+dnl
+dnl See definition of SAVE_C_VOLATILE_REGS in arm64helpers.m4
+dnl for details.
+
+undefine({METHOD_INVOCATION})
+
 dnl Runtime helpers
 
 NEW_DUAL_MODE_HELPER(jitNewValue,1)
@@ -255,12 +286,6 @@ DUAL_MODE_HELPER(jitANewArrayNoZeroInit,2)
 DUAL_MODE_HELPER(jitNewArray,2)
 DUAL_MODE_HELPER(jitNewArrayNoZeroInit,2)
 SLOW_PATH_ONLY_HELPER(jitAMultiNewArray,3)
-
-dnl jitStackOverflow is special case in that the frame size argument
-dnl is implicit (in the register file) rather than being passed as
-dnl an argument in the usual way.
-
-SLOW_PATH_ONLY_HELPER_NO_RETURN_VALUE(jitStackOverflow,0)
 
 SLOW_PATH_ONLY_HELPER_NO_RETURN_VALUE(jitCheckAsyncMessages,0)
 DUAL_MODE_HELPER_NO_RETURN_VALUE(jitCheckCast,2)
@@ -294,8 +319,10 @@ OLD_DUAL_MODE_HELPER_NO_RETURN_VALUE(jitPutFlattenableStaticField,3)
 OLD_DUAL_MODE_HELPER(jitLoadFlattenableArrayElement,2)
 OLD_DUAL_MODE_HELPER_NO_RETURN_VALUE(jitStoreFlattenableArrayElement,3)
 SLOW_PATH_ONLY_HELPER_NO_RETURN_VALUE(jitResolveFlattenableField,3)
-FAST_PATH_ONLY_HELPER(jitLookupDynamicInterfaceMethod,3)
-OLD_DUAL_MODE_HELPER(jitLookupDynamicPublicInterfaceMethod,3)
+
+ifdef({ASM_J9VM_OPT_OPENJDK_METHODHANDLE},{
+OLD_DUAL_MODE_HELPER(jitLookupDynamicPublicInterfaceMethod,2)
+}) dnl ASM_J9VM_OPT_OPENJDK_METHODHANDLE
 
 dnl Trap handlers
 
@@ -309,7 +336,6 @@ dnl Only called from PicBuilder
 PICBUILDER_FAST_PATH_ONLY_HELPER(jitMethodIsNative,1)
 PICBUILDER_FAST_PATH_ONLY_HELPER(jitMethodIsSync,1)
 PICBUILDER_FAST_PATH_ONLY_HELPER(jitResolvedFieldIsVolatile,3)
-PICBUILDER_DUAL_MODE_HELPER(jitLookupInterfaceMethod,3)
 PICBUILDER_SLOW_PATH_ONLY_HELPER(jitResolveString,3)
 PICBUILDER_SLOW_PATH_ONLY_HELPER(jitResolveClass,3)
 PICBUILDER_SLOW_PATH_ONLY_HELPER(jitResolveClassFromStaticField,3)
@@ -317,10 +343,6 @@ PICBUILDER_SLOW_PATH_ONLY_HELPER(jitResolveField,3)
 PICBUILDER_SLOW_PATH_ONLY_HELPER(jitResolveFieldSetter,3)
 PICBUILDER_SLOW_PATH_ONLY_HELPER(jitResolveStaticField,3)
 PICBUILDER_SLOW_PATH_ONLY_HELPER(jitResolveStaticFieldSetter,3)
-PICBUILDER_SLOW_PATH_ONLY_HELPER(jitResolveInterfaceMethod,2)
-PICBUILDER_SLOW_PATH_ONLY_HELPER(jitResolveSpecialMethod,3)
-PICBUILDER_SLOW_PATH_ONLY_HELPER(jitResolveStaticMethod,3)
-PICBUILDER_SLOW_PATH_ONLY_HELPER(jitResolveVirtualMethod,2)
 PICBUILDER_SLOW_PATH_ONLY_HELPER(jitResolveMethodType,3)
 PICBUILDER_SLOW_PATH_ONLY_HELPER(jitResolveMethodHandle,3)
 PICBUILDER_SLOW_PATH_ONLY_HELPER(jitResolveInvokeDynamic,3)
@@ -338,7 +360,6 @@ dnl Recompilation helpers
 
 SLOW_PATH_ONLY_HELPER(jitRetranslateCaller,2)
 SLOW_PATH_ONLY_HELPER(jitRetranslateCallerWithPreparation,3)
-SLOW_PATH_ONLY_HELPER(jitRetranslateMethod,3)
 
 dnl Exception throw helpers
 
@@ -372,8 +393,6 @@ FAST_PATH_ONLY_HELPER_NO_RETURN_VALUE(jitWriteBarrierStoreMetronome,3)
 
 dnl Misc
 
-SLOW_PATH_ONLY_HELPER(jitInduceOSRAtCurrentPC,0)
-SLOW_PATH_ONLY_HELPER(jitInduceOSRAtCurrentPCAndRecompile,0)
 SLOW_PATH_ONLY_HELPER(jitNewInstanceImplAccessCheck,3)
 SLOW_PATH_ONLY_HELPER_NO_EXCEPTION_NO_RETURN_VALUE(jitCallCFunction,3)
 SLOW_PATH_ONLY_HELPER_NO_EXCEPTION_NO_RETURN_VALUE(jitCallJitAddPicToPatchOnClassUnload,2)
@@ -408,7 +427,7 @@ BEGIN_HELPER(jitAcquireVMAccess)
 	mov x0,J9VMTHREAD
 	CALL_DIRECT(fast_jitAcquireVMAccess)
 	RESTORE_ALL_REGS
-	RESTORE_FPLR
+	RESTORE_LR
 END_HELPER(jitAcquireVMAccess)
 
 BEGIN_HELPER(jitReleaseVMAccess)
@@ -416,7 +435,7 @@ BEGIN_HELPER(jitReleaseVMAccess)
 	mov x0,J9VMTHREAD
 	CALL_DIRECT(fast_jitReleaseVMAccess)
 	RESTORE_ALL_REGS
-	RESTORE_FPLR
+	RESTORE_LR
 END_HELPER(jitReleaseVMAccess)
 
 START_PROC(cInterpreterFromJIT)
@@ -494,7 +513,7 @@ dnl x0 contains the method to run
 START_PROC(j2iInvokeExact)
 	SWITCH_TO_C_STACK
 	SAVE_PRESERVED_REGS
-	SAVE_FPLR
+	SAVE_LR
 	mov x1,x0
 	mov x0,{#}J9TR_bcloop_j2i_invoke_exact
 	b FUNC_LABEL(cInterpreterFromJIT)
@@ -509,7 +528,7 @@ dnl x0 contains the method to run
 START_PROC(j2iTransition)
 	SWITCH_TO_C_STACK
 	SAVE_PRESERVED_REGS
-	SAVE_FPLR
+	SAVE_LR
 	mov x1,x0
 	mov x0,{#}J9TR_bcloop_j2i_transition
 	b FUNC_LABEL(cInterpreterFromJIT)
@@ -525,7 +544,7 @@ dnl x9 contains the vTable index
 START_PROC(j2iVirtual)
 	SWITCH_TO_C_STACK
 	SAVE_PRESERVED_REGS
-	SAVE_FPLR
+	SAVE_LR
 	str x9,[J9VMTHREAD,{#}J9TR_VMThread_tempSlot]
 	mov x1,x0
 	mov x0,{#}J9TR_bcloop_j2i_virtual

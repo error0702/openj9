@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #pragma csect(CODE,"J9ZUnresolvedDataSnippet#C")
@@ -70,6 +70,7 @@ J9::Z::UnresolvedDataSnippet::UnresolvedDataSnippet(
    J9::UnresolvedDataSnippet(cg, node, symRef, isStore, canCauseGC),
       _branchInstruction(NULL),
       _dataReferenceInstruction(NULL),
+      _fenceNOPInst(NULL),
       _dataSymbolReference(symRef),
       _unresolvedData(NULL),
       _memoryReference(NULL),
@@ -180,6 +181,8 @@ J9::Z::UnresolvedDataSnippet::emitSnippetBody()
       if (resolveForStore())
          {
          glueRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_S390interpreterUnresolvedInstanceDataStoreGlue);
+
+         TR_ASSERT_FATAL_WITH_INSTRUCTION(getDataReferenceInstruction(), _fenceNOPInst != NULL, "Unresolved store must have a fence NOP instruction");
          }
       else
          {
@@ -226,6 +229,8 @@ J9::Z::UnresolvedDataSnippet::emitSnippetBody()
       if (resolveForStore())
          {
          glueRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_S390interpreterUnresolvedStaticDataStoreGlue);
+
+         TR_ASSERT_FATAL_WITH_INSTRUCTION(getDataReferenceInstruction(), _fenceNOPInst != NULL, "Unresolved store must have a fence NOP instruction");
          }
       else
          {
@@ -263,14 +268,12 @@ J9::Z::UnresolvedDataSnippet::emitSnippetBody()
 
    // PicBuilder function address
    *(uintptr_t *) cursor = (uintptr_t) glueRef->getMethodAddress();
-   AOTcgDiag1(comp, "add TR_AbsoluteHelperAddress cursor=%x\n", cursor);
    cg()->addProjectSpecializedRelocation(cursor, (uint8_t *)glueRef, NULL, TR_AbsoluteHelperAddress,
                              __FILE__, __LINE__, getNode());
    cursor += sizeof(uintptr_t);
 
    // code cache RA
    *(uintptr_t *) cursor = (uintptr_t) (getBranchInstruction()->getNext())->getBinaryEncoding();
-   AOTcgDiag1(comp, "add TR_AbsoluteMethodAddress cursor=%x\n", cursor);
    cg()->addProjectSpecializedRelocation(cursor, NULL, NULL, TR_AbsoluteMethodAddress,
                              __FILE__, __LINE__, getNode());
    cursor += sizeof(uintptr_t);
@@ -293,9 +296,16 @@ J9::Z::UnresolvedDataSnippet::emitSnippetBody()
 
    // address of constant pool
    *(uintptr_t *) cursor = (uintptr_t) getDataSymbolReference()->getOwningMethod(comp)->constantPool();
-   AOTcgDiag1(comp, "add TR_ConstantPool cursor=%x\n", cursor);
-   cg()->addExternalRelocation(new (cg()->trHeapMemory()) TR::ExternalRelocation(cursor, *(uint8_t **)cursor, getNode() ? (uint8_t *)(intptr_t)getNode()->getInlinedSiteIndex() : (uint8_t *)-1, TR_ConstantPool, cg()),
-                             __FILE__, __LINE__, getNode());
+   cg()->addExternalRelocation(
+      TR::ExternalRelocation::create(
+         cursor,
+         *(uint8_t **)cursor,
+         getNode() ? (uint8_t *)(intptr_t)getNode()->getInlinedSiteIndex() : (uint8_t *)-1,
+         TR_ConstantPool,
+         cg()),
+      __FILE__,
+      __LINE__,
+      getNode());
    cursor += sizeof(uintptr_t);
 
    // referencing instruction that needs patching
@@ -307,15 +317,26 @@ J9::Z::UnresolvedDataSnippet::emitSnippetBody()
       {
       *(uintptr_t *) cursor = (uintptr_t) (getBranchInstruction()->getNext())->getBinaryEncoding();
       }
-   AOTcgDiag1(comp, "add TR_AbsoluteMethodAddress cursor=%x\n", cursor);
    cg()->addProjectSpecializedRelocation(cursor, NULL, NULL, TR_AbsoluteMethodAddress,
                              __FILE__, __LINE__, getNode());
+   cursor += sizeof(uintptr_t);
+
+   // Fence NOP emitted for volatile field stores that may need patching for volatile fields
+   if (getFenceNOPInstruction() != NULL)
+      {
+      *(uintptr_t *) cursor = (uintptr_t) (getFenceNOPInstruction()->getBinaryEncoding());
+      cg()->addProjectSpecializedRelocation(cursor, NULL, NULL, TR_AbsoluteMethodAddress,
+                             __FILE__, __LINE__, getNode());
+      }
+   else
+      {
+      *(uintptr_t *) cursor = 0;
+      }
    cursor += sizeof(uintptr_t);
 
    // Literal Pool Address to patch.
    *(uintptr_t *) cursor = 0x0;
    setLiteralPoolPatchAddress(cursor);
-   AOTcgDiag1(comp, "add TR_AbsoluteMethodAddress cursor=%x\n", cursor);
    cg()->addProjectSpecializedRelocation(cursor, NULL, NULL, TR_AbsoluteMethodAddress,
                              __FILE__, __LINE__, getNode());
    cursor += sizeof(uintptr_t);
@@ -367,18 +388,24 @@ J9::Z::UnresolvedDataSnippet::emitSnippetBody()
          *(int16_t *) cursor = 0x0014;
          cursor += sizeof(int16_t);
 
-         *(int32_t *) cursor = 0xb90800e0;                       // 64Bit: AGR R14, Rbase
-         TR::RealRegister::setRegisterField((uint32_t*)cursor, 0, base);
-         cursor += sizeof(int32_t);
+         if (base != TR::RealRegister::NoReg)
+            {
+            *(int32_t *) cursor = 0xb90800e0;                    // 64Bit: AGR R14, Rbase
+            TR::RealRegister::setRegisterField((uint32_t*)cursor, 0, base);
+            cursor += sizeof(int32_t);
+            }
          }
       else
          {
          *(int32_t *) cursor = 0x58e0e000;                       // 31Bit: L   R14,6(R14)
          cursor += sizeof(int32_t);
 
-         *(uint32_t *) cursor = (int32_t)0x1ae00000;             // 31Bit: AR  R14, Rbase
-         TR::RealRegister::setRegisterField((uint32_t*)cursor, 4, base);
-         cursor += sizeof(int16_t);
+         if (base != TR::RealRegister::NoReg)
+            {
+            *(uint32_t *) cursor = (int32_t)0x1ae00000;          // 31Bit: AR  R14, Rbase
+            TR::RealRegister::setRegisterField((uint32_t*)cursor, 4, base);
+            cursor += sizeof(int16_t);
+            }
          }
 
       uint8_t*  returnAddress = (getBranchInstruction()->getNext())->getBinaryEncoding();
@@ -397,7 +424,6 @@ J9::Z::UnresolvedDataSnippet::emitSnippetBody()
       // Store pointer to resolved offset slot
       // code cache RA
       *(uintptr_t *) offsetMarker = (uintptr_t) cursor;
-      AOTcgDiag1(comp, "add TR_AbsoluteMethodAddress offsetMarker=%x\n", offsetMarker);
       cg()->addProjectSpecializedRelocation(offsetMarker, NULL, NULL, TR_AbsoluteMethodAddress,
                                 __FILE__, __LINE__, getNode());
 
@@ -415,7 +441,7 @@ uint32_t
 J9::Z::UnresolvedDataSnippet::getLength(int32_t  estimatedSnippetStart)
    {
    TR::Compilation *comp = cg()->comp();
-   uint32_t length = (comp->target().is64Bit() ? (14 + 5 * sizeof(uintptr_t)) : (12 + 5 * sizeof(uintptr_t)));
+   uint32_t length = (comp->target().is64Bit() ? (14 + 6 * sizeof(uintptr_t)) : (12 + 6 * sizeof(uintptr_t)));
    // For instance snippets, we have the out-of-line sequence
    if (isInstanceData())
       length += (comp->target().is64Bit()) ? 36 : 28;
@@ -549,6 +575,19 @@ TR_Debug::print(TR::FILE *pOutFile, TR::UnresolvedDataSnippet * snippet)
       addr = (uintptr_t) (snippet->getBranchInstruction()->getNext())->getBinaryEncoding();
       }
    trfprintf(pOutFile, "DC    \t0x%p \t# Address Of Ref. Instruction", addr);
+
+   bufferPos += sizeof(intptr_t);
+
+   printPrefix(pOutFile, NULL, bufferPos, sizeof(intptr_t));
+   if (snippet->getFenceNOPInstruction() != NULL)
+      {
+      addr = (uintptr_t) (snippet->getFenceNOPInstruction()->getBinaryEncoding());
+      }
+   else
+      {
+      addr = 0;
+      }
+   trfprintf(pOutFile, "DC    \t0x%p \t# Address NOP fence", addr);
 
    bufferPos += sizeof(intptr_t);
 

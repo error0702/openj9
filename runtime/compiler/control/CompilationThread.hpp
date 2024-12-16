@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #ifndef COMPILATIONTHREAD_INCL
@@ -101,7 +101,8 @@ struct CompileParameters
          TR::SegmentAllocator &scratchSegmentProvider,
          TR::Region &dispatchRegion,
          TR_Memory &trMemory,
-         const TR::CompileIlGenRequest &ilGenRequest
+         const TR::CompileIlGenRequest &ilGenRequest,
+         bool checkpointInProgress
       ) :
       _compilationInfo(compilationInfo),
       _vm(vm),
@@ -111,7 +112,8 @@ struct CompileParameters
       _scratchSegmentProvider(scratchSegmentProvider),
       _dispatchRegion(dispatchRegion),
       _trMemory(trMemory),
-      _ilGenRequest(ilGenRequest)
+      _ilGenRequest(ilGenRequest),
+      _checkpointInProgress(checkpointInProgress)
       {}
 
    TR_Memory *trMemory() { return &_trMemory; }
@@ -125,6 +127,7 @@ struct CompileParameters
    TR::Region           &_dispatchRegion;
    TR_Memory            &_trMemory;
    TR::CompileIlGenRequest  _ilGenRequest;
+   bool _checkpointInProgress;
    };
 
 #if defined(TR_HOST_S390)
@@ -178,8 +181,7 @@ class CompilationInfoPerThreadBase
                               bool canDoRelocatableCompile,
                               bool eligibleForRelocatableCompile,
                               TR_RelocationRuntime *reloRuntime);
-   const void* findAotBodyInSCC(J9VMThread *vmThread, const J9ROMMethod *romMethod);
-   bool isMethodIneligibleForAot(J9Method *method);
+   static const void* findAotBodyInSCC(J9VMThread *vmThread, const J9ROMMethod *romMethod);
 
 #if defined(J9VM_OPT_SHARED_CLASSES) && defined(J9VM_INTERP_AOT_RUNTIME_SUPPORT)
    TR_MethodMetaData *installAotCachedMethod(
@@ -349,7 +351,11 @@ class CompilationInfoPerThreadBase
              can do a remote compilation, because the server could have died since
              we last checked.
     */
-   bool cannotPerformRemoteComp();
+   bool cannotPerformRemoteComp(
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+      J9VMThread *vmThread
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
+   );
    /**
       @brief Returns true if heuristics determine that we have the resources to perform
              this compilation locally, rather than offloading it to the remote server.
@@ -429,7 +435,8 @@ private:
       J9VMThread *vmThread,
       TR::SegmentAllocator const &scratchSegmentProvider,
       TR::Compilation * compiler,
-      const char *exceptionName);
+      const char *exceptionName,
+      TR_MethodToBeCompiled *entry);
 
 #if defined(TR_HOST_S390)
    void outputVerboseMMapEntry(
@@ -496,6 +503,8 @@ class CompilationInfoPerThread : public TR::CompilationInfoPerThreadBase
    bool                   isDiagnosticThread() const { return _isDiagnosticThread; }
    CpuSelfThreadUtilization& getCompThreadCPU() { return _compThreadCPU; }
    TR::FILE              *getRTLogFile() { return _rtLogFile; }
+   void                   closeRTLogFile();
+   void                   openRTLogFile();
    virtual void           freeAllResources();
 
 #if defined(J9VM_OPT_JITSERVER)
@@ -507,6 +516,11 @@ class CompilationInfoPerThread : public TR::CompilationInfoPerThreadBase
    J9ROMClass               *getAndCacheRemoteROMClass(J9Class *clazz);
    J9ROMClass               *getRemoteROMClassIfCached(J9Class *clazz);
    PersistentUnorderedSet<TR_OpaqueClassBlock*> *getClassesThatShouldNotBeNewlyExtended() const { return _classesThatShouldNotBeNewlyExtended; }
+   bool                      getDeserializerWasReset() const { return _deserializerWasReset; }
+   // Called externally by a compilation thread that is resetting the JITServer AOT deserializer
+   void                      setDeserializerWasReset() { _deserializerWasReset = true; }
+   // Called by the current compilation thread at the beginning of a remote compilation to clear the _deserializerWasReset flag
+   void                      clearDeserializerWasReset() { _deserializerWasReset = false; }
 #endif /* defined(J9VM_OPT_JITSERVER) */
 
    protected:
@@ -531,6 +545,8 @@ class CompilationInfoPerThread : public TR::CompilationInfoPerThreadBase
    // The following hastable caches <classLoader,classname> --> <J9Class> mappings
    // The cache only lives during a compilation due to class unloading concerns
    PersistentUnorderedSet<TR_OpaqueClassBlock*> *_classesThatShouldNotBeNewlyExtended;
+   // A flag notifying this thread that the JITServer AOT deserializer was reset.
+   bool _deserializerWasReset;
 #endif /* defined(J9VM_OPT_JITSERVER) */
 
    }; // CompilationInfoPerThread

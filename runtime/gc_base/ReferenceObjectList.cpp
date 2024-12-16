@@ -1,6 +1,6 @@
 
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,9 +16,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "j9.h"
@@ -42,6 +42,31 @@ MM_ReferenceObjectList::MM_ReferenceObjectList()
 	, _priorPhantomHead(NULL)
 {
 	_typeId = __FUNCTION__;
+}
+
+MM_ReferenceObjectList *
+MM_ReferenceObjectList::newInstanceArray(MM_EnvironmentBase *env, uintptr_t arrayElementsTotal, MM_ReferenceObjectList *listsToCopy, uintptr_t arrayElementsToCopy)
+{
+	MM_ReferenceObjectList *referenceObjectLists = NULL;
+
+	referenceObjectLists = (MM_ReferenceObjectList *)env->getForge()->allocate(sizeof(MM_ReferenceObjectList) * arrayElementsTotal,  MM_AllocationCategory::FIXED, J9_GET_CALLSITE());
+	if (NULL != referenceObjectLists) {
+		Assert_MM_true(arrayElementsTotal >= arrayElementsToCopy);
+		/* Check whether a new array instance in being created from an existing array. If so, copy over the elements first. */
+		if (arrayElementsToCopy > 0) {
+			for (uintptr_t index = 0; index < arrayElementsToCopy; index++) {
+				referenceObjectLists[index] = listsToCopy[index];
+				referenceObjectLists[index].initialize(env);
+			}
+		}
+
+		for (uintptr_t index = arrayElementsToCopy; index < arrayElementsTotal; index++) {
+			new(&referenceObjectLists[index]) MM_ReferenceObjectList();
+			referenceObjectLists[index].initialize(env);
+		}
+	}
+
+	return referenceObjectLists;
 }
 
 void 

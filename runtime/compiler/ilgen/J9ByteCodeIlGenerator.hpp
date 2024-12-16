@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #ifndef IlGenerator_h
@@ -34,8 +34,11 @@
 #include "ilgen/IlGen.hpp"
 #include "infra/Checklist.hpp"
 #include "infra/Link.hpp"
+#include "infra/map.hpp"
+#include "infra/set.hpp"
 #include "infra/Stack.hpp"
 #include "env/VMJ9.h"
+#include "optimizer/CallInfo.hpp"
 
 class TR_InlineBlocks;
 class TR_PersistentClassInfo;
@@ -147,6 +150,11 @@ private:
    bool         runMacro(TR::SymbolReference *);
    bool         runFEMacro(TR::SymbolReference *);
    TR::Node *    genInvoke(TR::SymbolReference *, TR::Node *indirectCallFirstChild, TR::Node *invokedynamicReceiver = NULL);
+   TR::Node *    genInvokeInner(
+      TR::SymbolReference *,
+      TR::Node *indirectCallFirstChild,
+      TR::Node *invokedynamicReceiver,
+      TR::KnownObjectTable::Index *requiredKoi);
 
    TR::Node *    genInvokeDirect(TR::SymbolReference *symRef){ return genInvoke(symRef, NULL); }
    TR::Node *    genInvokeWithVFTChild(TR::SymbolReference *);
@@ -166,13 +174,13 @@ private:
    TR::SymbolReference *expandPlaceholderSignature(TR::SymbolReference *symRef, int32_t numArgs);
    TR::SymbolReference *expandPlaceholderSignature(TR::SymbolReference *symRef, int32_t numArgs, int32_t firstArgStackDepth);
    TR::SymbolReference *placeholderWithDummySignature();
-   TR::SymbolReference *placeholderWithSignature(char *prefix, int prefixLength, char *middle, int middleLength, char *suffix, int suffixLength);
+   TR::SymbolReference *placeholderWithSignature(const char *prefix, int prefixLength, const char *middle, int middleLength, const char *suffix, int suffixLength);
 
    void chopPlaceholder(TR::Node *placeholder, int32_t firstChild, int32_t numChildren);
 
-   char               *artificialSignature (TR_AllocationKind alloc, char *format, ...);
-   char               *vartificialSignature(TR_AllocationKind alloc, char *format, va_list args);
-   TR::SymbolReference *symRefWithArtificialSignature(TR::SymbolReference *original, char *effectiveSigFormat, ...);
+   char               *artificialSignature (TR_AllocationKind alloc, const char *format, ...);
+   char               *vartificialSignature(TR_AllocationKind alloc, const char *format, va_list args);
+   TR::SymbolReference *symRefWithArtificialSignature(TR::SymbolReference *original, const char *effectiveSigFormat, ...);
 
    // GenLoadStore
    //
@@ -205,11 +213,15 @@ private:
    void         storeFlattenableInstance(int32_t);
    void         storeFlattenableInstanceWithHelper(int32_t);
    void         storeStatic(int32_t);
+   TR::Node*    narrowIntStoreIfRequired(TR::Node *value, TR::SymbolReference *symRef);
    void         storeAuto(TR::DataType type, int32_t slot, bool isAdjunct = false);
    void         storeArrayElement(TR::DataType dt){ storeArrayElement(dt, comp()->il.opCodeForIndirectArrayStore(dt)); }
    void         storeArrayElement(TR::DataType dt, TR::ILOpCodes opCode, bool checks = true);
 
    void         calculateElementAddressInContiguousArray(int32_t, int32_t);
+#if defined(J9VM_GC_SPARSE_HEAP_ALLOCATION)
+   void         calculateElementAddressInContiguousArrayUsingDataAddrField(int32_t);
+#endif /* J9VM_GC_SPARSE_HEAP_ALLOCATION */
    void         calculateIndexFromOffsetInContiguousArray(int32_t, int32_t);
    void         calculateArrayElementAddress(TR::DataType, bool checks);
 
@@ -217,10 +229,7 @@ private:
    //
    TR::TreeTop * genTreeTop(TR::Node *);
 
-   TR::Node    * loadConstantValueIfPossible(TR::Node *, uintptr_t, TR::DataType type = TR::Int32, bool isArrayLength = true);
-
-   void         genArrayLength();
-   void         genContiguousArrayLength(int32_t width);
+   void         genArrayLength(bool contiguous = false);
    void         genArrayBoundsCheck(TR::Node *, int32_t);
    void         genDivCheck();
    void         genIDiv();
@@ -247,12 +256,6 @@ private:
    void         genMonitorEnter();
    void         genMonitorExit(bool);
    TR_OpaqueClassBlock *loadValueClass(int32_t classCpIndex);
-   void         genDefaultValue(uint16_t classCpIndex);
-   void         genDefaultValue(TR_OpaqueClassBlock *valueTypeClass);
-   void         genWithField(uint16_t fieldCpIndex);
-   void         genWithField(TR::SymbolReference *, TR_OpaqueClassBlock *);
-   void         genFlattenableWithField(uint16_t, TR_OpaqueClassBlock *);
-   void         genFlattenableWithFieldWithHelper(uint16_t fieldCpIndex);
    void         genFlush(int32_t nargs);
    void         genFullFence(TR::Node *node);
    void         handlePendingPushSaveSideEffects(TR::Node *, int32_t stackSize = -1);
@@ -366,8 +369,8 @@ private:
    bool replaceMembersOfFormat();
    bool replaceMethods(TR::TreeTop *tt, TR::Node *node);
    bool replaceFieldsAndStatics(TR::TreeTop *tt, TR::Node *node);
-   bool replaceField(TR::Node* node, char* destClass, char* destFieldName, char* destFieldSignature, int ParmIndex);
-   bool replaceStatic(TR::Node* node, char* dstClassName, char* staticName, char* type);
+   bool replaceField(TR::Node *node, const char* destClass, const char *destFieldName, const char *destFieldSignature, int ParmIndex);
+   bool replaceStatic(TR::Node *node, const char *dstClassName, const char *staticName, const char *type);
 
    uintptr_t walkReferenceChain(TR::Node *node, uintptr_t receiver);
 #if defined(J9VM_OPT_JITSERVER)
@@ -375,6 +378,10 @@ private:
 #endif
 
    bool hasFPU();
+
+   bool pushRequiredConst(TR::KnownObjectTable::Index *koi);
+   void markRequiredKnownObjectIndex(TR::Node *node, TR::KnownObjectTable::Index koi);
+   void assertFoldedAllRequiredConsts();
 
    // data
    //
@@ -410,12 +417,6 @@ private:
    TR_BitVector                     *_invokeDynamicCalls;
    TR_BitVector                     *_ilGenMacroInvokeExactCalls;
 
-   // TenantScope field support, set to 'true' if a get/put static is encountered
-   // when option TR_DisableMultiTenancy is on and current method contains static
-   // field and method reference/invoke, skip compilation for such method
-   bool                              _staticFieldReferenceEncountered;
-   bool                              _staticMethodInvokeEncountered;
-
    TR_OpaqueClassBlock              *_invokeSpecialInterface;
    TR_BitVector                     *_invokeSpecialInterfaceCalls;
    bool                              _invokeSpecialSeen;
@@ -425,13 +426,16 @@ private:
 
    // DecimalFormatPeephole
    struct methodRenamePair{
-      char* srcMethodSignature;
-      char* dstMethodSignature;
+      const char *srcMethodSignature;
+      const char *dstMethodSignature;
    };
 
    static const int32_t              _numDecFormatRenames = 9;
    static struct methodRenamePair    _decFormatRenames[_numDecFormatRenames];
    TR::SymbolReference               *_decFormatRenamesDstSymRef[_numDecFormatRenames];
+
+   const TR::map<int32_t, TR::RequiredConst> * const _requiredConsts; // from current inline call target
+   TR::set<int32_t>                 *_foldedRequiredConsts; // to make sure none were missed
    };
 
 #endif

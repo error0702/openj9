@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1998, 2019 IBM Corp. and others
+ * Copyright IBM Corp. and others 1998
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,14 +15,15 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "jni.h"
 #include "j9.h"
 #include "j2sever.h"
+#include "ut_j9jcl.h"
 
 jobject JNICALL
 Java_com_ibm_java_lang_management_internal_RuntimeMXBeanImpl_getNameImpl(JNIEnv *env, jobject beanInstance)
@@ -51,9 +52,17 @@ Java_com_ibm_java_lang_management_internal_RuntimeMXBeanImpl_getStartTimeImpl(JN
 jlong JNICALL
 Java_com_ibm_java_lang_management_internal_RuntimeMXBeanImpl_getUptimeImpl(JNIEnv *env, jobject beanInstance)
 {
-	J9JavaVM *javaVM = ((J9VMThread *) env)->javaVM;
-	PORT_ACCESS_FROM_JAVAVM( javaVM );
-	return (jlong)( j9time_current_time_millis() - javaVM->managementData->vmStartTime );
+	J9JavaVM *javaVM = ((J9VMThread*)env)->javaVM;
+	PORT_ACCESS_FROM_JAVAVM(javaVM);
+	I_64 criuTimeDeltaMillis = 0;
+	I_64 timeNow = j9time_current_time_millis();
+
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+	criuTimeDeltaMillis = javaVM->checkpointState.checkpointRestoreTimeDelta / J9PORT_TIME_NS_PER_MS;
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
+	Trc_JCL_MXBean_getUptimeImpl(env, timeNow, javaVM->managementData->vmStartTime, criuTimeDeltaMillis);
+
+	return (jlong)(timeNow - javaVM->managementData->vmStartTime - criuTimeDeltaMillis);
 }
 
 jboolean JNICALL
@@ -67,6 +76,7 @@ Java_com_ibm_java_lang_management_internal_RuntimeMXBeanImpl_isBootClassPathSupp
 	}
 }
 
+#if JAVA_SPEC_VERSION < 19
 /**
  * This is a static function.
  * @return process ID of the caller.
@@ -81,6 +91,7 @@ Java_com_ibm_lang_management_internal_ExtendedRuntimeMXBeanImpl_getProcessIDImpl
 	pid =  (jlong) j9sysinfo_get_pid();
 	return pid;
 }
+#endif /* JAVA_SPEC_VERSION < 19 */
 
 /**
  * @return vm idle state of the JVM

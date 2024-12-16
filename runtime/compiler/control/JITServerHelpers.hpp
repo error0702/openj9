@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2019, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2019
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,14 +15,15 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #ifndef JITSERVER_HELPERS_H
 #define JITSERVER_HELPERS_H
 
+#include <random>
 #include "net/MessageTypes.hpp"
 #include "runtime/JITClientSession.hpp"
 
@@ -54,6 +55,9 @@ public:
       CLASSINFO_METHODS_OF_CLASS,
       CLASSINFO_CONSTANT_POOL,
       CLASSINFO_CLASS_CHAIN_OFFSET_IDENTIFYING_LOADER,
+      CLASSINFO_ARRAY_ELEMENT_SIZE,
+      CLASSINFO_DEFAULT_VALUE_SLOT_ADDRESS,
+      CLASSINFO_NULLRESTRICTED_ARRAY_CLASS,
       };
 
    // NOTE: when adding new elements to this tuple, add them to the end,
@@ -82,7 +86,11 @@ public:
       uintptr_t,                         // 19: _classFlags
       uintptr_t,                         // 20: _classChainOffsetIdentifyingLoader
       std::vector<J9ROMMethod *>,        // 21: _origROMMethods
-      std::string                        // 22: _classNameIdentifyingLoader
+      std::string,                       // 22: _classNameIdentifyingLoader
+      int32_t,                           // 23: _arrayElementSize
+      j9object_t *,                      // 24: _defaultValueSlotAddress
+      std::string,                       // 25: optional hash of packedROMClass
+      TR_OpaqueClassBlock *              // 26: _nullRestrictedArrayClass
       >;
 
    // Packs a ROMClass to be transferred to the server.
@@ -90,7 +98,8 @@ public:
    // structures used for packing). This function should be used with TR::StackMemoryRegion.
    // If passed non-zero expectedSize, and it doesn't match the resulting packedSize
    // (which is returned to the caller by reference), this function returns NULL.
-   static J9ROMClass *packROMClass(J9ROMClass *romClass, TR_Memory *trMemory, size_t &packedSize, size_t expectedSize = 0);
+   static J9ROMClass *packROMClass(const J9ROMClass *romClass, TR_Memory *trMemory, TR_J9VMBase *fej9,
+                                   size_t &packedSize, size_t expectedSize = 0, size_t generatedPrefixLength = 0);
 
    static ClassInfoTuple packRemoteROMClassInfo(J9Class *clazz, J9VMThread *vmThread, TR_Memory *trMemory, bool serializeClass);
    static void freeRemoteROMClass(J9ROMClass *romClass, TR_PersistentMemory *persistentMemory);
@@ -101,7 +110,7 @@ public:
    static J9ROMClass *getRemoteROMClassIfCached(ClientSessionData *clientSessionData, J9Class *clazz);
    static J9ROMClass *getRemoteROMClass(J9Class *clazz, JITServer::ServerStream *stream,
                                         TR_PersistentMemory *persistentMemory, ClassInfoTuple &classInfoTuple);
-   static J9ROMClass *romClassFromString(const std::string &romClassStr, TR_PersistentMemory *persistentMemory);
+   static J9ROMClass *romClassFromString(const std::string &romClassStr, const std::string &romClassHashStr, TR_PersistentMemory *persistentMemory);
    static bool getAndCacheRAMClassInfo(J9Class *clazz, ClientSessionData *clientSessionData,
                                        JITServer::ServerStream *stream, ClassInfoDataType dataType, void *data);
    static bool getAndCacheRAMClassInfo(J9Class *clazz, ClientSessionData *clientSessionData,
@@ -116,7 +125,7 @@ public:
 
    // Functions used for allowing the client to compile locally when server is unavailable.
    // Should be used only on the client side.
-   static void postStreamFailure(OMRPortLibrary *portLibrary, TR::CompilationInfo *compInfo);
+   static void postStreamFailure(OMRPortLibrary *portLibrary, TR::CompilationInfo *compInfo, bool retryConnectionImmediately, bool connectionFailure);
    static bool shouldRetryConnection(OMRPortLibrary *portLibrary);
    static void postStreamConnectionSuccess();
    static bool isServerAvailable() { return _serverAvailable; }
@@ -124,8 +133,6 @@ public:
    static void printJITServerMsgStats(J9JITConfig *, TR::CompilationInfo *);
    static void printJITServerCHTableStats(J9JITConfig *, TR::CompilationInfo *);
    static void printJITServerCacheStats(J9JITConfig *, TR::CompilationInfo *);
-
-   static uint32_t serverMsgTypeCount[JITServer::MessageType_MAXTYPE];
 
    static bool isAddressInROMClass(const void *address, const J9ROMClass *romClass);
 
@@ -140,6 +147,25 @@ public:
 
    static void cacheRemoteROMClassBatch(ClientSessionData *clientData, const std::vector<J9Class *> &ramClasses,
                                         const std::vector<ClassInfoTuple> &classInfoTuples);
+   // Helper routine to generate a unique ID for the client or server
+   static uint64_t generateUID();
+
+   static uint32_t getFullClassNameLength(const J9ROMClass *romClass, const J9ROMClass *baseComponent,
+                                          uint32_t numDimensions, bool checkGenerated = false);
+   // Writes the full class name (array class signature for arrays, class name otherwise) into the result buffer.
+   // The buffer length must be at least getFullClassNameLength(romClass, baseComponent, numDimensions).
+   // The baseComponent ROMClass and numDimensions correspond to the result of TR_J9VM::getBaseComponentClass().
+   static void getFullClassName(uint8_t *result, uint32_t length, const J9ROMClass *romClass,
+                                const J9ROMClass *baseComponent, uint32_t numDimensions, bool checkGenerated = false);
+
+   // If name matches one of the recognized runtime-generated class name patterns (where the name can vary across JVM
+   // instances, e.g., lambdas), returns the length of the deterministic class name prefix, otherwise returns 0.
+   static size_t getGeneratedClassNamePrefixLength(const J9UTF8 *name);
+
+   static size_t getGeneratedClassNamePrefixLength(const J9ROMClass *romClass)
+      {
+      return getGeneratedClassNamePrefixLength(J9ROMCLASS_CLASSNAME(romClass));
+      }
 
 private:
    static void getROMClassData(const ClientSessionData::ClassInfo &classInfo, ClassInfoDataType dataType, void *data);

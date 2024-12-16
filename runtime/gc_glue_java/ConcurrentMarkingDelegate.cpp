@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "ConcurrentMarkingDelegate.hpp"
@@ -31,6 +31,7 @@
 #include "HeapRegionIteratorStandard.hpp"
 #include "ReferenceObjectList.hpp"
 #include "StackSlotValidator.hpp"
+#include "VMAccess.hpp"
 #include "VMInterface.hpp"
 #include "VMThreadListIterator.hpp"
 
@@ -151,7 +152,14 @@ MM_ConcurrentMarkingDelegate::scanThreadRoots(MM_EnvironmentBase *env)
 	markSchemeStackIteratorData localData;
 	localData.markingScheme = _markingScheme;
 	localData.env = env;
+	/* In a case this thread is a carrier thread, and a virtual thread is mounted, we will scan virtual thread's stack. */
 	GC_VMThreadStackSlotIterator::scanSlots(vmThread, vmThread, (void *)&localData, concurrentStackSlotIterator, true, false);
+
+#if JAVA_SPEC_VERSION >= 19
+	if (NULL != vmThread->currentContinuation) {
+		GC_VMThreadStackSlotIterator::scanSlots(vmThread, vmThread, vmThread->currentContinuation, (void *)&localData, concurrentStackSlotIterator, true, false);
+	}
+#endif /* JAVA_SPEC_VERSION >= 19 */
 
 	return true;
 }
@@ -418,9 +426,6 @@ MM_ConcurrentMarkingDelegate::concurrentClassMark(MM_EnvironmentBase *env, bool 
 						J9Module * const module = *modulePtr;
 
 						_markingScheme->markObject(env, (j9object_t)module->moduleObject);
-						if (NULL != module->moduleName) {
-							_markingScheme->markObject(env, (j9object_t)module->moduleName);
-						}
 						if (NULL != module->version) {
 							_markingScheme->markObject(env, (j9object_t)module->version);
 						}
@@ -428,6 +433,10 @@ MM_ConcurrentMarkingDelegate::concurrentClassMark(MM_EnvironmentBase *env, bool 
 							goto quitConcurrentClassMark;
 						}
 						modulePtr = (J9Module**)hashTableNextDo(&moduleWalkState);
+					}
+
+					if (classLoader == _javaVM->systemClassLoader) {
+						_markingScheme->markObject(env, _javaVM->unnamedModuleForSystemLoader->moduleObject);
 					}
 				}
 
@@ -445,5 +454,20 @@ quitConcurrentClassMark:
 	return sizeTraced;
 }
 #endif /* J9VM_GC_DYNAMIC_CLASS_UNLOADING */
+
+void
+MM_ConcurrentMarkingDelegate::acquireExclusiveVMAccessAndSignalThreadsToActivateWriteBarrier(MM_EnvironmentBase *env)
+{
+	J9VMThread *vmThread = (J9VMThread *)env->getLanguageVMThread();
+
+	VM_VMAccess::setPublicFlags(vmThread, J9_PUBLIC_FLAGS_NOT_AT_SAFE_POINT);
+	_collector->acquireExclusiveVMAccessAndSignalThreadsToActivateWriteBarrier(env);
+	VM_VMAccess::clearPublicFlags(vmThread, J9_PUBLIC_FLAGS_NOT_AT_SAFE_POINT);
+
+	if (J9_ARE_ANY_BITS_SET(vmThread->publicFlags, J9_PUBLIC_FLAGS_HALT_THREAD_ANY) && (0 == vmThread->omrVMThread->exclusiveCount)) {
+		vmThread->javaVM->internalVMFunctions->internalReleaseVMAccess(vmThread);
+		vmThread->javaVM->internalVMFunctions->internalAcquireVMAccess(vmThread);
+	}
+}
 
 #endif /* defined(OMR_GC_MODRON_CONCURRENT_MARK) */

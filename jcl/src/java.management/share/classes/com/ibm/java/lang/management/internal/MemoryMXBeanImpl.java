@@ -1,6 +1,6 @@
 /*[INCLUDE-IF JAVA_SPEC_VERSION >= 8]*/
-/*******************************************************************************
- * Copyright (c) 2005, 2021 IBM Corp. and others
+/*
+ * Copyright IBM Corp. and others 2005
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,10 +16,10 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
 package com.ibm.java.lang.management.internal;
 
 import java.lang.management.GarbageCollectorMXBean;
@@ -38,7 +38,7 @@ import java.util.List;
 import javax.management.MBeanNotificationInfo;
 import javax.management.ObjectName;
 
-/*[IF Sidecar19-SE]*/
+/*[IF JAVA_SPEC_VERSION >= 9]*/
 import com.ibm.sharedclasses.spi.SharedClassProvider;
 import java.net.URL;
 import java.security.BasicPermission;
@@ -46,9 +46,9 @@ import java.util.ServiceLoader;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.IntConsumer;
 import java.util.function.UnaryOperator;
-/*[ELSE]
+/*[ELSE] JAVA_SPEC_VERSION >= 9 */
 import com.ibm.oti.shared.SharedClassStatistics;
-/*[ENDIF]*/
+/*[ENDIF] JAVA_SPEC_VERSION >= 9 */
 
 /**
  * Runtime type for {@link MemoryMXBean}.
@@ -96,7 +96,7 @@ public class MemoryMXBeanImpl extends LazyDelegatingNotifier implements MemoryMX
 
 	private ObjectName objectName;
 
-	/*[IF Sidecar19-SE]*/
+	/*[IF JAVA_SPEC_VERSION >= 9]*/
 	/**
 	 * The SharedClassProvider class to be used when shared classes are disabled.
 	 */
@@ -223,7 +223,7 @@ public class MemoryMXBeanImpl extends LazyDelegatingNotifier implements MemoryMX
 	}
 
 	private final SharedClassProviderHolder sharedClassProviderHolder;
-	/*[ENDIF] Sidecar19-SE */
+	/*[ENDIF] JAVA_SPEC_VERSION >= 9 */
 
 	/**
 	 * Constructor intentionally private to prevent instantiation by others.
@@ -237,9 +237,9 @@ public class MemoryMXBeanImpl extends LazyDelegatingNotifier implements MemoryMX
 		createMemoryPools();
 		createMemoryManagers();
 		setManagedMemoryPoolsForManagers();
-		/*[IF Sidecar19-SE]*/
+		/*[IF JAVA_SPEC_VERSION >= 9]*/
 		sharedClassProviderHolder = new SharedClassProviderHolder();
-		/*[ENDIF]*/
+		/*[ENDIF] JAVA_SPEC_VERSION >= 9 */
 	}
 
 	private void setManagedMemoryPoolsForManagers() {
@@ -432,6 +432,9 @@ public class MemoryMXBeanImpl extends LazyDelegatingNotifier implements MemoryMX
 	 * {@inheritDoc}
 	 */
 	@Override
+	/*[IF JAVA_SPEC_VERSION >= 18]*/
+	@SuppressWarnings("deprecation")
+	/*[ENDIF] JAVA_SPEC_VERSION >= 18 */
 	public int getObjectPendingFinalizationCount() {
 		return this.getObjectPendingFinalizationCountImpl();
 	}
@@ -565,66 +568,66 @@ public class MemoryMXBeanImpl extends LazyDelegatingNotifier implements MemoryMX
 	 * {@inheritDoc}
 	 */
 	public long getSharedClassCacheSize() {
-		/*[IF Sidecar19-SE]*/
+		/*[IF JAVA_SPEC_VERSION >= 9]*/
 		return sharedClassProviderHolder.get().getCacheSize();
-		/*[ELSE]
+		/*[ELSE] JAVA_SPEC_VERSION >= 9 */
 		return SharedClassStatistics.maxSizeBytes();
-		/*[ENDIF]*/
+		/*[ENDIF] JAVA_SPEC_VERSION >= 9 */
 	}
 
 	/**
 	 * {@inheritDoc}
 	 */
 	public long getSharedClassCacheSoftmxBytes() {
-		/*[IF Sidecar19-SE]*/
+		/*[IF JAVA_SPEC_VERSION >= 9]*/
 		return sharedClassProviderHolder.get().getSoftmxBytes();
-		/*[ELSE]
+		/*[ELSE] JAVA_SPEC_VERSION >= 9 */
 		return SharedClassStatistics.softmxBytes();
-		/*[ENDIF]*/
+		/*[ENDIF] JAVA_SPEC_VERSION >= 9 */
 	}
 
 	/**
 	 * {@inheritDoc}
 	 */
 	public long getSharedClassCacheMinAotBytes() {
-		/*[IF Sidecar19-SE]*/
+		/*[IF JAVA_SPEC_VERSION >= 9]*/
 		return sharedClassProviderHolder.get().getMinAotBytes();
-		/*[ELSE]
+		/*[ELSE] JAVA_SPEC_VERSION >= 9 */
 		return SharedClassStatistics.minAotBytes();
-		/*[ENDIF]*/
+		/*[ENDIF] JAVA_SPEC_VERSION >= 9 */
 	}
 
 	/**
 	 * {@inheritDoc}
 	 */
 	public long getSharedClassCacheMaxAotBytes() {
-		/*[IF Sidecar19-SE]*/
+		/*[IF JAVA_SPEC_VERSION >= 9]*/
 		return sharedClassProviderHolder.get().getMaxAotBytes();
-		/*[ELSE]
+		/*[ELSE] JAVA_SPEC_VERSION >= 9 */
 		return SharedClassStatistics.maxAotBytes();
-		/*[ENDIF]*/
+		/*[ENDIF] JAVA_SPEC_VERSION >= 9 */
 	}
 
 	/**
 	 * {@inheritDoc}
 	 */
 	public long getSharedClassCacheMinJitDataBytes() {
-		/*[IF Sidecar19-SE]*/
+		/*[IF JAVA_SPEC_VERSION >= 9]*/
 		return sharedClassProviderHolder.get().getMinJitDataBytes();
-		/*[ELSE]
+		/*[ELSE] JAVA_SPEC_VERSION >= 9 */
 		return SharedClassStatistics.minJitDataBytes();
-		/*[ENDIF]*/
+		/*[ENDIF] JAVA_SPEC_VERSION >= 9 */
 	}
 
 	/**
 	 * {@inheritDoc}
 	 */
 	public long getSharedClassCacheMaxJitDataBytes() {
-		/*[IF Sidecar19-SE]*/
+		/*[IF JAVA_SPEC_VERSION >= 9]*/
 		return sharedClassProviderHolder.get().getMaxJitDataBytes();
-		/*[ELSE]
+		/*[ELSE] JAVA_SPEC_VERSION >= 9 */
 		return SharedClassStatistics.maxJitDataBytes();
-		/*[ENDIF]*/
+		/*[ENDIF] JAVA_SPEC_VERSION >= 9 */
 	}
 
 	/**
@@ -767,11 +770,11 @@ public class MemoryMXBeanImpl extends LazyDelegatingNotifier implements MemoryMX
 	 * {@inheritDoc}
 	 */
 	public long getSharedClassCacheFreeSpace() {
-		/*[IF Sidecar19-SE]*/
+		/*[IF JAVA_SPEC_VERSION >= 9]*/
 		return sharedClassProviderHolder.get().getFreeSpace();
-		/*[ELSE]
+		/*[ELSE] JAVA_SPEC_VERSION >= 9 */
 		return SharedClassStatistics.freeSpaceBytes();
-		/*[ENDIF]*/
+		/*[ENDIF] JAVA_SPEC_VERSION >= 9 */
 	}
 
 	/**

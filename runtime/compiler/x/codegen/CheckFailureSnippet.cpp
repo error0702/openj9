@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "x/codegen/CheckFailureSnippet.hpp"
@@ -149,23 +149,25 @@ uint8_t *TR::X86CheckFailureSnippet::emitCheckFailureSnippetBody(uint8_t *buffer
       *buffer++ = 0xd8;
       }
 
-   *buffer++ = 0xe8; // CallImm4
+   *buffer = 0xe8; // CallImm4
    intptr_t destinationAddress = (intptr_t)getDestination()->getMethodAddress();
 
-   if (NEEDS_TRAMPOLINE(destinationAddress, buffer+4, cg()))
+   if (cg()->directCallRequiresTrampoline(destinationAddress, reinterpret_cast<intptr_t>(buffer++)))
       {
       destinationAddress = TR::CodeCacheManager::instance()->findHelperTrampoline(getDestination()->getReferenceNumber(), (void *)buffer);
       TR_ASSERT(IS_32BIT_RIP(destinationAddress, buffer+4), "Local helper trampoline should be reachable directly.\n");
       }
 
    *(int32_t *)buffer = (int32_t)(destinationAddress - (intptr_t)(buffer+4));
-   cg()->addExternalRelocation(new (cg()->trHeapMemory())
-      TR::ExternalRelocation(
+   cg()->addExternalRelocation(
+      TR::ExternalRelocation::create(
          buffer,
          (uint8_t *)getDestination(),
          TR_HelperAddress,
          cg()),
-      __FILE__, __LINE__, getCheckInstruction()->getNode());
+      __FILE__,
+      __LINE__,
+      getCheckInstruction()->getNode());
 
    buffer += 4;
    uint8_t *checkSite = getCheckInstruction()->getBinaryEncoding();
@@ -303,32 +305,40 @@ uint8_t *TR::X86CheckFailureSnippetWithResolve::emitSnippetBody()
    //
    *buffer++ = 0x68; // push   imm4
    *(int32_t *)buffer = (int32_t) (intptr_t) getDataSymbolReference()->getOwningMethod(cg()->comp())->constantPool();
-   cg()->addExternalRelocation(new (cg()->trHeapMemory()) TR::ExternalRelocation(buffer,
-                                                                           *(uint8_t **)buffer,
-                                                                           getCheckInstruction()->getNode() ? (uint8_t *)(uintptr_t)getCheckInstruction()->getNode()->getInlinedSiteIndex() : (uint8_t *)-1,
-                                                                           TR_ConstantPool, cg()),
-                          __FILE__, __LINE__,
-                          getCheckInstruction()->getNode());
+   cg()->addExternalRelocation(
+      TR::ExternalRelocation::create(
+         buffer,
+         *(uint8_t **)buffer,
+         getCheckInstruction()->getNode() ? (uint8_t *)(uintptr_t)getCheckInstruction()->getNode()->getInlinedSiteIndex() : (uint8_t *)-1,
+         TR_ConstantPool,
+         cg()),
+      __FILE__,
+      __LINE__,
+      getCheckInstruction()->getNode());
    buffer += 4;
 
    // Call the glue routine
    //
-   *buffer++ = 0xe8;                      // call  Imm4 glue routine
+   *buffer = 0xe8;                      // call  Imm4 glue routine
 
    TR::SymbolReference * glueSymRef = cg()->symRefTab()->findOrCreateRuntimeHelper(getHelper());
    intptr_t glueAddress = (intptr_t)glueSymRef->getMethodAddress();
-   if (NEEDS_TRAMPOLINE(glueAddress, buffer+4, cg()))
+
+   if (cg()->directCallRequiresTrampoline(glueAddress, reinterpret_cast<intptr_t>(buffer++)))
       {
       glueAddress = TR::CodeCacheManager::instance()->findHelperTrampoline(glueSymRef->getReferenceNumber(), (void *)buffer);
       TR_ASSERT(IS_32BIT_RIP(glueAddress, buffer+4), "Local helper trampoline should be reachable directly.\n");
       }
    *(int32_t *)buffer = (int32_t)(glueAddress - (intptr_t)(buffer+4));
-   cg()->addExternalRelocation(new (cg()->trHeapMemory()) TR::ExternalRelocation(buffer,
-                                                         (uint8_t *)glueSymRef,
-                                                         TR_HelperAddress, cg()),
-                          __FILE__,
-                          __LINE__,
-                          getCheckInstruction()->getNode());
+   cg()->addExternalRelocation(
+      TR::ExternalRelocation::create(
+         buffer,
+         (uint8_t *)glueSymRef,
+         TR_HelperAddress,
+         cg()),
+      __FILE__,
+      __LINE__,
+      getCheckInstruction()->getNode());
 
    buffer += 4;
 
@@ -340,22 +350,25 @@ uint8_t *TR::X86CheckFailureSnippetWithResolve::emitSnippetBody()
       *buffer++ = 0xd8;
       }
 
-   *buffer++ = 0xe8; // CallImm4
+   *buffer = 0xe8; // CallImm4
 
    intptr_t destinationAddress = (intptr_t)getDestination()->getMethodAddress();
-   if (NEEDS_TRAMPOLINE(destinationAddress, buffer+4, cg()))
+
+   if (cg()->directCallRequiresTrampoline(destinationAddress, reinterpret_cast<intptr_t>(buffer++)))
       {
       destinationAddress = TR::CodeCacheManager::instance()->findHelperTrampoline(getDestination()->getReferenceNumber(), (void *)buffer);
       TR_ASSERT(IS_32BIT_RIP(destinationAddress, buffer+4), "Local helper trampoline should be reachable directly.\n");
       }
    *(int32_t *)buffer = (int32_t)(destinationAddress - (intptr_t)(buffer+4));
-   cg()->addExternalRelocation(new (cg()->trHeapMemory()) TR::ExternalRelocation(buffer,
-                                                         (uint8_t *)getDestination(),
-                                                         TR_HelperAddress,
-                                                         cg()),
-                                                         __FILE__,
-                                                         __LINE__,
-                                                         getCheckInstruction()->getNode());
+   cg()->addExternalRelocation(
+      TR::ExternalRelocation::create(
+         buffer,
+         (uint8_t *)getDestination(),
+         TR_HelperAddress,
+         cg()),
+      __FILE__,
+      __LINE__,
+      getCheckInstruction()->getNode());
    buffer += 4;
    uint8_t *checkSite = getCheckInstruction()->getBinaryEncoding();
    *(uint32_t *)buffer = (uint32_t)(buffer - checkSite);

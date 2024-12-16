@@ -1,5 +1,5 @@
-/*******************************************************************************
- * Copyright (c) 2018, 2021 IBM Corp. and others
+/*
+ * Copyright IBM Corp. and others 2018
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,10 +15,10 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
 package org.openj9.test.java_lang;
 
 import java.lang.constant.ClassDesc;
@@ -27,6 +27,7 @@ import java.lang.invoke.MethodHandles.Lookup;
 import java.util.Optional;
 import java.util.NoSuchElementException;
 
+import org.openj9.test.util.VersionCheck;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 import org.testng.log4testng.Logger;
@@ -147,12 +148,20 @@ public class Test_Class {
 	public void testClassArrayType() throws Throwable {
 		for (Object[] prim : primitiveTest) {
 			if ((Class<?>)prim[0] == void.class) {
-				/* test is expected to throw IllegalArgumentException */
+				/* test is expected to throw IllegalArgumentException up to jdk18, or UnsupportedOperationException from jdk19 */
 				try {
-					arrayTypeTestGeneral("testClassArrayType (primitive) this test should throw IllegalArgumentException", (Class<?>)prim[0], (String)prim[1]);
+					arrayTypeTestGeneral("testClassArrayType (primitive) this test should throw Exception", (Class<?>)prim[0], (String)prim[1]);
 					Assert.fail();
-				} catch(IllegalArgumentException e) {
-					/* test passed */
+				} catch(Exception e) {
+					if (VersionCheck.major() >= 19) {
+						if (e.getClass() != UnsupportedOperationException.class) {
+							Assert.fail();
+						}
+					} else {
+						if (e.getClass() != IllegalArgumentException.class) {
+							Assert.fail();
+						}
+					}
 				}
 			} else {				
 				arrayTypeTestGeneral("testClassArrayType (primitive)", (Class<?>)prim[0], (String)prim[1]);

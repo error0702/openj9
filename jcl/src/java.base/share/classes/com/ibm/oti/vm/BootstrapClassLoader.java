@@ -1,9 +1,7 @@
-/*[INCLUDE-IF Sidecar16 & !Sidecar19-SE]*/
-
+/*[INCLUDE-IF JAVA_SPEC_VERSION == 8]*/
 package com.ibm.oti.vm;
-
-/*******************************************************************************
- * Copyright (c) 1998, 2018 IBM Corp. and others
+/*
+ * Copyright IBM Corp. and others 1998
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -19,10 +17,10 @@ package com.ibm.oti.vm;
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
 
 import java.util.*;
 
@@ -36,7 +34,7 @@ import java.security.PrivilegedAction;
 /**
  * BootstrapClassLoaders load classes out of the file system,
  * from the directories and jars on the system class path.
- * The system class path can be set using the command line 
+ * The system class path can be set using the command line
  * option "-scp <paths>", and can be read from the system
  * property "sun.boot.class.path".
  *
@@ -89,11 +87,11 @@ public Class<?> loadClass(String className) throws ClassNotFoundException {
 
 public static ClassLoader singleton() {
 	if (singleton == null)
-	 	singleton = new BootstrapClassLoader();
+		singleton = new BootstrapClassLoader();
 	 else
 /*[MSG "K0084", "can only instantiate one BootstrapClassLoader"]*/
-	 	throw new SecurityException(com.ibm.oti.util.Msg.getString("K0084")); //$NON-NLS-1$
- 	return singleton;
+		throw new SecurityException(com.ibm.oti.util.Msg.getString("K0084")); //$NON-NLS-1$
+	return singleton;
 }
 
 protected Package getPackage(String name) {
@@ -101,7 +99,7 @@ protected Package getPackage(String name) {
 }
 
 protected Package[] getPackages() {
-	return VM.getVMLangAccess().getSystemPackages();	
+	return VM.getVMLangAccess().getSystemPackages();
 }
 
 /*[PR 123807] Design 450 SE.JVMTI: JVMTI 1.1: New ClassLoaderSearch API */
@@ -117,7 +115,7 @@ private void appendToClassPathForInstrumentation(String jarPath) throws Throwabl
 		// Note: No java-level synchronization is required to call the native.
 		/*[PR CMVC 164017] appendToClassPathForInstrumentation uses UTF8 file path */
 		int newCount = addJar(com.ibm.oti.util.Util.getBytes(jarPath));
-		
+
 		int[] newTypes = new int[newCount];
 		System.arraycopy(types, 0, newTypes, 0, newCount - 1);
 		types = newTypes;

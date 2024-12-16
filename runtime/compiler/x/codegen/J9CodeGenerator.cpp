@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "codegen/AheadOfTimeCompile.hpp"
@@ -50,7 +50,8 @@
 extern void TEMPORARY_initJ9X86TreeEvaluatorTable(TR::CodeGenerator *cg);
 
 J9::X86::CodeGenerator::CodeGenerator(TR::Compilation *comp) :
-      J9::CodeGenerator(comp),
+   J9::CodeGenerator(comp),
+   _nanoTimeTemp(NULL),
    _stackFramePaddingSizeInBytes(0)
    {
    /**
@@ -72,7 +73,7 @@ J9::X86::CodeGenerator::initialize()
 
    cg->setAheadOfTimeCompile(new (cg->trHeapMemory()) TR::AheadOfTimeCompile(cg));
 
-   if (!TR::Compiler->om.canGenerateArraylets())
+   if (!TR::Compiler->om.canGenerateArraylets() && !TR::Compiler->om.isOffHeapAllocationEnabled())
       {
       cg->setSupportsReferenceArrayCopy();
       cg->setSupportsInlineStringLatin1Inflate();
@@ -103,19 +104,19 @@ J9::X86::CodeGenerator::initialize()
 
    if (comp->target().cpu.supportsFeature(OMR_FEATURE_X86_SSE4_1) &&
        !comp->getOption(TR_DisableSIMDStringCaseConv) &&
-       !TR::Compiler->om.canGenerateArraylets())
+       !TR::Compiler->om.canGenerateArraylets() && !TR::Compiler->om.isOffHeapAllocationEnabled())
       cg->setSupportsInlineStringCaseConversion();
 
    if (comp->target().cpu.supportsFeature(OMR_FEATURE_X86_SSSE3) &&
        !comp->getOption(TR_DisableFastStringIndexOf) &&
-       !TR::Compiler->om.canGenerateArraylets())
+       !TR::Compiler->om.canGenerateArraylets() && !TR::Compiler->om.isOffHeapAllocationEnabled())
       {
       cg->setSupportsInlineStringIndexOf();
       }
 
    if (comp->target().cpu.supportsFeature(OMR_FEATURE_X86_SSE4_1) &&
        !comp->getOption(TR_DisableSIMDStringHashCode) &&
-       !TR::Compiler->om.canGenerateArraylets())
+       !TR::Compiler->om.canGenerateArraylets() && !TR::Compiler->om.isOffHeapAllocationEnabled())
       {
       cg->setSupportsInlineStringHashCode();
       }
@@ -125,6 +126,13 @@ J9::X86::CodeGenerator::initialize()
       cg->setSupportsStackAllocationOfArraylets();
       }
 
+   static bool disableInlineVectorHashCode = feGetEnv("TR_disableInlineVectorHashCode") != NULL;
+   if (comp->target().cpu.supportsFeature(OMR_FEATURE_X86_SSE4_1) && !TR::Compiler->om.canGenerateArraylets() &&
+       !TR::Compiler->om.isOffHeapAllocationEnabled() && !disableInlineVectorHashCode)
+      {
+      cg->setSupportsInlineVectorizedHashCode();
+      }
+
    if (!comp->getOption(TR_FullSpeedDebug))
       cg->setSupportsDirectJNICalls();
 
@@ -132,6 +140,16 @@ J9::X86::CodeGenerator::initialize()
       {
       cg->setSupportsBigDecimalLongLookasideVersioning();
       cg->setSupportsBDLLHardwareOverflowCheck();
+      }
+
+   static bool disableInlineVectorizedMismatch = feGetEnv("TR_disableInlineVectorizedMismatch") != NULL;
+   if (cg->getSupportsArrayCmpLen() &&
+#if defined(J9VM_GC_SPARSE_HEAP_ALLOCATION)
+         !TR::Compiler->om.isOffHeapAllocationEnabled() &&
+#endif /* J9VM_GC_SPARSE_HEAP_ALLOCATION */
+         !disableInlineVectorizedMismatch)
+      {
+      cg->setSupportsInlineVectorizedMismatch();
       }
 
    // Disable fast gencon barriers for AOT compiles because relocations on
@@ -190,6 +208,23 @@ TR::Recompilation *
 J9::X86::CodeGenerator::allocateRecompilationInfo()
    {
    return TR_X86Recompilation::allocate(self()->comp());
+   }
+
+TR::SymbolReference *
+J9::X86::CodeGenerator::getNanoTimeTemp()
+   {
+   if (_nanoTimeTemp == NULL)
+      {
+      TR::AutomaticSymbol *sym;
+#if defined(LINUX) || defined(OSX)
+      sym = TR::AutomaticSymbol::create(self()->trHeapMemory(),TR::Aggregate,sizeof(struct timeval));
+#else
+      sym = TR::AutomaticSymbol::create(self()->trHeapMemory(),TR::Aggregate,8);
+#endif
+      self()->comp()->getMethodSymbol()->addAutomatic(sym);
+      _nanoTimeTemp = new (self()->trHeapMemory()) TR::SymbolReference(self()->comp()->getSymRefTab(), sym);
+      }
+   return _nanoTimeTemp;
    }
 
 void
@@ -479,4 +514,94 @@ J9::X86::CodeGenerator::reserveNTrampolines(int32_t numTrampolines)
       }
 
    TR_ASSERT(newCache->isReserved(), "New CodeCache is not reserved");
+   }
+
+bool
+J9::X86::CodeGenerator::supportsNonHelper(TR::SymbolReferenceTable::CommonNonhelperSymbol symbol)
+   {
+   if (symbol == TR::SymbolReferenceTable::jitDispatchJ9MethodSymbol
+       && self()->comp()->target().is64Bit())
+      {
+      return true;
+      }
+
+   return J9::CodeGenerator::supportsNonHelper(symbol);
+   }
+
+/*
+ * This method returns TRUE for all the cases we decide NOT to replace the call to CAS
+ * with inline assembly. The GRA and Evaluator should be consistent about whether to inline CAS natives.
+ */
+static bool willNotInlineCompareAndSwapNative(TR::Node *node,
+      int8_t size,
+      TR::Compilation *comp)
+   {
+   TR::SymbolReference *callSymRef = node->getSymbolReference();
+   TR::MethodSymbol *methodSymbol = callSymRef->getSymbol()->castToMethodSymbol();
+
+   if (TR::Compiler->om.canGenerateArraylets() && !node->isUnsafeGetPutCASCallOnNonArray())
+      return true;
+   static char *disableCASInlining = feGetEnv("TR_DisableCASInlining");
+
+   if (disableCASInlining)
+      return true;
+
+   // In Java9 the sun.misc.Unsafe JNI methods have been moved to jdk.internal,
+   // with a set of wrappers remaining in sun.misc to delegate to the new package.
+   // We can be called in this function for the wrappers (which we will
+   // not be converting to assembly), the new jdk.internal JNI methods or the
+   // Java8 sun.misc JNI methods (both of which we will convert). We can
+   // differentiate between these cases by testing with isNative() on the method.
+   if (!methodSymbol->isNative())
+      return true;
+
+   if (size == 4)
+      {
+      return false;
+      }
+   else if (size == 8 && comp->target().is64Bit())
+      {
+      return false;
+      }
+   else
+      {
+      if (!comp->cg()->getX86ProcessorInfo().supportsCMPXCHG8BInstruction())
+         return true;
+
+      return false;
+      }
+   }
+
+/** @brief Identify methods which are not transformed into inline assembly.
+
+    Some recognized methods are transformed into very simple hardcoded
+    assembly sequences which don't need register spills as real calls do.
+
+    @param node The TR::Node for the method call. NB this function assumes the Node is a call.
+
+    @return true if the method will be treated as a normal call, false if the method
+    will be converted to inline assembly.
+ */
+bool
+J9::X86::CodeGenerator::willBeEvaluatedAsCallByCodeGen(TR::Node *node, TR::Compilation *comp)
+   {
+   TR::SymbolReference *callSymRef = node->getSymbolReference();
+   TR::MethodSymbol *methodSymbol = callSymRef->getSymbol()->castToMethodSymbol();
+   switch (methodSymbol->getRecognizedMethod())
+      {
+      case TR::sun_misc_Unsafe_compareAndSwapInt_jlObjectJII_Z:
+      case TR::jdk_internal_misc_Unsafe_compareAndExchangeInt:
+         return willNotInlineCompareAndSwapNative(node, 4, comp);
+      case TR::sun_misc_Unsafe_compareAndSwapLong_jlObjectJJJ_Z:
+      case TR::jdk_internal_misc_Unsafe_compareAndExchangeLong:
+         return willNotInlineCompareAndSwapNative(node, 8, comp);
+      case TR::sun_misc_Unsafe_compareAndSwapObject_jlObjectJjlObjectjlObject_Z:
+      case TR::jdk_internal_misc_Unsafe_compareAndExchangeObject:
+      case TR::jdk_internal_misc_Unsafe_compareAndExchangeReference:
+         return willNotInlineCompareAndSwapNative(node, TR::Compiler->om.sizeofReferenceField(), comp);
+
+      default:
+         break;
+      }
+   return true;
    }

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #ifndef J9PROTOS_H
@@ -40,9 +40,6 @@
 /* This is required by vmfntbl.c so that the LE service CEEHDLR can be called directly from builder */
 #include <leawi.h>
 #endif
-
-
-#define SEGMENT_TYPE(flags,type) ((flags & MEMORY_TYPE_MASK) == type)
 
 
 typedef struct J9Relocation {
@@ -155,23 +152,23 @@ I_32 numCodeSets (void);
 
 #if !defined(J9_SOFT_FLOAT) && (defined(_X86_) || defined (__i386__) || defined(J9HAMMER) || (defined(OSX) && !defined(J9AARCH64)))
 
-#define 	J9_SETUP_FPU_STATE() helperInitializeFPU()
+#define J9_SETUP_FPU_STATE() helperInitializeFPU()
 
 #else
 
-#define 	J9_SETUP_FPU_STATE()
+#define J9_SETUP_FPU_STATE()
 
 #endif
 
 
 
-#ifdef WIN64 
+#ifdef WIN64
 
 /*HACK */
 
 #undef  J9_SETUP_FPU_STATE
 
-#define 	J9_SETUP_FPU_STATE()
+#define J9_SETUP_FPU_STATE()
 
 #endif
 
@@ -1000,7 +997,7 @@ extern J9_CFUNC int
 initJVMRI PROTOTYPE(( J9JavaVM * vm ));
 
 struct DgRasInterface ;
-extern J9_CFUNC int 
+extern J9_CFUNC int
 fillInDgRasInterface PROTOTYPE((struct DgRasInterface *dri));
 
 extern J9_CFUNC int
@@ -1136,6 +1133,7 @@ extern J9_CFUNC BOOLEAN jitIsFieldStable(J9VMThread *currentThread, J9Class *cla
 extern J9_CFUNC BOOLEAN jitIsMethodTaggedWithForceInline(J9VMThread *currentThread, J9Method *method);
 extern J9_CFUNC BOOLEAN jitIsMethodTaggedWithDontInline(J9VMThread *currentThread, J9Method *method);
 extern J9_CFUNC BOOLEAN jitIsMethodTaggedWithIntrinsicCandidate(J9VMThread *currentThread, J9Method *method);
+extern J9_CFUNC BOOLEAN jitIsMethodTaggedWithChangesCurrentThread(J9VMThread *currentThread, J9Method *method);
 
 typedef struct J9MethodFromSignatureWalkState {
 	const char *className;
@@ -1236,6 +1234,9 @@ extern J9_CFUNC void  JNICALL releaseArrayElements (JNIEnv *env, jarray array, v
 extern J9_CFUNC void  JNICALL setStaticObjectField (JNIEnv *env, jclass clazz, jfieldID fieldID, jobject value);
 extern J9_CFUNC jobject  JNICALL getStaticObjectField (JNIEnv *env, jclass clazz, jfieldID fieldID);
 extern J9_CFUNC jsize  JNICALL getStringUTFLength (JNIEnv *env, jstring string);
+#if JAVA_SPEC_VERSION >= 24
+extern J9_CFUNC jlong  JNICALL getStringUTFLengthAsLong(JNIEnv *env, jstring string);
+#endif /* JAVA_SPEC_VERSION >= 24 */
 extern J9_CFUNC jint  JNICALL registerNatives (JNIEnv *env, jclass clazz, const JNINativeMethod *methods, jint nMethods);
 extern J9_CFUNC jdouble  JNICALL getStaticDoubleField (JNIEnv *env, jclass clazz, jfieldID fieldID);
 extern J9_CFUNC jobject  JNICALL allocObject (JNIEnv *env, jclass clazz);
@@ -1265,6 +1266,9 @@ extern J9_CFUNC j9object_t resolveMethodHandleRefInto(J9VMThread *vmThread, J9Co
 extern J9_CFUNC j9object_t resolveOpenJDKInvokeHandle (J9VMThread *vmThread, J9ConstantPool *ramCP, UDATA cpIndex, UDATA resolveFlags);
 extern J9_CFUNC j9object_t resolveInvokeDynamic (J9VMThread *vmThread, J9ConstantPool *ramCP, UDATA cpIndex, UDATA resolveFlags);
 extern J9_CFUNC j9object_t resolveConstantDynamic (J9VMThread *vmThread, J9ConstantPool *ramCP, UDATA cpIndex, UDATA resolveFlags);
+#if JAVA_SPEC_VERSION >= 16
+extern J9_CFUNC j9object_t resolveFfiCallInvokeHandle(J9VMThread *vmThread, j9object_t handle);
+#endif /* JAVA_SPEC_VERSION >= 16 */
 #endif /* _J9VMRESOLVESUPPORT_ */
 
 /* J9VMRomImageSupport*/
@@ -1362,6 +1366,9 @@ extern J9_CFUNC void  JNICALL sendResolveConstantDynamic (J9VMThread *vmThread, 
 extern J9_CFUNC void  JNICALL sendResolveInvokeDynamic (J9VMThread *vmThread, J9ConstantPool *ramCP, UDATA callSiteIndex, J9ROMNameAndSignature* nameAndSig, U_16* bsmData);
 extern J9_CFUNC void  JNICALL jitFillOSRBuffer (struct J9VMThread *vmContext, void *osrBlock);
 extern J9_CFUNC void  JNICALL sendRunThread(J9VMThread *vmContext, j9object_t tenantContext);
+#if JAVA_SPEC_VERSION >= 16
+extern J9_CFUNC void JNICALL sendResolveFfiCallInvokeHandle (J9VMThread *currentThread, j9object_t handle);
+#endif /* JAVA_SPEC_VERSION >= 16 */
 #endif /* _J9VMJAVAINTERPRETERSTARTUP_ */
 
 /* J9VMNativeHelpersLarge*/
@@ -1377,8 +1384,8 @@ extern J9_CFUNC UDATA  hasMoreInlinedMethods (void * inlinedCallSite);
 extern J9_CFUNC UDATA  getByteCodeIndex (void * inlinedCallSite);
 extern J9_CFUNC void  jitReportDynamicCodeLoadEvents (J9VMThread * currentThread);
 extern J9_CFUNC UDATA  getJitInlineDepthFromCallSite (J9JITExceptionTable *metaData, void *inlinedCallSite);
-extern J9_CFUNC void*  jitGetInlinerMapFromPC (J9VMThread * currentThread, J9JITExceptionTable * exceptionTable, UDATA jitPC);
-extern J9_CFUNC void*  getStackMapFromJitPC (J9VMThread * currentThread, struct J9JITExceptionTable * exceptionTable, UDATA jitPC);
+extern J9_CFUNC void*  jitGetInlinerMapFromPC (J9VMThread * currentThread, J9JavaVM * vm, J9JITExceptionTable * exceptionTable, UDATA jitPC);
+extern J9_CFUNC void*  getStackMapFromJitPC (J9VMThread * currentThread, J9JavaVM * vm, struct J9JITExceptionTable * exceptionTable, UDATA jitPC);
 extern J9_CFUNC UDATA  getCurrentByteCodeIndexAndIsSameReceiver (J9JITExceptionTable *metaData, void *stackMap, void *currentInlinedCallSite, UDATA * isSameReceiver);
 extern J9_CFUNC void  clearFPStack (void);
 extern J9_CFUNC void  jitExclusiveVMShutdownPending (J9VMThread *vmThread);
@@ -1393,4 +1400,3 @@ extern J9_CFUNC void  jitAddPicToPatchOnClassUnload (void *classPointer, void *a
 #endif
 
 #endif /* J9PROTOS_H */
-

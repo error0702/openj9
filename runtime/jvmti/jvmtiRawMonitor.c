@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "jvmtiHelpers.h"
@@ -134,6 +134,9 @@ block:
 					}
 				}
 			}
+#if JAVA_SPEC_VERSION >= 19
+			currentThread->ownedMonitorCount += 1;
+#endif /* JAVA_SPEC_VERSION >= 19 */
 		} else {
 #if defined(J9VM_INTERP_ATOMIC_FREE_JNI)
 			if (currentThread->inNative)
@@ -169,6 +172,10 @@ jvmtiRawMonitorExit(jvmtiEnv* env,
 	if (rc == JVMTI_ERROR_NONE) {
 		if (omrthread_monitor_exit((omrthread_monitor_t) monitor) != 0) {
 			rc = JVMTI_ERROR_NOT_MONITOR_OWNER;
+#if JAVA_SPEC_VERSION >= 19
+		} else {
+			currentThread->ownedMonitorCount -= 1;
+#endif /* JAVA_SPEC_VERSION >= 19 */
 		}
 
 		/* JDK blocks here if the current thread is suspended - don't do VM access stuff if the current thread has exclusive */
@@ -196,47 +203,121 @@ done:
 
 
 jvmtiError JNICALL
-jvmtiRawMonitorWait(jvmtiEnv* env,
+jvmtiRawMonitorWait(jvmtiEnv *env,
 	jrawMonitorID monitor,
 	jlong millis)
 {
-	J9JavaVM * vm = JAVAVM_FROM_ENV(env);
-	jvmtiError rc;
-	J9VMThread * currentThread;
+	J9JavaVM *vm = JAVAVM_FROM_ENV(env);
+	jvmtiError rc = JVMTI_ERROR_NONE;
+	J9VMThread *currentThread = NULL;
 
 	Trc_JVMTI_jvmtiRawMonitorWait_Entry(env, monitor, omrthread_monitor_get_name((omrthread_monitor_t) monitor));
 
 	ENSURE_MONITOR_NON_NULL(monitor);
 
 	rc = getCurrentVMThread(vm, &currentThread);
-	if (rc == JVMTI_ERROR_NONE) {
-		switch (omrthread_monitor_wait_interruptable((omrthread_monitor_t) monitor, (millis < 0) ? 0 : millis, 0)) {
-			case 0:
-			case J9THREAD_TIMED_OUT :
-				rc = JVMTI_ERROR_NONE;
-				break;
-			case J9THREAD_ILLEGAL_MONITOR_STATE :
-				rc = JVMTI_ERROR_NOT_MONITOR_OWNER;
-				break;
-			case J9THREAD_INTERRUPTED :
-			case J9THREAD_PRIORITY_INTERRUPTED :
-				rc = JVMTI_ERROR_INTERRUPT;
-				break;
-			case J9THREAD_INVALID_ARGUMENT :
-				rc = JVMTI_ERROR_INTERRUPT;
-				break;
-			default:
-				rc = JVMTI_ERROR_INTERNAL;
-				break;
+	if (JVMTI_ERROR_NONE == rc) {
+		IDATA result = 0;
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+		BOOLEAN waitTimed = (millis > 0);
+		I_64 beforeWait = 0;
+		if (waitTimed) {
+			PORT_ACCESS_FROM_JAVAVM(vm);
+			beforeWait = j9time_nano_time();
+		}
+continueWait:
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
+		millis = ((millis < 0) ? 0 : millis);
+		result = omrthread_monitor_wait_interruptable((omrthread_monitor_t)monitor, millis, 0);
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+		if (((J9THREAD_INTERRUPTED == result)
+			|| (J9THREAD_PRIORITY_INTERRUPTED == result))
+			&& J9_IS_SINGLE_THREAD_MODE(vm)
+		) {
+			if (waitTimed) {
+				PORT_ACCESS_FROM_JAVAVM(vm);
+				I_64 waitedTime = (j9time_nano_time() - beforeWait) / 1000000;
+				if (waitedTime < millis) {
+					millis -= waitedTime;
+				} else {
+					/* timed out, waiting another 10ms in single thread mode */
+					millis = 10;
+				}
+			}
+			/* continue waiting if interrupted spuriously in single thread mode */
+			goto continueWait;
+		}
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
+		switch (result) {
+		case 0:
+			/* FALLTHROUGH*/
+		case J9THREAD_TIMED_OUT:
+			rc = JVMTI_ERROR_NONE;
+			break;
+		case J9THREAD_ILLEGAL_MONITOR_STATE:
+			rc = JVMTI_ERROR_NOT_MONITOR_OWNER;
+			break;
+		case J9THREAD_INTERRUPTED:
+			/* FALLTHROUGH*/
+		case J9THREAD_PRIORITY_INTERRUPTED: {
+#if JAVA_SPEC_VERSION >= 19
+			J9InternalVMFunctions const * const vmFuncs = vm->internalVMFunctions;
+			j9object_t threadObject = NULL;
+			j9object_t threadLock = NULL;
+
+			vmFuncs->internalEnterVMFromJNI(currentThread);
+
+			threadObject = currentThread->threadObject;
+			Assert_JVMTI_true(NULL != threadObject);
+
+			threadLock = J9VMJAVALANGTHREAD_LOCK(currentThread, threadObject);
+			threadLock = (j9object_t)vmFuncs->objectMonitorEnter(currentThread, threadLock);
+
+			if (J9_OBJECT_MONITOR_ENTER_FAILED(threadLock)) {
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+				if (J9_OBJECT_MONITOR_CRIU_SINGLE_THREAD_MODE_THROW == (UDATA)threadLock) {
+					vmFuncs->setCRIUSingleThreadModeJVMCRIUException(currentThread, 0, 0);
+					rc = JVMTI_ERROR_INTERNAL;
+				} else
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
+				if (J9_OBJECT_MONITOR_OOM == (UDATA)threadLock) {
+					rc = JVMTI_ERROR_OUT_OF_MEMORY;
+				}
+				goto release;
+			} else {
+				/* Refetch J9VMThread->threadObject as it can be moved by the GC while waiting for the monitor. */
+				threadObject = currentThread->threadObject;
+				if (J9VMJAVALANGTHREAD_DEADINTERRUPT(currentThread, threadObject)) {
+					J9VMJAVALANGTHREAD_SET_DEADINTERRUPT(currentThread, threadObject, JNI_FALSE);
+					if (IS_JAVA_LANG_VIRTUALTHREAD(currentThread, threadObject)) {
+						J9VMJAVALANGTHREAD_SET_DEADINTERRUPT(currentThread, currentThread->carrierThreadObject, JNI_FALSE);
+					}
+				}
+				vmFuncs->objectMonitorExit(currentThread, threadLock);
+			}
+
+			rc = JVMTI_ERROR_INTERRUPT;
+release:
+			vmFuncs->internalExitVMToJNI(currentThread);
+#else /* JAVA_SPEC_VERSION >= 19 */
+			rc = JVMTI_ERROR_INTERRUPT;
+#endif /* JAVA_SPEC_VERSION >= 19 */
+			break;
+		}
+		case J9THREAD_INVALID_ARGUMENT:
+			rc = JVMTI_ERROR_INTERRUPT;
+			break;
+		default:
+			rc = JVMTI_ERROR_INTERNAL;
+			break;
 		}
 
 		/* JDK blocks here if the current thread is suspended - don't do VM access stuff if the current thread has exclusive */
-
 		if (currentThread->publicFlags & J9_PUBLIC_FLAGS_HALT_THREAD_ANY) {
-			if (currentThread->omrVMThread->exclusiveCount == 0) {
+			if (0 == currentThread->omrVMThread->exclusiveCount) {
 				UDATA count = 0;
 
-				while (omrthread_monitor_exit((omrthread_monitor_t) monitor) == 0) {
+				while (0 == omrthread_monitor_exit((omrthread_monitor_t) monitor)) {
 					++count;
 				}
 
@@ -252,7 +333,7 @@ jvmtiRawMonitorWait(jvmtiEnv* env,
 				}
 
 				/* There is still a timing hole here, since the thread may be suspended at this point */
-				while (count-- != 0) {
+				while (0 != count--) {
 					omrthread_monitor_enter((omrthread_monitor_t) monitor);
 				}
 			}
@@ -304,6 +385,3 @@ jvmtiRawMonitorNotifyAll(jvmtiEnv* env,
 done:
 	TRACE_JVMTI_RETURN(jvmtiRawMonitorNotifyAll);
 }
-
-
-

@@ -1,6 +1,6 @@
 
 /*******************************************************************************
- * Copyright (c) 1991, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,9 +16,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 /**
@@ -57,6 +57,9 @@ public:
 	uintptr_t _ownableSynchronizerCandidates;  /**< number of ownable synchronizer objects visited this cycle */
 	uintptr_t _ownableSynchronizerSurvived;	/**< number of ownable synchronizer objects survived this cycle */
 
+	uintptr_t _continuationCandidates;  /**< number of continuation objects visited this cycle */
+	uintptr_t _continuationCleared;	/**< number of continuation objects cleared this cycle */
+
 	MM_ReferenceStats _weakReferenceStats;  /**< Weak reference stats for the cycle */
 	MM_ReferenceStats _softReferenceStats;  /**< Soft reference stats for the cycle */
 	MM_ReferenceStats _phantomReferenceStats;  /**< Phantom reference stats for the cycle */
@@ -67,10 +70,10 @@ public:
 	uintptr_t _monitorReferenceCleared; /**< The number of monitor references that have been cleared during marking */
 	uintptr_t _monitorReferenceCandidates; /**< The number of monitor references that have been visited in monitor table during marking */
 
-#if defined(J9VM_GC_ENABLE_DOUBLE_MAP)
-	uintptr_t _doubleMappedArrayletsCleared; /**< The number of double mapped arraylets that have been cleared durign marking */
-	uintptr_t _doubleMappedArrayletsCandidates; /**< The number of double mapped arraylets that have been visited during marking */
-#endif /* J9VM_GC_ENABLE_DOUBLE_MAP */
+#if defined(J9VM_GC_SPARSE_HEAP_ALLOCATION)
+	uintptr_t _offHeapRegionsCleared; /**< The number of sparse heap allocated regions that have been cleared during marking */
+	uintptr_t _offHeapRegionCandidates; /**< The number of sparse heap allocated regions that have been visited during marking */
+#endif /* defined(J9VM_GC_SPARSE_HEAP_ALLOCATION) */
 
 	uint64_t _cycleStartTime; /**< The start time of a copy forward cycle */
 
@@ -91,6 +94,9 @@ public:
 		_ownableSynchronizerCandidates = 0;
 		_ownableSynchronizerSurvived = 0;
 
+		_continuationCandidates = 0;
+		_continuationCleared = 0;
+
 		_weakReferenceStats.clear();
 		_softReferenceStats.clear();
 		_phantomReferenceStats.clear();
@@ -101,10 +107,10 @@ public:
 		_monitorReferenceCleared = 0;
 		_monitorReferenceCandidates = 0;
 
-#if defined(J9VM_GC_ENABLE_DOUBLE_MAP)
-		_doubleMappedArrayletsCleared = 0;
-		_doubleMappedArrayletsCandidates = 0;
-#endif /* J9VM_GC_ENABLE_DOUBLE_MAP */
+#if defined(J9VM_GC_SPARSE_HEAP_ALLOCATION)
+		_offHeapRegionsCleared = 0;
+		_offHeapRegionCandidates = 0;
+#endif /* defined(J9VM_GC_SPARSE_HEAP_ALLOCATION) */
 	}
 	
 	/**
@@ -117,6 +123,8 @@ public:
 		_unfinalizedEnqueued += stats->_unfinalizedEnqueued;
 
 		_ownableSynchronizerSurvived += stats->_ownableSynchronizerSurvived;
+		_continuationCandidates += stats->_continuationCandidates;
+		_continuationCleared += stats->_continuationCleared;
 
 		_weakReferenceStats.merge(&stats->_weakReferenceStats);
 		_softReferenceStats.merge(&stats->_softReferenceStats);
@@ -128,10 +136,10 @@ public:
 		_monitorReferenceCleared += stats->_monitorReferenceCleared;
 		_monitorReferenceCandidates += stats->_monitorReferenceCandidates;
 
-#if defined(J9VM_GC_ENABLE_DOUBLE_MAP)
-		_doubleMappedArrayletsCleared += stats->_doubleMappedArrayletsCleared;
-		_doubleMappedArrayletsCandidates += stats->_doubleMappedArrayletsCandidates;
-#endif /* J9VM_GC_ENABLE_DOUBLE_MAP */
+#if defined(J9VM_GC_SPARSE_HEAP_ALLOCATION)
+		_offHeapRegionsCleared += stats->_offHeapRegionsCleared;
+		_offHeapRegionCandidates += stats->_offHeapRegionCandidates;
+#endif /* defined(J9VM_GC_SPARSE_HEAP_ALLOCATION) */
 	}
 
 	MM_CopyForwardStats() :
@@ -140,6 +148,8 @@ public:
 		, _unfinalizedEnqueued(0)
 		, _ownableSynchronizerCandidates(0)
 		, _ownableSynchronizerSurvived(0)
+		, _continuationCandidates(0)
+		, _continuationCleared(0)
 		, _weakReferenceStats()
 		, _softReferenceStats()
 		, _phantomReferenceStats()
@@ -147,10 +157,10 @@ public:
 		, _stringConstantsCandidates(0)
 		, _monitorReferenceCleared(0)
 		, _monitorReferenceCandidates(0)
-#if defined(J9VM_GC_ENABLE_DOUBLE_MAP)
-		, _doubleMappedArrayletsCleared(0)
-		, _doubleMappedArrayletsCandidates(0)
-#endif /* J9VM_GC_ENABLE_DOUBLE_MAP */
+#if defined(J9VM_GC_SPARSE_HEAP_ALLOCATION)
+		, _offHeapRegionsCleared(0)
+		, _offHeapRegionCandidates(0)
+#endif /* defined(J9VM_GC_SPARSE_HEAP_ALLOCATION) */
 	{}
 };
 

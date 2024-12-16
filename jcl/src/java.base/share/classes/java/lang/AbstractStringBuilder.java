@@ -1,6 +1,6 @@
-/*[INCLUDE-IF Sidecar18-SE & !Sidecar19-SE]*/
-/*******************************************************************************
- * Copyright (c) 2017, 2018 IBM Corp. and others
+/*[INCLUDE-IF JAVA_SPEC_VERSION == 8]*/
+/*
+ * Copyright IBM Corp. and others 2017
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,17 +16,17 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
 package java.lang;
 
 abstract class AbstractStringBuilder {
-	/* 
-	 * According to the JCL specifications, java.lang.StringBuilder and java.lang.StringBuffer extend java.lang.Object. 
+	/*
+	 * According to the JCL specifications, java.lang.StringBuilder and java.lang.StringBuffer extend java.lang.Object.
 	 * However, RI implementations extend AbstractStringBuilder, and this class may show up in user code,
-	 * specifically in the stack map tables. This class ensures that the code can still run on J9 if it was compiled 
-	 * with RI.  
+	 * specifically in the stack map tables. This class ensures that the code can still run on J9 if it was compiled
+	 * with RI.
 	 */
 }

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2016, 2017 IBM Corp. and others
+ * Copyright IBM Corp. and others 2016
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #ifndef J9RASTRACE_H
@@ -113,6 +113,17 @@ void trcTraceMethodExit(J9VMThread *thr, J9Method *method, void *exceptionPtr, v
 omr_error_t setMethodSpec(J9JavaVM *vm, char * value, J9UTF8 ** utf8Address, int * matchFlag);
 omr_error_t setMethod(J9JavaVM *vm, const char * value, BOOLEAN atRuntime);
 U_8 rasSetTriggerTrace(J9VMThread *thr, J9Method *method);
+/**
+ * A helper method shared by VM trace initialization hookRAMClassLoad()
+ * and CRIU restore using a trace option file via addInternalJVMClassIterationRestoreHook().
+ *
+ * @param[in] thr the current J9VMThread
+ * @param[in] clazz the J9Class to be iterated
+ * @param[in/out] nlsMsgFormat an NLS message
+ *
+ * @return BOOLEAN TRUE if no error, otherwise FALSE
+ */
+BOOLEAN setRAMClassExtendedMethodFlagsHelper(J9VMThread *thr, J9Class *clazz, const char **nlsMsgFormat);
 void rasTriggerMethod(J9VMThread *thr, J9Method *mb, I_32 entry, const TriggerPhase phase);
 BOOLEAN matchMethod (RasMethodTable * methodTable, J9Method *method);
 omr_error_t processTriggerMethodClause(OMR_VMThread *, char *, BOOLEAN atRuntime);

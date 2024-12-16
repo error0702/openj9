@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2019, 2020 IBM Corp. and others
+# Copyright IBM Corp. and others 2019
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
 # OpenJDK Assembly Exception [2].
 #
 # [1] https://www.gnu.org/software/classpath/license.html
-# [2] http://openjdk.java.net/legal/assembly-exception.html
+# [2] https://openjdk.org/legal/assembly-exception.html
 #
-# SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+# SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
 ################################################################################
 
 set(OMR_ENHANCED_WARNINGS OFF)
@@ -43,6 +43,7 @@ target_include_directories(j9ddr_misc
 		${j9vm_SOURCE_DIR}/bcutil
 		${j9vm_BINARY_DIR}/bcutil
 		${j9vm_SOURCE_DIR}/shared_common/include
+		${j9vm_SOURCE_DIR}/compiler
 		${omr_SOURCE_DIR}/compiler
 )
 
@@ -54,11 +55,13 @@ if(OMR_TOOLCONFIG STREQUAL "gnu")
 	# defining _FORTIFY_SOURCE is invalid when optimizations are disabled
 	omr_remove_flags(CMAKE_C_FLAGS ${OMR_STRNCPY_FORTIFY_OPTIONS})
 	omr_remove_flags(CMAKE_CXX_FLAGS ${OMR_STRNCPY_FORTIFY_OPTIONS})
-	if(NOT CMAKE_CXX_COMPILER_ID MATCHES Clang)
-		target_compile_options(j9ddr_misc PRIVATE -femit-class-debug-always)
-	endif()
 endif()
 
+if(CMAKE_C_COMPILER_ID MATCHES "Clang")
+	target_compile_options(j9ddr_misc PRIVATE -fno-eliminate-unused-debug-types)
+elseif(CMAKE_C_COMPILER_ID STREQUAL "GNU")
+	target_compile_options(j9ddr_misc PRIVATE -femit-class-debug-always)
+endif()
 
 if(OMR_OS_AIX)
 	target_link_libraries(j9ddr_misc

@@ -1,5 +1,5 @@
 //*******************************************************************************
-// Copyright (c) 2015, 2021 IBM Corp. and others
+// Copyright IBM Corp. and others 2015
 //
 // This program and the accompanying materials are made available under
 // the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
 // OpenJDK Assembly Exception [2].
 //
 // [1] https://www.gnu.org/software/classpath/license.html
-// [2] http://openjdk.java.net/legal/assembly-exception.html
+// [2] https://openjdk.org/legal/assembly-exception.html
 //
-// SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+// SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
 //******************************************************************************
 
 Executable=j9prt
@@ -1544,7 +1544,7 @@ TraceException=Trc_PRT_mem_advise_and_free_memory_basic_Pgser_Release_failed Obs
 TraceEvent=Trc_PRT_mem_advise_and_free_memory_basic_params Obsolete Overhead=1 Level=5 NoEnv Template="j9mem_advise_and_free_memory_basic : pagesize=%zu memoryPointer=%p memorySize=%zu"
 TraceEvent=Trc_PRT_mem_advise_and_free_memory_basic_oscall Obsolete Overhead=1 Level=10 NoEnv Template="j9mem_advise_and_free_memory_basic : memPtrPageRounded=%p memPtrSizePageRounded=%zu"
 
-TraceExit=Trc_PRT_j9hypervisor_vendor_init_exit Group=j9mem Overhead=1 Level=5 NoEnv Template="j9hypervisor_vendor_init exited with ret=%d"
+TraceExit=Trc_PRT_j9hypervisor_vendor_init_exit Group=j9hypervisor Overhead=1 Level=5 NoEnv Template="j9hypervisor_vendor_init exited with ret=%d"
 
 TraceException=Trc_PRT_vmem_j9vmem_reserve_memory_ex_UnableToReallocateWithLargePages Obsolete Group=j9mem Overhead=1 Level=3 NoEnv Template="j9vmem_reserve_memory_ex: unable to reallocate %u bytes at %p using large pages"
 
@@ -2136,3 +2136,10 @@ TraceException=Trc_PRT_j9shmem_getDir_tryHomeDirFailed_cannotStat Group=j9shmem 
 TraceExit=Trc_PRT_shared_createDir_Exit8 Group=j9shmem Overhead=1 Level=1 NoEnv Template="j9shmem_createDir file_attr reported isDir, directory exists, cacheDirPerm is not present and it is not the default directory"
 
 TraceExit=Trc_PRT_shmem_j9shmem_stat_Exit2_V2 Group=j9shmem Overhead=1 Level=1 NoEnv Template="j9shmem_stat exit - contents of controlFile %s is corrupted, error code is %u"
+
+TraceException=Trc_PRT_shared_cleanSharedMemorySegments_getUserNameTooLong Group=j9shmem Overhead=1 Level=1 NoEnv Template="cleanSharedMemorySegments: The length of the user name is %zd, it should be greater than 0 and less than %d."
+TraceException=Trc_PRT_shared_cleanSharedMemorySegments_getUserName_Failed Group=j9shmem Overhead=1 Level=1 NoEnv Template="cleanSharedMemorySegments: omrsysinfo_get_username failed"
+TraceException=Trc_PRT_shared_cleanSharedMemorySegments_getEnvUserNameTooLong Group=j9shmem Overhead=1 Level=1 NoEnv Template="cleanSharedMemorySegments: The length of the environment variable USER is %zd, it should be greater than 0 and less than %d."
+TraceException=Trc_PRT_shared_cleanSharedMemorySegments_getEnvUserName_Failed Group=j9shmem Overhead=1 Level=1 NoEnv Template="cleanSharedMemorySegments: omrsysinfo_get_env failed"
+
+TraceException=Trc_PRT_j9shmem_getDir_tryHomeDirFailed_notFinalRestore Group=j9shmem Overhead=1 Level=1 NoEnv Template="j9shmem_getDir: not CRIU final restore, skip getpwuid(), and homeDir is NULL."

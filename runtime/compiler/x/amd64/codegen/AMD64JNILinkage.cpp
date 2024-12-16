@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #ifdef TR_TARGET_64BIT
@@ -78,7 +78,7 @@ TR::Register *J9::X86::AMD64::JNILinkage::processJNIReferenceArg(TR::Node *child
          if (child->pointsToNull())
             {
             refReg = cg()->allocateRegister();
-            generateRegRegInstruction(TR::InstOpCode::XORRegReg(), child, refReg, refReg, cg());
+            generateRegRegInstruction(TR::InstOpCode::XOR4RegReg, child, refReg, refReg, cg());
             // TODO (81564): We need to kill the scratch register to prevent an
             // assertion error, but is this the right place to do so?
             cg()->stopUsingRegister(refReg);
@@ -938,7 +938,7 @@ void J9::X86::AMD64::JNILinkage::acquireVMAccess(TR::Node *callNode)
    TR::Register *scratchReg1 = cg()->allocateRegister();
    TR::Register *scratchReg2 = cg()->allocateRegister();
 
-   generateRegRegInstruction(TR::InstOpCode::XORRegReg(), callNode, scratchReg1, scratchReg1, cg());
+   generateRegRegInstruction(TR::InstOpCode::XOR4RegReg, callNode, scratchReg1, scratchReg1, cg());
 
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(fe());
    uintptr_t mask = fej9->constAcquireVMAccessOutOfLineMask();
@@ -1350,6 +1350,18 @@ TR::Register *J9::X86::AMD64::JNILinkage::buildDirectJNIDispatch(TR::Node *callN
 
       if (isGPUHelper)
          callNode->setSymbolReference(callSymRef); //change back to callSymRef afterwards
+
+#if JAVA_SPEC_VERSION >= 19
+      /**
+       * For virtual threads, bump the callOutCounter.  It is safe and most efficient to
+       * do this unconditionally.  No need to check for overflow.
+       */
+      generateMemInstruction(
+         TR::InstOpCode::INC8Mem,
+         callNode,
+         generateX86MemoryReference(vmThreadReg, fej9->thisThreadGetCallOutCountOffset(), cg()),
+         cg());
+#endif
       }
 
    // Switch from the Java stack to the C stack:
@@ -1398,7 +1410,7 @@ TR::Register *J9::X86::AMD64::JNILinkage::buildDirectJNIDispatch(TR::Node *callN
       targetAddress = (uintptr_t)callSymbol1->getResolvedMethod()->startAddressForJNIMethod(comp());
       }
 
-   TR::Instruction *callInstr = generateMethodDispatch(callNode, isJNIGCPoint, targetAddress);
+  TR::Instruction *callInstr = generateMethodDispatch(callNode, isJNIGCPoint, targetAddress);
 
   if (isGPUHelper)
       callNode->setSymbolReference(callSymRef); //change back to callSymRef afterwards
@@ -1469,6 +1481,18 @@ TR::Register *J9::X86::AMD64::JNILinkage::buildDirectJNIDispatch(TR::Node *callN
 
    if (createJNIFrame)
       {
+#if JAVA_SPEC_VERSION >= 19
+      /**
+       * For virtual threads, decrement the callOutCounter.  It is safe and most efficient to
+       * do this unconditionally.  No need to check for underflow.
+       */
+      generateMemInstruction(
+         TR::InstOpCode::DEC8Mem,
+         callNode,
+         generateX86MemoryReference(vmThreadReg, fej9->thisThreadGetCallOutCountOffset(), cg()),
+         cg());
+#endif
+
       generateRegMemInstruction(
             TR::InstOpCode::ADDRegMem(),
             callNode,

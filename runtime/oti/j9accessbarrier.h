@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #ifndef J9ACCESSBARRIER_H
@@ -105,23 +105,67 @@ typedef struct J9IndexableObject* mm_j9array_t;
 
 #define J9JAVAARRAYDISCONTIGUOUS_EA(vmThread, array, index, elemType) \
 	(J9VMTHREAD_COMPRESS_OBJECT_REFERENCES(vmThread) \
-		? (&(((elemType*)J9_CONVERT_POINTER_FROM_TOKEN__(vmThread, ((U_32*)((J9IndexableObjectDiscontiguousCompressed *)array + 1))[((U_32)index)/(J9VMTHREAD_JAVAVM(vmThread)->arrayletLeafSize/sizeof(elemType))]))[((U_32)index)%(J9VMTHREAD_JAVAVM(vmThread)->arrayletLeafSize/sizeof(elemType))])) \
-		: (&(((elemType*)(((UDATA*)((J9IndexableObjectDiscontiguousFull *)array + 1))[((U_32)index)/(J9VMTHREAD_JAVAVM(vmThread)->arrayletLeafSize/sizeof(elemType))]))[((U_32)index)%(J9VMTHREAD_JAVAVM(vmThread)->arrayletLeafSize/sizeof(elemType))])))
+		? (&(((elemType*)J9_CONVERT_POINTER_FROM_TOKEN__(vmThread, ((U_32*)(((UDATA)(array)) + (vmThread)->discontiguousIndexableHeaderSize))[((U_32)index)/(J9VMTHREAD_JAVAVM(vmThread)->arrayletLeafSize/sizeof(elemType))]))[((U_32)index)%(J9VMTHREAD_JAVAVM(vmThread)->arrayletLeafSize/sizeof(elemType))])) \
+		: (&(((elemType*)(((UDATA*)(((UDATA)(array)) + (vmThread)->discontiguousIndexableHeaderSize))[((U_32)index)/(J9VMTHREAD_JAVAVM(vmThread)->arrayletLeafSize/sizeof(elemType))]))[((U_32)index)%(J9VMTHREAD_JAVAVM(vmThread)->arrayletLeafSize/sizeof(elemType))])))
 
 #define J9JAVAARRAYDISCONTIGUOUS_EA_VM(javaVM, array, index, elemType) \
 	(J9JAVAVM_COMPRESS_OBJECT_REFERENCES(javaVM) \
-		? (&(((elemType*)J9_CONVERT_POINTER_FROM_TOKEN_VM__(javaVM, ((U_32*)((J9IndexableObjectDiscontiguousCompressed *)array + 1))[((U_32)index)/((javaVM)->arrayletLeafSize/sizeof(elemType))]))[((U_32)index)%((javaVM)->arrayletLeafSize/sizeof(elemType))])) \
-		: (&(((elemType*)(((UDATA*)((J9IndexableObjectDiscontiguousFull *)array + 1))[((U_32)index)/((javaVM)->arrayletLeafSize/sizeof(elemType))]))[((U_32)index)%((javaVM)->arrayletLeafSize/sizeof(elemType))])))
+		? (&(((elemType*)J9_CONVERT_POINTER_FROM_TOKEN_VM__(javaVM, ((U_32*)(((UDATA)(array)) + (javaVM)->discontiguousIndexableHeaderSize))[((U_32)index)/((javaVM)->arrayletLeafSize/sizeof(elemType))]))[((U_32)index)%((javaVM)->arrayletLeafSize/sizeof(elemType))])) \
+		: (&(((elemType*)(((UDATA*)(((UDATA)(array)) + (javaVM)->discontiguousIndexableHeaderSize))[((U_32)index)/((javaVM)->arrayletLeafSize/sizeof(elemType))]))[((U_32)index)%((javaVM)->arrayletLeafSize/sizeof(elemType))])))
+
+#define J9JAVAARRAYCONTIGUOUS_BASE_EA(vmThread, array, index, elemType) \
+	(J9VMTHREAD_COMPRESS_OBJECT_REFERENCES(vmThread) \
+		? (&((elemType*)((((J9IndexableObjectContiguousCompressed *)(array)) + 1)))[index]) \
+		: (&((elemType*)((((J9IndexableObjectContiguousFull *)(array)) + 1)))[index]))
+
+#define J9JAVAARRAYCONTIGUOUS_BASE_EA_VM(javaVM, array, index, elemType) \
+	(J9JAVAVM_COMPRESS_OBJECT_REFERENCES(javaVM) \
+		? (&((elemType*)((((J9IndexableObjectContiguousCompressed *)(array)) + 1)))[index]) \
+		: (&((elemType*)((((J9IndexableObjectContiguousFull *)(array)) + 1)))[index]))
+
+#if defined(J9VM_ENV_DATA64)
+#define J9JAVAARRAYCONTIGUOUS_WITH_DATAADDRESS_VIRTUALLARGEOBJECTHEAPDISABLED_EA(vmThread, array, index, elemType) \
+	(J9VMTHREAD_COMPRESS_OBJECT_REFERENCES(vmThread) \
+		? (&((elemType*)((((J9IndexableObjectWithDataAddressContiguousCompressed *)(array)) + 1)))[index]) \
+		: (&((elemType*)((((J9IndexableObjectWithDataAddressContiguousFull *)(array)) + 1)))[index]))
+
+#define J9JAVAARRAYCONTIGUOUS_WITH_DATAADDRESS_VIRTUALLARGEOBJECTHEAPDISABLED_EA_VM(javaVM, array, index, elemType) \
+	(J9JAVAVM_COMPRESS_OBJECT_REFERENCES(javaVM) \
+		? (&((elemType*)((((J9IndexableObjectWithDataAddressContiguousCompressed *)(array)) + 1)))[index]) \
+		: (&((elemType*)((((J9IndexableObjectWithDataAddressContiguousFull *)(array)) + 1)))[index]))
+
+#define J9JAVAARRAYCONTIGUOUS_WITH_DATAADDRESS_VIRTUALLARGEOBJECTHEAPENABLED_EA(vmThread, array, index, elemType) \
+	(J9VMTHREAD_COMPRESS_OBJECT_REFERENCES(vmThread) \
+		? (&((elemType*)((((J9IndexableObjectWithDataAddressContiguousCompressed *)(array))->dataAddr)))[index]) \
+		: (&((elemType*)((((J9IndexableObjectWithDataAddressContiguousFull *)(array))->dataAddr)))[index]))
+
+#define J9JAVAARRAYCONTIGUOUS_WITH_DATAADDRESS_VIRTUALLARGEOBJECTHEAPENABLED_EA_VM(javaVM, array, index, elemType) \
+	(J9JAVAVM_COMPRESS_OBJECT_REFERENCES(javaVM) \
+		? (&((elemType*)((((J9IndexableObjectWithDataAddressContiguousCompressed *)(array))->dataAddr)))[index]) \
+		: (&((elemType*)((((J9IndexableObjectWithDataAddressContiguousFull *)(array))->dataAddr)))[index]))
 
 #define J9JAVAARRAYCONTIGUOUS_EA(vmThread, array, index, elemType) \
-	(J9VMTHREAD_COMPRESS_OBJECT_REFERENCES(vmThread) \
-		? (&((elemType*)((((J9IndexableObjectContiguousCompressed *)(array)) + 1)))[(index)]) \
-		: (&((elemType*)((((J9IndexableObjectContiguousFull *)(array)) + 1)))[(index)]))
+	(((vmThread)->isIndexableDataAddrPresent) \
+		? (((vmThread)->isVirtualLargeObjectHeapEnabled) \
+				? J9JAVAARRAYCONTIGUOUS_WITH_DATAADDRESS_VIRTUALLARGEOBJECTHEAPENABLED_EA(vmThread, array, index, elemType) \
+				: J9JAVAARRAYCONTIGUOUS_WITH_DATAADDRESS_VIRTUALLARGEOBJECTHEAPDISABLED_EA(vmThread, array, index, elemType)) \
+		: J9JAVAARRAYCONTIGUOUS_BASE_EA(vmThread, array, index, elemType))
 
 #define J9JAVAARRAYCONTIGUOUS_EA_VM(javaVM, array, index, elemType) \
-	(J9JAVAVM_COMPRESS_OBJECT_REFERENCES(javaVM) \
-		? (&((elemType*)((((J9IndexableObjectContiguousCompressed *)(array)) + 1)))[(index)]) \
-		: (&((elemType*)((((J9IndexableObjectContiguousFull *)(array)) + 1)))[(index)]))
+	(((javaVM)->isIndexableDataAddrPresent) \
+		? (((javaVM)->isVirtualLargeObjectHeapEnabled) \
+				? J9JAVAARRAYCONTIGUOUS_WITH_DATAADDRESS_VIRTUALLARGEOBJECTHEAPENABLED_EA_VM(javaVM, array, index, elemType) \
+				: J9JAVAARRAYCONTIGUOUS_WITH_DATAADDRESS_VIRTUALLARGEOBJECTHEAPDISABLED_EA_VM(javaVM, array, index, elemType)) \
+		: J9JAVAARRAYCONTIGUOUS_BASE_EA_VM(javaVM, array, index, elemType))
+
+#else /* defined(J9VM_ENV_DATA64) */
+#define J9JAVAARRAYCONTIGUOUS_EA(vmThread, array, index, elemType) \
+	J9JAVAARRAYCONTIGUOUS_BASE_EA(vmThread, array, index, elemType)
+
+#define J9JAVAARRAYCONTIGUOUS_EA_VM(javaVM, array, index, elemType) \
+	J9JAVAARRAYCONTIGUOUS_BASE_EA_VM(javaVM, array, index, elemType)
+
+#endif /* defined(J9VM_ENV_DATA64) */
 
 #define J9ISCONTIGUOUSARRAY(vmThread, array) \
 	(J9VMTHREAD_COMPRESS_OBJECT_REFERENCES(vmThread) \

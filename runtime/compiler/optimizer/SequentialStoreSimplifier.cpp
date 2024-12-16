@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "optimizer/SequentialStoreSimplifier.hpp"
@@ -1866,7 +1866,7 @@ TR::Node* TR_arraycopySequentialStores::constValNode()
 // Transform a set of sequential stores into increasing storage from an integral type into
 // an arraycopy call
 // Order varies depending if on Big Endian or Little Endian target hardware
-// ibstore <array element>
+// bstorei <array element>
 //   aiadd
 //     aload <arr>
 //     isub
@@ -1939,7 +1939,7 @@ static TR::TreeTop* generateArraycopyFromSequentialStores(TR::Compilation* comp,
    symRef->setOffset(arraycopy.getTreeTop()->getNode()->getSymbolReference()->getOffset());
 
    //
-   // delete the ibstore trees and replace them with a new, improved iXstore tree
+   // delete the bstorei trees and replace them with a new, improved iXstore tree
    //
    arraycopy.removeTrees(symRef);
 
@@ -1982,7 +1982,7 @@ static TR::TreeTop* generateArraycopyFromSequentialStores(TR::Compilation* comp,
    return treeTop;
    }
 
-static TR::TreeTop* generateArraycopyFromSequentialLoadsDEPRECATED(TR::Compilation* comp, TR::TreeTop* currentTreeTop, TR::Node* ibloadNode)
+static TR::TreeTop* generateArraycopyFromSequentialLoadsDEPRECATED(TR::Compilation* comp, TR::TreeTop* currentTreeTop, TR::Node* bloadiNode)
    {
 
    static const char * disableSeqLoadOpt = feGetEnv("TR_DisableSeqLoadOpt");
@@ -2000,7 +2000,7 @@ static TR::TreeTop* generateArraycopyFromSequentialLoadsDEPRECATED(TR::Compilati
    TR::Node* rootNode;
 
    //checking the number of bytes
-   while ( !((currentNode->getFirstChild() == ibloadNode) && (currentNode->getOpCodeValue() == TR::bu2i)) )
+   while ( !((currentNode->getFirstChild() == bloadiNode) && (currentNode->getOpCodeValue() == TR::bu2i)) )
       {
       if ( (currentNode->getOpCodeValue() == TR::iadd) || (currentNode->getOpCodeValue() == TR::ior))
          {
@@ -2039,7 +2039,7 @@ static TR::TreeTop* generateArraycopyFromSequentialLoadsDEPRECATED(TR::Compilati
 
    // Need to make sure these loads are not under spine checks.
    //
-   if (comp->requiresSpineChecks() && ibloadNode->getReferenceCount() > 1)
+   if (comp->requiresSpineChecks() && bloadiNode->getReferenceCount() > 1)
       {
       TR::TreeTop *tt = currentTreeTop;
       TR::TreeTop *lastTreeTop = currentTreeTop->getEnclosingBlock()->startOfExtendedBlock()->getFirstRealTreeTop()->getPrevTreeTop();
@@ -2054,7 +2054,7 @@ static TR::TreeTop* generateArraycopyFromSequentialLoadsDEPRECATED(TR::Compilati
             node = node->getFirstChild();
             while (node->getOpCode().isConversion())
                node = node->getFirstChild();
-            if (node == ibloadNode)
+            if (node == bloadiNode)
                {
                dumpOptDetails(comp, " Sequential Load to spine checked array not reducible\n");
                return currentTreeTop;
@@ -2447,7 +2447,7 @@ TR::TreeTop* generateArraycopyFromSequentialLoads(TR::Compilation* comp, bool tr
    if (trace) traceMsg(comp, "Sequential Load Simplification Candidate - rootNode: %p, newConvertChildNode: %p, newLoadChildNode: %p\n", rootNode, newConvertChildNode, newLoadChildNode);
 
    /*
-    * Check the endianess of the platform and the endianess of the byte array.
+    * Check the endianness of the platform and the endianness of the byte array.
     * If they don't match, byteswaps will be needed.
     */
    if (littleEndianLoad && !comp->target().cpu.isLittleEndian())
@@ -2767,7 +2767,7 @@ TR::TreeTop* generateArraycopyFromSequentialLoads(TR::Compilation* comp, bool tr
       if (trace) traceMsg(comp, "Creating mulNode (%p) with children %p and %p.\n", mulNode, mulNode->getFirstChild(), mulNode->getSecondChild());
 
       TR::Node * shortConversionNode = NULL;
-      /* The location to start the sload from depends on endianess of the byte array. */
+      /* The location to start the sload from depends on endianness of the byte array. */
       if (littleEndianLoad)
          {
          shortConversionNode = byteConversionNodes[0];
@@ -2842,7 +2842,7 @@ TR::TreeTop* generateArraycopyFromSequentialLoads(TR::Compilation* comp, bool tr
       if (trace) traceMsg(comp, "Creating mulNode (%p) with children %p and %p.\n", mulNode, mulNode->getFirstChild(), mulNode->getSecondChild());
 
       TR::Node * lowerIntConversionNode = NULL;
-      /* The location to start the lower iload from depends on endianess of the byte array. */
+      /* The location to start the lower iload from depends on endianness of the byte array. */
       if (littleEndianLoad)
          {
          lowerIntConversionNode = byteConversionNodes[0];
@@ -3229,7 +3229,7 @@ static TR::TreeTop* generateArraysetFromSequentialStores(TR::Compilation* comp, 
    //traceMsg(comp, " First store in sequence %p Load Ref:%p Number of bytes: %d. Offset range:%d to %d. Byte Value:%d\n", istoreNode, arrayset.getALoadRef(), numBytes, arrayset.getBaseOffset(), arrayset.getBaseOffset() + numBytes - 1, arrayset.getConstant());
 
    //
-   // break the iistore trees into tree_tops of the aload and const
+   // break the istorei trees into tree_tops of the aload and const
    // so that it can be subsequently deleted by simplifier phase
    //
    TR_arraysetSequentialStores arraysetUpdate = TR_arraysetSequentialStores(comp);
@@ -3324,7 +3324,7 @@ static TR::TreeTop* generateArraysetFromSequentialStores(TR::Compilation* comp, 
       TR::Node *topNode = TR::Node::create(TR::treetop, 1, arraysetNode);
       arraysetTreeTop = TR::TreeTop::create(comp, topNode);
 
-      // delete all the old iistore trees by eliminating them from the tree list
+      // delete all the old istorei trees by eliminating them from the tree list
       prevTreeTop->join(arraysetTreeTop);
       arraysetTreeTop->join(curTreeTop);
       }
@@ -3332,7 +3332,7 @@ static TR::TreeTop* generateArraysetFromSequentialStores(TR::Compilation* comp, 
       {
       TR_ASSERT((numBytes <= 8), "Number of bytes is more than expected\n");
       //
-      // delete the ibstore trees and replace them with a new, improved iXstore tree
+      // delete the bstorei trees and replace them with a new, improved iXstore tree
       //
       //dumpOptDetails(comp, " Remove trees %p to %p\n", istoreTreeTop->getNode(), curTreeTop->getNode());
       //TR::TreeTop::removeDeadTrees(comp, istoreTreeTop, curTreeTop);
@@ -4108,7 +4108,7 @@ TR_SequentialStoreSimplifier::optDetailString() const throw()
 /*
  * Seen in atmstac0.cbl after removing the reassociation opts from Simplifier:
  *
- * [0x2A0A5874]   ibstore #182[id=42:"WS-ATM-ACCT-ENTRY-USED-F"][0x29201614]  Shadow[<refined-array-shadow>] <intPrec=2>
+ * [0x2A0A5874]   bstorei #182[id=42:"WS-ATM-ACCT-ENTRY-USED-F"][0x29201614]  Shadow[<refined-array-shadow>] <intPrec=2>
  *                  ==>aiadd at [0x2A0A561C]
  * [0x2A0A58B4]     buconst -16 <intPrec=2>    <flags:"0x204" (X!=0 X<=0 )/>
  * [0x2A0A5A94]   astore #201[id=305:"Subscr-AddrTemp"][0x2A08552C]  Auto[<auto slot 84>]
@@ -4206,7 +4206,7 @@ bool mayKillInterferenceBetweenNodes(TR::Compilation * comp,
       comp->getDebug()->trace(" --- does node %p get killed somewhere in the subtree of node %p?\n", n2, n1);
       }
 
-   if (n1->referencesMayKillAliasInSubTree(n2, newVisitCount))
+   if (n1->referencesMayKillAliasInSubTree(n2, newVisitCount, comp))
       {
       if (trace)
          comp->getDebug()->trace(" ---- node %p is killed somewhere in the subtree of node %p\n", n2, n1);
@@ -4239,7 +4239,7 @@ bool mayKillInterferenceBetweenNodes(TR::Compilation * comp,
       comp->getDebug()->trace(" --- does node %p get killed somewhere in the subtree of node %p?\n", n2, n1);
       }
 
-   if (n1->referencesMayKillAliasInSubTree(n2, newVisitCount))
+   if (n1->referencesMayKillAliasInSubTree(n2, newVisitCount, comp))
       {
       if (trace)
          comp->getDebug()->trace(" ---- node %p is killed somewhere in the subtree of node %p\n", n2, n1);

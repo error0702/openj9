@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include <string.h>
@@ -71,11 +71,6 @@ static UDATA nativeMethodEqual(void *leftKey, void *rightKey, void *userData);
 static UDATA bindNative(J9VMThread *currentThread, J9Method *nativeMethod, char * longJNI, char * shortJNI, UDATA bindJNINative);
 static UDATA lookupNativeAddress(J9VMThread *currentThread, J9Method *nativeMethod, J9NativeLibrary *handle, char *longJNI, char *shortJNI, UDATA functionArgCount, UDATA bindJNINative);
 
-#if JAVA_SPEC_VERSION >= 15
-J9_DECLARE_CONSTANT_UTF8(j9_findnative_sig, "(Ljava/lang/ClassLoader;Ljava/lang/String;)J");
-J9_DECLARE_CONSTANT_UTF8(j9_findnative_name, "findNative");
-#endif /* JAVA_SPEC_VERSION >= 15 */
-
 typedef struct {
 	const char *nativeName;
 	UDATA sendTargetNumber;
@@ -83,12 +78,18 @@ typedef struct {
 
 static inlMapping mappings[] = {
 	{ "Java_java_lang_Thread_currentThread__", J9_BCLOOP_SEND_TARGET_INL_THREAD_CURRENT_THREAD },
+#if JAVA_SPEC_VERSION >= 19
+	{ "Java_java_lang_Thread_setCurrentThread__Ljava_lang_Thread_2", J9_BCLOOP_SEND_TARGET_INL_THREAD_SET_CURRENT_THREAD },
+#endif /* JAVA_SPEC_VERSION >= 19 */
 	{ "Java_java_lang_Object_getClass__", J9_BCLOOP_SEND_TARGET_INL_OBJECT_GET_CLASS },
 	{ "Java_java_lang_Class_isAssignableFrom__Ljava_lang_Class_2", J9_BCLOOP_SEND_TARGET_INL_CLASS_IS_ASSIGNABLE_FROM },
 	{ "Java_java_lang_Class_isArray__", J9_BCLOOP_SEND_TARGET_INL_CLASS_IS_ARRAY },
 	{ "Java_java_lang_Class_isPrimitive__", J9_BCLOOP_SEND_TARGET_INL_CLASS_IS_PRIMITIVE },
 #if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
-	{ "Java_java_lang_Class_isPrimitiveClass__", J9_BCLOOP_SEND_TARGET_INL_CLASS_IS_PRIMITIVE_CLASS },
+	{ "Java_java_lang_Class_isValue__", J9_BCLOOP_SEND_TARGET_INL_CLASS_IS_VALUE },
+	{ "Java_java_lang_Class_isIdentity__", J9_BCLOOP_SEND_TARGET_INL_CLASS_IS_IDENTITY },
+	{ "Java_java_lang_J9VMInternals_positiveOnlyHashcodes__", J9_BCLOOP_SEND_TARGET_INL_INTERNALS_POSITIVE_ONLY_HASHCODES },
+	{ "Java_java_lang_Class_getClassFileVersion0__", J9_BCLOOP_SEND_TARGET_INL_CLASS_GET_CLASS_FILEVERSION },
 #endif /* J9VM_OPT_VALHALLA_VALUE_TYPES */
 	{ "Java_java_lang_Class_getModifiersImpl__", J9_BCLOOP_SEND_TARGET_INL_CLASS_GET_MODIFIERS_IMPL },
 	{ "Java_java_lang_Class_getComponentType__", J9_BCLOOP_SEND_TARGET_INL_CLASS_GET_COMPONENT_TYPE },
@@ -177,7 +178,7 @@ static inlMapping mappings[] = {
 	{ "Java_java_lang_ClassLoader_findLoadedClassImpl__Ljava_lang_String_2", J9_BCLOOP_SEND_TARGET_INL_CLASSLOADER_FIND_LOADED_CLASS_IMPL },
 	{ "Java_java_lang_VMAccess_findClassOrNull__Ljava_lang_String_2Ljava_lang_ClassLoader_2", J9_BCLOOP_SEND_TARGET_INL_VM_FIND_CLASS_OR_NULL },
 	{ "Java_java_lang_Class_forNameImpl__Ljava_lang_String_2ZLjava_lang_ClassLoader_2", J9_BCLOOP_SEND_TARGET_CLASS_FORNAMEIMPL },
-	{ "Java_java_lang_Thread_interrupted__", J9_BCLOOP_SEND_TARGET_INL_THREAD_INTERRUPTED },
+	{ "Java_java_lang_Thread_interruptedImpl__", J9_BCLOOP_SEND_TARGET_INL_THREAD_INTERRUPTED },
 	{ "Java_com_ibm_oti_vm_VM_getCPIndexImpl__Ljava_lang_Class_2", J9_BCLOOP_SEND_TARGET_INL_VM_GET_CP_INDEX_IMPL},
 	{ "Java_com_ibm_oti_vm_VM_getStackClassLoader__I", J9_BCLOOP_SEND_TARGET_INL_VM_GET_STACK_CLASS_LOADER },
 	/* Forward duplicated getStackClassLoader natives to the same target */
@@ -191,13 +192,13 @@ static inlMapping mappings[] = {
 	{ "Java_com_ibm_oti_vm_VM_getClassPathEntryType__Ljava_lang_Object_2I", J9_BCLOOP_SEND_TARGET_INL_VM_GET_CLASS_PATH_ENTRY_TYPE },
 	{ "Java_com_ibm_oti_vm_VM_isBootstrapClassLoader__Ljava_lang_ClassLoader_2", J9_BCLOOP_SEND_TARGET_INL_VM_IS_BOOTSTRAP_CLASS_LOADER },
 	{ "Java_sun_misc_Unsafe_allocateInstance__Ljava_lang_Class_2", J9_BCLOOP_SEND_TARGET_INL_UNSAFE_ALLOCATE_INSTANCE },
-	{ "Java_openj9_internal_tools_attach_target_Attachment_loadAgentLibraryImpl__Ljava_lang_ClassLoader_2Ljava_lang_String_2Ljava_lang_String_2Z", J9_BCLOOP_SEND_TARGET_INL_ATTACHMENT_LOADAGENTLIBRARYIMPL },
+	{ "Java_openj9_internal_tools_attach_target_Attachment_loadAgentLibraryImpl__ZLjava_lang_ClassLoader_2Ljava_lang_String_2Ljava_lang_String_2Z", J9_BCLOOP_SEND_TARGET_INL_ATTACHMENT_LOADAGENTLIBRARYIMPL },
 	{ "Java_com_ibm_oti_vm_VM_getStackClass__I", J9_BCLOOP_SEND_TARGET_INL_VM_GETSTACKCLASS },
 	/* Forward duplicated getStackClass natives to the same target */
 	{ "Java_java_lang_invoke_MethodHandles_getStackClass__I", J9_BCLOOP_SEND_TARGET_INL_VM_GETSTACKCLASS },
 	{ "Java_java_lang_Class_getStackClass__I", J9_BCLOOP_SEND_TARGET_INL_VM_GETSTACKCLASS },
-	{ "Java_java_lang_Thread_sleep__JI", J9_BCLOOP_SEND_TARGET_INL_THREAD_SLEEP },
-	{ "Java_java_lang_Object_wait__JI", J9_BCLOOP_SEND_TARGET_INL_OBJECT_WAIT },
+	{ "Java_java_lang_Thread_sleepImpl__JI", J9_BCLOOP_SEND_TARGET_INL_THREAD_SLEEP },
+	{ "Java_java_lang_Object_waitImpl__JI", J9_BCLOOP_SEND_TARGET_INL_OBJECT_WAIT },
 	{ "Java_java_lang_ClassLoader_loadLibraryWithPath___3BLjava_lang_ClassLoader_2_3B", J9_BCLOOP_SEND_TARGET_INL_CLASSLOADER_LOADLIBRARYWITHPATH },
 	{ "Java_java_lang_Thread_isInterruptedImpl__", J9_BCLOOP_SEND_TARGET_INL_THREAD_ISINTERRUPTEDIMPL },
 	{ "Java_java_lang_ClassLoader_initAnonClassLoader__Ljava_lang_InternalAnonymousClassLoader_2", J9_BCLOOP_SEND_TARGET_INL_CLASSLOADER_INITIALIZEANONCLASSLOADER },
@@ -277,22 +278,36 @@ static inlMapping mappings[] = {
 	{ "Java_jdk_internal_misc_Unsafe_compareAndSetInt__Ljava_lang_Object_2JII", J9_BCLOOP_SEND_TARGET_INL_UNSAFE_COMPAREANDSWAPINT },
 	{ "Java_jdk_internal_misc_Unsafe_allocateInstance__Ljava_lang_Class_2", J9_BCLOOP_SEND_TARGET_INL_UNSAFE_ALLOCATE_INSTANCE },
 #if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
-	{ "Java_jdk_internal_misc_Unsafe_getValue__Ljava_lang_Object_2JLjava_lang_Class_2", J9_BCLOOP_SEND_TARGET_INL_UNSAFE_GETVALUE },
-	{ "Java_jdk_internal_misc_Unsafe_putValue__Ljava_lang_Object_2JLjava_lang_Class_2Ljava_lang_Object_2", J9_BCLOOP_SEND_TARGET_INL_UNSAFE_PUTVALUE },
 	{ "Java_jdk_internal_misc_Unsafe_uninitializedDefaultValue__Ljava_lang_Class_2", J9_BCLOOP_SEND_TARGET_INL_UNSAFE_UNINITIALIZEDDEFAULTVALUE },
 	{ "Java_jdk_internal_misc_Unsafe_valueHeaderSize__Ljava_lang_Class_2", J9_BCLOOP_SEND_TARGET_INL_UNSAFE_VALUEHEADERSIZE },
-	{ "Java_jdk_internal_misc_Unsafe_isFlattenedArray__Ljava_lang_Class_2", J9_BCLOOP_SEND_TARGET_INL_UNSAFE_ISFLATTENEDARRAY },
-	{ "Java_jdk_internal_misc_Unsafe_isFlattened__Ljava_lang_reflect_Field_2", J9_BCLOOP_SEND_TARGET_INL_UNSAFE_ISFLATTENED },
+	{ "Java_jdk_internal_misc_Unsafe_getObjectSize__Ljava_lang_Object_2", J9_BCLOOP_SEND_TARGET_INL_UNSAFE_GETOBJECTSIZE },
 #endif /* J9VM_OPT_VALHALLA_VALUE_TYPES */
+#if defined(J9VM_OPT_VALHALLA_FLATTENABLE_VALUE_TYPES)
+	{ "Java_jdk_internal_misc_Unsafe_getValue__Ljava_lang_Object_2JLjava_lang_Class_2", J9_BCLOOP_SEND_TARGET_INL_UNSAFE_GETVALUE },
+	{ "Java_jdk_internal_misc_Unsafe_putValue__Ljava_lang_Object_2JLjava_lang_Class_2Ljava_lang_Object_2", J9_BCLOOP_SEND_TARGET_INL_UNSAFE_PUTVALUE },
+	{ "Java_jdk_internal_misc_Unsafe_isFlatArray__Ljava_lang_Class_2", J9_BCLOOP_SEND_TARGET_INL_UNSAFE_ISFLATARRAY },
+	{ "Java_jdk_internal_misc_Unsafe_isFlatField__Ljava_lang_reflect_Field_2", J9_BCLOOP_SEND_TARGET_INL_UNSAFE_ISFLATFIELD },
+	{ "Java_jdk_internal_misc_Unsafe_isFieldAtOffsetFlattened__Ljava_lang_Class_2J", J9_BCLOOP_SEND_TARGET_INL_UNSAFE_ISFIELDATOFFSETFLATTENED },
+#endif /* J9VM_OPT_VALHALLA_FLATTENABLE_VALUE_TYPES */
 	{ "Java_java_lang_Thread_onSpinWait__", J9_BCLOOP_SEND_TARGET_INL_THREAD_ON_SPIN_WAIT },
 #if JAVA_SPEC_VERSION >= 11
 	{ "Java_jdk_internal_reflect_Reflection_getClassAccessFlags__Ljava_lang_Class_2", J9_BCLOOP_SEND_TARGET_INL_REFLECTION_GETCLASSACCESSFLAGS },
 #else /* JAVA_SPEC_VERSION >= 11 */
 	{ "Java_sun_reflect_Reflection_getClassAccessFlags__Ljava_lang_Class_2", J9_BCLOOP_SEND_TARGET_INL_REFLECTION_GETCLASSACCESSFLAGS },
 #endif /* JAVA_SPEC_VERSION >= 11 */
-#if JAVA_SPEC_VERSION >= 16
-	{ "Java_jdk_internal_foreign_abi_ProgrammableInvoker_invokeNative__JJ_3J", J9_BCLOOP_SEND_TARGET_INL_PROGRAMMABLEINVOKER_INVOKENATIVE },
-#endif /* JAVA_SPEC_VERSION >= 16 */
+
+#if JAVA_SPEC_VERSION >= 22
+	{ "Java_openj9_internal_foreign_abi_InternalDowncallHandler_invokeNative___3Ljava_lang_Object_2_3JZJJJJ_3J", J9_BCLOOP_SEND_TARGET_INL_INTERNALDOWNCALLHANDLER_INVOKENATIVE },
+#elif JAVA_SPEC_VERSION == 21
+	{ "Java_openj9_internal_foreign_abi_InternalDowncallHandler_invokeNative__ZJJJJ_3J", J9_BCLOOP_SEND_TARGET_INL_INTERNALDOWNCALLHANDLER_INVOKENATIVE },
+#elif JAVA_SPEC_VERSION >= 16
+	{ "Java_openj9_internal_foreign_abi_InternalDowncallHandler_invokeNative__JJJ_3J", J9_BCLOOP_SEND_TARGET_INL_INTERNALDOWNCALLHANDLER_INVOKENATIVE },
+#endif /* JAVA_SPEC_VERSION >= 22 */
+#if JAVA_SPEC_VERSION >= 19
+	{ "Java_jdk_internal_vm_Continuation_enterImpl__", J9_BCLOOP_SEND_TARGET_ENTER_CONTINUATION },
+	{ "Java_jdk_internal_vm_Continuation_yieldImpl__Z", J9_BCLOOP_SEND_TARGET_YIELD_CONTINUATION },
+	{ "Java_jdk_internal_vm_Continuation_isPinnedImpl__", J9_BCLOOP_SEND_TARGET_ISPINNED_CONTINUATION },
+#endif /* JAVA_SPEC_VERSION >= 19 */
 };
 
 typedef struct J9OutOfLineINLMapping {
@@ -303,21 +318,20 @@ typedef struct J9OutOfLineINLMapping {
 static J9OutOfLineINLMapping outOfLineINLmappings[] = {
 	{ "Java_jdk_internal_misc_Unsafe_fullFence__", OutOfLineINL_jdk_internal_misc_Unsafe_fullFence },
 	{ "Java_sun_misc_Unsafe_fullFence__", OutOfLineINL_jdk_internal_misc_Unsafe_fullFence },
-	{ "Java_jdk_internal_misc_Unsafe_compareAndExchangeObjectVolatile__Ljava_lang_Object_2JLjava_lang_Object_2Ljava_lang_Object_2", OutOfLineINL_jdk_internal_misc_Unsafe_compareAndExchangeObjectVolatile },
-	{ "Java_jdk_internal_misc_Unsafe_compareAndExchangeObject__Ljava_lang_Object_2JLjava_lang_Object_2Ljava_lang_Object_2", OutOfLineINL_jdk_internal_misc_Unsafe_compareAndExchangeObjectVolatile },
-	{ "Java_jdk_internal_misc_Unsafe_compareAndExchangeReference__Ljava_lang_Object_2JLjava_lang_Object_2Ljava_lang_Object_2", OutOfLineINL_jdk_internal_misc_Unsafe_compareAndExchangeObjectVolatile },
-	{ "Java_jdk_internal_misc_Unsafe_compareAndExchangeIntVolatile__Ljava_lang_Object_2JII", OutOfLineINL_jdk_internal_misc_Unsafe_compareAndExchangeIntVolatile },
-	{ "Java_jdk_internal_misc_Unsafe_compareAndExchangeInt__Ljava_lang_Object_2JII", OutOfLineINL_jdk_internal_misc_Unsafe_compareAndExchangeIntVolatile },
-	{ "Java_jdk_internal_misc_Unsafe_compareAndExchangeLongVolatile__Ljava_lang_Object_2JJJ", OutOfLineINL_jdk_internal_misc_Unsafe_compareAndExchangeLongVolatile },
-	{ "Java_jdk_internal_misc_Unsafe_compareAndExchangeLong__Ljava_lang_Object_2JJJ", OutOfLineINL_jdk_internal_misc_Unsafe_compareAndExchangeLongVolatile },
+	{ "Java_jdk_internal_misc_Unsafe_compareAndExchangeObject__Ljava_lang_Object_2JLjava_lang_Object_2Ljava_lang_Object_2", OutOfLineINL_jdk_internal_misc_Unsafe_compareAndExchangeObject },
+	{ "Java_jdk_internal_misc_Unsafe_compareAndExchangeReference__Ljava_lang_Object_2JLjava_lang_Object_2Ljava_lang_Object_2", OutOfLineINL_jdk_internal_misc_Unsafe_compareAndExchangeObject },
+	{ "Java_jdk_internal_misc_Unsafe_compareAndExchangeInt__Ljava_lang_Object_2JII", OutOfLineINL_jdk_internal_misc_Unsafe_compareAndExchangeInt },
+	{ "Java_jdk_internal_misc_Unsafe_compareAndExchangeLong__Ljava_lang_Object_2JJJ", OutOfLineINL_jdk_internal_misc_Unsafe_compareAndExchangeLong },
 	{ "Java_com_ibm_jit_JITHelpers_acmplt__Ljava_lang_Object_2Ljava_lang_Object_2", OutOfLineINL_com_ibm_jit_JITHelpers_acmplt },
-#if defined(J9VM_OPT_PANAMA)
-	{ "Java_java_lang_invoke_NativeMethodHandle_initJ9NativeCalloutDataRef___3Ljava_lang_String_2", OutOfLineINL_java_lang_invoke_NativeMethodHandle_initJ9NativeCalloutDataRef },
-	{ "Java_java_lang_invoke_NativeMethodHandle_freeJ9NativeCalloutDataRef__", OutOfLineINL_java_lang_invoke_NativeMethodHandle_freeJ9NativeCalloutDataRef },
-#endif /* defined(J9VM_OPT_PANAMA) */
 #if JAVA_SPEC_VERSION >= 16
-	{ "Java_jdk_internal_foreign_abi_ProgrammableInvoker_resolveRequiredFields__", OutOfLineINL_jdk_internal_foreign_abi_ProgrammableInvoker_resolveRequiredFields },
-	{ "Java_jdk_internal_foreign_abi_ProgrammableInvoker_initCifNativeThunkData___3Ljava_lang_String_2Ljava_lang_String_2Z", OutOfLineINL_jdk_internal_foreign_abi_ProgrammableInvoker_initCifNativeThunkData },
+	{ "Java_openj9_internal_foreign_abi_InternalDowncallHandler_initCifNativeThunkData___3Ljava_lang_String_2Ljava_lang_String_2ZI", OutOfLineINL_openj9_internal_foreign_abi_InternalDowncallHandler_initCifNativeThunkData },
+#if JAVA_SPEC_VERSION >= 22
+	{ "Java_openj9_internal_foreign_abi_InternalDowncallHandler_isFfiProtoEnabled__", OutOfLineINL_openj9_internal_foreign_abi_InternalDowncallHandler_isFfiProtoEnabled },
+	{ "Java_openj9_internal_foreign_abi_InternalDowncallHandler_setNativeInvokeCache__Ljava_lang_invoke_MethodHandle_2", OutOfLineINL_openj9_internal_foreign_abi_InternalDowncallHandler_setNativeInvokeCache },
+#endif /* JAVA_SPEC_VERSION >= 22 */
+	{ "Java_openj9_internal_foreign_abi_InternalDowncallHandler_resolveRequiredFields__", OutOfLineINL_openj9_internal_foreign_abi_InternalDowncallHandler_resolveRequiredFields },
+	{ "Java_openj9_internal_foreign_abi_InternalUpcallHandler_allocateUpcallStub__Lopenj9_internal_foreign_abi_UpcallMHMetaData_2_3Ljava_lang_String_2", OutOfLineINL_openj9_internal_foreign_abi_InternalUpcallHandler_allocateUpcallStub },
+	{ "Java_openj9_internal_foreign_abi_UpcallMHMetaData_resolveUpcallDataInfo__", OutOfLineINL_openj9_internal_foreign_abi_UpcallMHMetaData_resolveUpcallDataInfo },
 #endif /* JAVA_SPEC_VERSION >= 16 */
 };
 
@@ -640,7 +654,7 @@ nativeSignature(J9Method* nativeMethod, char *resultBuffer)
 				parsingReturnType = TRUE;
 				continue;
 			case 'L':
-				nextType = 'L';
+				nextType = (char)ch;
 				while(J9UTF8_DATA(methodSig)[i++] != ';') {}		/* a type string - loop scanning for ';' to end it - i points past ';' when done loop */
 				break;
 			case 'Z':
@@ -1082,32 +1096,43 @@ lookupJNINative(J9VMThread *currentThread, J9NativeLibrary *nativeLibrary, J9Met
 	UDATA lookupResult = 0;
 	void *functionAddress = NULL;
 	J9JavaVM *vm = currentThread->javaVM;
+#if defined(J9VM_OPT_JAVA_OFFLOAD_SUPPORT)
+	UDATA doSwitching = 0;
+#endif /* defined(J9VM_OPT_JAVA_OFFLOAD_SUPPORT) */
 	PORT_ACCESS_FROM_JAVAVM(vm);
 
 	Trc_VM_lookupJNINative_Entry(currentThread, nativeLibrary, nativeMethod, symbolName, signature);
-#if JAVA_SPEC_VERSION >= 15
+#if JAVA_SPEC_VERSION >= 17
 	if (NULL == nativeLibrary) {
-		J9MemoryManagerFunctions const * const mmFuncs = vm->memoryManagerFunctions;
-		J9NameAndSignature nas = {0};
-		nas.name = (J9UTF8 *)&j9_findnative_name;
-		nas.signature = (J9UTF8 *)&j9_findnative_sig;
 		internalAcquireVMAccess(currentThread);
-		j9object_t entryName = mmFuncs->j9gc_createJavaLangString(currentThread, (U_8*)symbolName, strlen(symbolName), 0);
-		j9object_t classLoaderObject = J9_CLASS_FROM_METHOD(nativeMethod)->classLoader->classLoaderObject;
-		UDATA args[] = { (UDATA) classLoaderObject, (UDATA) entryName };
-		runStaticMethod(currentThread, (U_8 *)"java/lang/ClassLoader", &nas, 2, (UDATA *)args);
+		j9object_t entryName = vm->memoryManagerFunctions->j9gc_createJavaLangString(currentThread, (U_8*)symbolName, strlen(symbolName), 0);
+		if (NULL != entryName) {
+			j9object_t classLoaderObject = J9_CLASS_FROM_METHOD(nativeMethod)->classLoader->classLoaderObject;
+			J9Method *findNativeMethod = J9VMJAVALANGCLASSLOADER_FINDNATIVE_METHOD(vm);
+			UDATA args[] = {(UDATA)classLoaderObject, (UDATA)entryName};
+			internalRunStaticMethod(currentThread, findNativeMethod, TRUE, (sizeof(args) / sizeof(UDATA)), args);
+			functionAddress = (UDATA*)(*(U_64*)&(currentThread->returnValue));
+#if defined(J9VM_OPT_JAVA_OFFLOAD_SUPPORT)
+			doSwitching = ((UDATA)functionAddress) & J9_NATIVE_LIBRARY_SWITCH_MASK;
+			functionAddress = (UDATA *)(((UDATA)functionAddress) & ~(UDATA)J9_NATIVE_LIBRARY_SWITCH_MASK);
+#endif /* defined(J9VM_OPT_JAVA_OFFLOAD_SUPPORT) */
+		}
+		/* always clear pending exception, might retry later */
+		VM_VMHelpers::clearException(currentThread);
 		internalReleaseVMAccess(currentThread);
-		functionAddress = (UDATA *) currentThread->returnValue;
-		if ((NULL != currentThread->currentException) || (NULL == functionAddress) ) {
+		if (NULL == functionAddress) {
 			lookupResult = 1;
 		}
 		Trc_VM_lookupJNINative_NullNativeLibrary(currentThread, nativeMethod, symbolName, signature, functionAddress);
 	} else
-#endif /* JAVA_SPEC_VERSION >= 15 */
+#endif /* JAVA_SPEC_VERSION >= 17 */
 	{
 		lookupResult = j9sl_lookup_name(nativeLibrary->handle, symbolName, (UDATA*)&functionAddress, signature);
+#if defined(J9VM_OPT_JAVA_OFFLOAD_SUPPORT)
+		doSwitching = nativeLibrary->doSwitching;
+#endif /* defined(J9VM_OPT_JAVA_OFFLOAD_SUPPORT) */
 	}
-	if (lookupResult == 0) {
+	if (0 == lookupResult) {
 		UDATA cpFlags = J9_STARTPC_JNI_NATIVE;
 
 #if defined(J9VM_OPT_JVMTI)
@@ -1116,13 +1141,15 @@ lookupJNINative(J9VMThread *currentThread, J9NativeLibrary *nativeLibrary, J9Met
 		internalReleaseVMAccess(currentThread);
 #endif
 #if defined(J9VM_OPT_JAVA_OFFLOAD_SUPPORT)
-		if ((NULL != nativeLibrary) && (0 != nativeLibrary->doSwitching)) {
+		if (0 != doSwitching) {
 			cpFlags |= J9_STARTPC_NATIVE_REQUIRES_SWITCHING;
-			if (nativeLibrary->doSwitching & J9_NATIVE_LIBRARY_SWITCH_JDBC) {
-				J9Class* ramClass;
-				
-				ramClass = J9_CLASS_FROM_METHOD(nativeMethod);
-				ramClass->classDepthAndFlags |= J9AccClassHasJDBCNatives;
+			if (J9_ARE_ANY_BITS_SET(doSwitching, J9_NATIVE_LIBRARY_SWITCH_JDBC | J9_NATIVE_LIBRARY_SWITCH_WITH_SUBTASKS)) {
+				J9Class *ramClass = J9_CLASS_FROM_METHOD(nativeMethod);
+				if (J9_ARE_ANY_BITS_SET(doSwitching, J9_NATIVE_LIBRARY_SWITCH_JDBC)) {
+					ramClass->classDepthAndFlags |= J9AccClassHasJDBCNatives;
+				} else {
+					ramClass->classFlags |= J9ClassHasOffloadAllowSubtasksNatives;
+				}
 			}
 		}
 #endif

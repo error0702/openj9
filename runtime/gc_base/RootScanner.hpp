@@ -1,6 +1,6 @@
 
 /*******************************************************************************
- * Copyright (c) 1991, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,9 +16,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 /**
@@ -72,12 +72,12 @@ class MM_RootScanner : public MM_BaseVirtual
 	 * Data members
 	 */
 private:
-
+	bool _isContinuationListEmpty;
 protected:
 	MM_EnvironmentBase *_env;
 	MM_GCExtensions *_extensions;
 	MM_CollectorLanguageInterfaceImpl *_clij;
-	OMR_VM *_omrVM;
+	J9JavaVM *_javaVM;
 
 	bool _stringTableAsRoot;  /**< Treat the string table as a hard root */
 	bool _jniWeakGlobalReferencesTableAsRoot;	/**< Treat JNI Weak References Table as a hard root */
@@ -91,9 +91,9 @@ protected:
 #endif /* J9VM_GC_MODRON_SCAVENGER */	 	
 	bool _classDataAsRoots; /**< Should all classes (and class loaders) be treated as roots. Default true, should set to false when class unloading */
 	bool _includeJVMTIObjectTagTables; /**< Should the iterator include the JVMTIObjectTagTables. Default true, should set to false when doing JVMTI object walks */
-#if defined(J9VM_GC_ENABLE_DOUBLE_MAP)
-	bool _includeDoubleMap; /**< Enables doublemap should the GC policy be balanced. Default is false. */
-#endif /* J9VM_GC_ENABLE_DOUBLE_MAP */
+#if defined(J9VM_GC_SPARSE_HEAP_ALLOCATION)
+	bool _includeVirtualLargeObjectHeap; /**< Enables scanning of objects that has been allocated at sparse heap. Default is false */
+#endif /* defined(J9VM_GC_SPARSE_HEAP_ALLOCATION) */
 	bool _trackVisibleStackFrameDepth; /**< Should the stack walker be told to track the visible frame depth. Default false, should set to true when doing JVMTI walks that report stack slots */
 
 	U_64 _entityStartScanTime; /**< The start time of the scan of the current scanning entity, or 0 if no entity is being scanned.  Defaults to 0. */
@@ -119,20 +119,18 @@ private:
 	 * @param manager current region manager
 	 * @param memoryType memory type
 	 */
-	void scanArrayObject(MM_EnvironmentBase *env, J9Object *objectPtr, MM_MemoryPool *memoryPool, MM_HeapRegionManager *manager, UDATA memoryType);
+	void scanArrayObject(MM_EnvironmentBase *env, J9Object *objectPtr, MM_MemoryPool *memoryPool, MM_HeapRegionManager *manager, uintptr_t memoryType);
+
+	bool isContinuationListEmpty(MM_EnvironmentBase *env);
+
+	/**
+	 * Scan all objects from class loader.
+	 * @param env thread GC environment
+	 * @param classLoader class loader address
+	 */
+	void scanClassloader(MM_EnvironmentBase *env, J9ClassLoader *classLoader);
 
 protected:
-	/**
-	 * Determine whether running method classes in stack frames should be walked.
-	 * @return boolean determining whether running method classes in stack frames should be walked
-	 */
-	MMINLINE bool isStackFrameClassWalkNeeded() {
-		if (_nurseryReferencesOnly || _nurseryReferencesPossibly) {
-			return false;
-		}
-		return 	_includeStackFrameClassReferences;
-	}
-
 	/* Family of yielding methods to be overridden by incremental scanners such
 	 * as the RealtimeRootScanner. The default implementations of these do
 	 * nothing. 
@@ -144,7 +142,7 @@ protected:
 	 * yield.
 	 * @return true if the GC should yield, false otherwise
 	 */
-	virtual bool shouldYieldFromClassScan(UDATA timeSlackNanoSec = 0);
+	virtual bool shouldYieldFromClassScan(uintptr_t timeSlackNanoSec = 0);
 
 	/**
 	 * Root scanning methods that have been incrementalized are responsible for
@@ -200,7 +198,7 @@ protected:
 		_scanningEntity = scanningEntity;
 		
 		if (_extensions->rootScannerStatsEnabled) {
-			OMRPORT_ACCESS_FROM_OMRVM(_omrVM);
+			OMRPORT_ACCESS_FROM_OMRVM(_javaVM->omrVM);
 			_entityStartScanTime = omrtime_hires_clock();	
 			_entityIncrementStartTime = _entityStartScanTime;
 		}
@@ -233,7 +231,7 @@ protected:
 		Assert_MM_true(_scanningEntity == scannedEntity);
 		
 		if (_extensions->rootScannerStatsEnabled) {
- 			OMRPORT_ACCESS_FROM_OMRVM(_omrVM);
+			OMRPORT_ACCESS_FROM_OMRVM(_javaVM->omrVM);
  			uint64_t entityEndScanTime = omrtime_hires_clock();
 			
 			_env->_rootScannerStats._statsUsed = true;
@@ -261,6 +259,16 @@ protected:
 	void scanModularityObjects(J9ClassLoader * classLoader);
 
 public:
+	/**
+	 * Determine whether running method classes in stack frames should be walked.
+	 * @return boolean determining whether running method classes in stack frames should be walked
+	 */
+	MMINLINE bool isStackFrameClassWalkNeeded() {
+		if (_nurseryReferencesOnly || _nurseryReferencesPossibly) {
+			return false;
+		}
+		return 	_includeStackFrameClassReferences;
+	}
 
 	/** 
 	 * Maintain start/end increment times when scan is suspended. Add the diff (duration) to scan entity time. 
@@ -270,7 +278,7 @@ public:
 	reportScanningSuspended()
 	{
 		if (_extensions->rootScannerStatsEnabled) {
-			OMRPORT_ACCESS_FROM_OMRVM(_omrVM);
+			OMRPORT_ACCESS_FROM_OMRVM(_javaVM->omrVM);
 			_entityIncrementEndTime = omrtime_hires_clock();
 			
 			updateScanStats(_entityIncrementEndTime);
@@ -284,7 +292,7 @@ public:
 	reportScanningResumed()
 	{
 		if (_extensions->rootScannerStatsEnabled) {
-			OMRPORT_ACCESS_FROM_OMRVM(_omrVM);
+			OMRPORT_ACCESS_FROM_OMRVM(_javaVM->omrVM);
 			_entityIncrementStartTime = omrtime_hires_clock();
 			_entityIncrementEndTime = 0;	
 		}
@@ -292,10 +300,11 @@ public:
 
 	MM_RootScanner(MM_EnvironmentBase *env, bool singleThread = false)
 		: MM_BaseVirtual()
+		, _isContinuationListEmpty(false)
 		, _env(env)
 		, _extensions(MM_GCExtensions::getExtensions(env))
 		, _clij((MM_CollectorLanguageInterfaceImpl *)_extensions->collectorLanguageInterface)
-		, _omrVM(env->getOmrVM())
+		, _javaVM((J9JavaVM *)env->getOmrVM()->_language_vm)
 		, _stringTableAsRoot(true)
 		, _jniWeakGlobalReferencesTableAsRoot(false)
 		, _singleThread(singleThread)
@@ -307,9 +316,9 @@ public:
 #endif /* J9VM_GC_MODRON_SCAVENGER */
 		, _classDataAsRoots(true)
 		, _includeJVMTIObjectTagTables(true)
-#if defined(J9VM_GC_ENABLE_DOUBLE_MAP)
-		, _includeDoubleMap(_extensions->indexableObjectModel.isDoubleMappingEnabled())
-#endif /* J9VM_GC_ENABLE_DOUBLE_MAP */
+#if defined(J9VM_GC_SPARSE_HEAP_ALLOCATION)
+		, _includeVirtualLargeObjectHeap(_extensions->indexableObjectModel.isVirtualLargeObjectHeapEnabled())
+#endif /* defined(J9VM_GC_SPARSE_HEAP_ALLOCATION) */
 		, _trackVisibleStackFrameDepth(false)
 		, _entityStartScanTime(0)
 		, _entityIncrementStartTime(0)
@@ -319,7 +328,7 @@ public:
 	{
 		_typeId = __FUNCTION__;
 		
-		OMRPORT_ACCESS_FROM_OMRVM(_omrVM);
+		OMRPORT_ACCESS_FROM_ENVIRONMENT(env);
 		_entityIncrementStartTime = omrtime_hires_clock();
 
 	}
@@ -366,6 +375,9 @@ public:
 	}
 #endif /* J9VM_GC_DYNAMIC_CLASS_UNLOADING */
 
+	bool getClassDataAsRoots() {
+		return _classDataAsRoots;
+	}
 #if defined(J9VM_OPT_JVMTI)
 	/** Set whether the iterator will scan the JVMTIObjectTagTables (if applicable to the scan type) */
 	void setIncludeJVMTIObjectTagTables(bool includeJVMTIObjectTagTables) {
@@ -378,8 +390,12 @@ public:
 		 _trackVisibleStackFrameDepth = trackVisibleStackFrameDepth;
 	}
 
+	bool getTrackVisibleStackFrameDepth() {
+		return _trackVisibleStackFrameDepth;
+	}
+
 	/** General object slot handler to be reimplemented by specializing class. This handler is called for every reference to a J9Object. */
-	virtual void doSlot(J9Object** slotPtr) = 0;
+	virtual void doSlot(J9Object **slotPtr) = 0;
 
 	/** General class slot handler to be reimplemented by specializing class. This handler is called for every reference to a J9Class. */
 	virtual void doClassSlot(J9Class *classPtr);
@@ -391,7 +407,7 @@ public:
 	 * Scan object field
 	 * @param slotObject for field
 	 */
-	virtual void doFieldSlot(GC_SlotObject * slotObject);
+	virtual void doFieldSlot(GC_SlotObject *slotObject);
 	
 	virtual void scanRoots(MM_EnvironmentBase *env);
 	virtual void scanClearable(MM_EnvironmentBase *env);
@@ -409,11 +425,11 @@ public:
 #endif /* J9VM_GC_DYNAMIC_CLASS_UNLOADING */
 	virtual CompletePhaseCode scanClassesComplete(MM_EnvironmentBase *env);
 
- 	virtual bool scanOneThread(MM_EnvironmentBase *env, J9VMThread* walkThread, void* localData);
+	virtual bool scanOneThread(MM_EnvironmentBase *env, J9VMThread *walkThread, void *localData);
 	
 	virtual void scanClassLoaders(MM_EnvironmentBase *env);
 	virtual void scanThreads(MM_EnvironmentBase *env);
- 	virtual void scanSingleThread(MM_EnvironmentBase *env, J9VMThread* walkThread);
+	virtual void scanSingleThread(MM_EnvironmentBase *env, J9VMThread *walkThread);
 #if defined(J9VM_GC_FINALIZATION)
 	virtual void scanFinalizableObjects(MM_EnvironmentBase *env);
 	virtual void scanUnfinalizedObjects(MM_EnvironmentBase *env);
@@ -428,6 +444,17 @@ public:
 	 * which modifies elements within the list.
 	 */
 	virtual void scanOwnableSynchronizerObjects(MM_EnvironmentBase *env);
+	/**
+	 * scanContinuationObjects() is for removing continuation objects, which are dead or last unmounted,
+	 * from the continuation lists within a scope of current GC(for example just for Nursery in Scavenge).
+	 */
+	virtual void scanContinuationObjects(MM_EnvironmentBase *env);
+	/**
+	 * iterateAllContinuationObjects() is for iterating all live continuation objects in the heap and doing any processing
+	 * that other parties may register through a hook [J9HOOK_MM_WALKCONTINUATION].
+	 */
+	virtual void iterateAllContinuationObjects(MM_EnvironmentBase *env) {}
+
 	virtual void scanStringTable(MM_EnvironmentBase *env);
 	void scanJNIGlobalReferences(MM_EnvironmentBase *env);
 	virtual void scanJNIWeakGlobalReferences(MM_EnvironmentBase *env);
@@ -440,18 +467,18 @@ public:
 	void scanJVMTIObjectTagTables(MM_EnvironmentBase *env);
 #endif /* J9VM_OPT_JVMTI */
 
-#if defined(J9VM_GC_ENABLE_DOUBLE_MAP)
+#if defined(J9VM_GC_SPARSE_HEAP_ALLOCATION)
 	/**
-	 * Scans each heap region for arraylet leaves that contains a not NULL
-	 * contiguous address. This address points to a contiguous representation
-	 * of the arraylet associated with this leaf. Only arraylets that has been
-	 * double mapped will contain such contiguous address, otherwise the
-	 * address will be NULL
-	 * 
+	 * Scans each heap region for arraylet leaves that contains a non-NULL
+	 * contiguous address due to off-heap allocation. This address points to the contiguous representation
+	 * of the arraylet associated with this leaf. Only arraylets that have been off-heap
+	 * allocated or double-mapped will contain such a contiguous address, otherwise the
+	 * address will be NULL.
+	 *
 	 * @param env thread GC Environment
 	 */
-	void scanDoubleMappedObjects(MM_EnvironmentBase *env);
-#endif /* J9VM_GC_ENABLE_DOUBLE_MAP */
+	void scanObjectsInVirtualLargeObjectHeap(MM_EnvironmentBase *env);
+#endif /* defined(J9VM_GC_SPARSE_HEAP_ALLOCATION) */
 
 	virtual void doClassLoader(J9ClassLoader *classLoader);
 
@@ -479,14 +506,21 @@ public:
 #endif /* J9VM_GC_FINALIZATION */
 
 	/**
+	 * During clearabble processing, invoke specific processing/checks after last known phase that scans (and copies) objects.
+	 */
+	virtual void completedObjectScanPhasesCheckpoint() {}
+
+	/**
 	 * @todo Provide function documentation
 	 */
 	virtual void doOwnableSynchronizerObject(J9Object *objectPtr, MM_OwnableSynchronizerObjectList *list);
+	virtual void doContinuationObject(J9Object *objectPtr, MM_ContinuationObjectList *list);
 	
 	/**
 	 * @todo Provide function documentation
 	 */	
 	virtual CompletePhaseCode scanOwnableSynchronizerObjectsComplete(MM_EnvironmentBase *env);
+	virtual CompletePhaseCode scanContinuationObjectsComplete(MM_EnvironmentBase *env);
 
 	virtual void doMonitorReference(J9ObjectMonitor *objectMonitor, GC_HashTableIterator *monitorReferenceIterator);
 	virtual void doMonitorLookupCacheSlot(j9objectmonitor_t* slotPtr);
@@ -506,17 +540,16 @@ public:
 	virtual void doStringCacheTableSlot(J9Object **slotPtr);
 	virtual void doVMClassSlot(J9Class *classPtr);
 	virtual void doVMThreadSlot(J9Object **slotPtr, GC_VMThreadIterator *vmThreadIterator);
-#if defined(J9VM_GC_ENABLE_DOUBLE_MAP)
+
+#if defined(J9VM_GC_SPARSE_HEAP_ALLOCATION)
 	/**
-	 * Frees double mapped region associated to objectPtr (arraylet spine) if objectPtr
-	 * is not live
+	 * Frees the region used for off-heap allocation associated to the objectPtr (arraylet spine) if the objectPtr
+	 * is not live.
 	 *
 	 * @param objectPtr[in] indexable object's spine
-	 * @param identifier[in/out] identifier associated with object's spine, which contains
-	 * doble mapped address and size
 	 */
-	virtual void doDoubleMappedObjectSlot(J9Object *objectPtr, struct J9PortVmemIdentifier *identifier);
-#endif /* J9VM_GC_ENABLE_DOUBLE_MAP */
+	virtual void doObjectInVirtualLargeObjectHeap(J9Object *objectPtr, bool *sparseHeapAllocation);
+#endif /* defined(J9VM_GC_SPARSE_HEAP_ALLOCATION) */
 	
 	/**
 	 * Called for each object stack slot. Subclasses may override.

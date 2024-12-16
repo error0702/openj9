@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "AtomicSupport.hpp"
@@ -25,6 +25,8 @@
 #include "control/CompilationRuntime.hpp"
 #include "control/Recompilation.hpp"
 #include "control/RecompilationInfo.hpp"
+#include "control/CompilationController.hpp"
+#include "control/CompilationStrategy.hpp"
 #include "compile/Compilation.hpp"
 #include "control/Options.hpp"
 #include "compile/SymbolReferenceTable.hpp"
@@ -271,7 +273,7 @@ J9::Recompilation::beforeOptimization()
          }
       else
          {
-         if (!debug("disableCatchBlockProfiler"))
+         if (!debug("disableCatchBlockProfiler") && _compilation->getOption(TR_EnableOldEDO))
             {
             _profilers.add(new (_compilation->trHeapMemory()) TR_CatchBlockProfiler(_compilation, self(), true));
             }
@@ -393,10 +395,8 @@ J9::Recompilation::switchToProfiling(uint32_t f, uint32_t c)
       return false;
       }
 
-   if (_compilation->isOptServer() && !TR::Options::getCmdLineOptions()->getOption(TR_AggressiveOpts))
+   if (_compilation->isOptServer() && !_compilation->getOption(TR_AggressiveSwitchingToProfiling))
       {
-      // can afford to switch to profiling under aggressive; needed for BigDecimal opt
-      //
       return false;
       }
 
@@ -499,7 +499,7 @@ J9::Recompilation::getExistingMethodInfo(TR_ResolvedMethod *method)
 /**
  * This method can extract a value profiler from the current list of
  * recompilation profilers.
- * 
+ *
  * \return The first TR_ValueProfiler in the current list of profilers, NULL if there are none.
  */
 TR_ValueProfiler *
@@ -587,6 +587,7 @@ TR_PersistentMethodInfo::TR_PersistentMethodInfo(TR::Compilation *comp) :
    _recentProfileInfo(0),
    _bestProfileInfo(0),
    _optimizationPlan(0),
+   _catchBlockCounter(0),
    _numberOfInvalidations(0),
    _numberOfInlinedMethodRedefinition(0),
    _numPrexAssumptions(0)
@@ -603,14 +604,6 @@ TR_PersistentMethodInfo::TR_PersistentMethodInfo(TR::Compilation *comp) :
       setDisableProfiling();
       }
 
-   // Start cpoSampleCounter at 1.  Because the method sample count
-   // is stored in the compiled method info, we can't start counting
-   // until already compiled once, thus we missed the first sample.
-   // (not particularly clean solution.  Should really attach the
-   // counter to the method, not the compiled-method)
-   //
-   _cpoSampleCounter = 1;
-
    uint64_t tempTimeStamp = comp->getPersistentInfo()->getElapsedTime();
    if (tempTimeStamp < (uint64_t)0x0FFFF)
       _timeStamp = (uint16_t)tempTimeStamp;
@@ -625,6 +618,7 @@ TR_PersistentMethodInfo::TR_PersistentMethodInfo(TR_OpaqueMethodBlock *methodInf
    _recentProfileInfo(0),
    _bestProfileInfo(0),
    _optimizationPlan(0),
+   _catchBlockCounter(0),
    _numberOfInvalidations(0),
    _numberOfInlinedMethodRedefinition(0),
    _numPrexAssumptions(0)
@@ -741,7 +735,7 @@ TR_PersistentMethodInfo::setForSharedInfo(TR_PersistentProfileInfo** ptr, TR_Per
    // Before it can be accessed, inc ref count on new info
    if (newInfo)
       TR_PersistentProfileInfo::incRefCount(newInfo);
-   
+
    // Update ptr as if it was unlocked
    // Doesn't matter what the old info was, as long as it was unlocked
    do {

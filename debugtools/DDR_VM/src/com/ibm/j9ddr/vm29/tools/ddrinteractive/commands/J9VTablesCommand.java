@@ -1,5 +1,5 @@
-/*******************************************************************************
- * Copyright (c) 2001, 2021 IBM Corp. and others
+/*
+ * Copyright IBM Corp. and others 2001
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,10 +15,10 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
 package com.ibm.j9ddr.vm29.tools.ddrinteractive.commands;
 
 import java.io.PrintStream;
@@ -43,7 +43,7 @@ import com.ibm.j9ddr.vm29.pointer.helper.J9RASHelper;
 import com.ibm.j9ddr.vm29.structure.J9VTableHeader;
 import com.ibm.j9ddr.vm29.types.UDATA;
 
-public class J9VTablesCommand extends Command 
+public class J9VTablesCommand extends Command
 {
 	public J9VTablesCommand()
 	{
@@ -62,7 +62,7 @@ public class J9VTablesCommand extends Command
 			long jitVTableOffset;
 			long startIndex;
 
-			long address = CommandUtils.parsePointer(args[0], J9BuildFlags.env_data64);
+			long address = CommandUtils.parsePointer(args[0], J9BuildFlags.J9VM_ENV_DATA64);
 
 			ramClass = J9ClassPointer.cast(address);
 
@@ -84,7 +84,7 @@ public class J9VTablesCommand extends Command
 				startIndex = 2;
 			}
 
-			if (J9BuildFlags.interp_nativeSupport) {
+			if (J9BuildFlags.J9VM_INTERP_NATIVE_SUPPORT) {
 				if (!vm.jitConfig().isNull()) {
 					jitVTable = UDATAPointer.cast(U8Pointer.cast(ramClass).sub(jitVTableOffset));
 				}

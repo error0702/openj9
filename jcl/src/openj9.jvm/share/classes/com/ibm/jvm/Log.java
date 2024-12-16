@@ -1,6 +1,6 @@
 /*[INCLUDE-IF JAVA_SPEC_VERSION >= 8]*/
-/*******************************************************************************
- * Copyright (c) 2006, 2021 IBM Corp. and others
+/*
+ * Copyright IBM Corp. and others 2006
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,25 +16,25 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
 package com.ibm.jvm;
 
 import java.util.Objects;
 
 /**
- * 
+ *
  * The <code>Log</code> class contains methods for controlling system log options
  * This class cannot be instantiated.
  */
 public class Log {
 
 	private static final String LEGACY_LOG_PERMISSION_PROPERTY = "com.ibm.jvm.enableLegacyLogSecurity"; //$NON-NLS-1$
-		
+
 	private static final LogPermission LOG_PERMISSION = new LogPermission();
-	
+
 	/**
 	 * Query the log options. Returns a String representation of the log options.
 	 * @return The current log options
@@ -48,10 +48,10 @@ public class Log {
 	/**
 	 * Set the log options.
 	 * Use the same syntax as the -Xsyslog command-line option, with the initial -Xsyslog: omitted.
-	 * 
+	 *
 	 * @param options The command line log flags.
 	 * @return status 0 on success otherwise a RuntimeException is thrown
-	 * 
+	 *
 	 * @throws RuntimeException if there is a problem setting the log options
 	 * @throws SecurityException if there is a security manager and it doesn't allow the checks required to change the log settings
 	 */
@@ -67,26 +67,27 @@ public class Log {
 	 * directly.
 	 * @throws SecurityException
 	 */
-    private static void checkLegacySecurityPermssion() throws SecurityException {
-    	if (!("false".equalsIgnoreCase(com.ibm.oti.vm.VM.getVMLangAccess()	//$NON-NLS-1$
-    		.internalGetProperties().getProperty(LEGACY_LOG_PERMISSION_PROPERTY)))) {
-    		checkLogSecurityPermssion();
-    	}
-    }
-	
-    private static void checkLogSecurityPermssion() throws SecurityException {
+	private static void checkLegacySecurityPermssion() throws SecurityException {
+		if (!("false".equalsIgnoreCase(com.ibm.oti.vm.VM //$NON-NLS-1$
+				.internalGetProperties().getProperty(LEGACY_LOG_PERMISSION_PROPERTY)))
+		) {
+			checkLogSecurityPermssion();
+		}
+	}
+
+	private static void checkLogSecurityPermssion() throws SecurityException {
 		/* Check the caller has LogPermission. */
 		@SuppressWarnings("removal")
 		SecurityManager manager = System.getSecurityManager();
-		if( manager != null ) {
+		if (manager != null) {
 			manager.checkPermission(LOG_PERMISSION);
 		}
-    }
-    
+	}
+
 	/*
 	 * Log should not be instantiated.
 	 */
-	private Log() {	
+	private Log() {
 	}
 
 	private static native String QueryOptionsImpl();

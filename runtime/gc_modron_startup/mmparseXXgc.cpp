@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
  
 /**
@@ -641,6 +641,7 @@ gcParseXXgcArguments(J9JavaVM *vm, char *optArg)
 				returnValue = JNI_EINVAL;
 				break;
 			}
+			extensions->packetListSplitForced = true;
 			continue;
 		}
 		
@@ -655,6 +656,7 @@ gcParseXXgcArguments(J9JavaVM *vm, char *optArg)
 				returnValue = JNI_EINVAL;
 				break;
 			}
+			extensions->cacheListSplitForced = true;
 			continue;
 		}
 #endif /* J9VM_GC_MODRON_SCAVENGER */
@@ -698,6 +700,7 @@ gcParseXXgcArguments(J9JavaVM *vm, char *optArg)
 				break;
 			}
 			extensions->enableHybridMemoryPool = true;
+			extensions->splitFreeListAmountForced = true;
 			continue;
 		}
 
@@ -712,6 +715,7 @@ gcParseXXgcArguments(J9JavaVM *vm, char *optArg)
 				returnValue = JNI_EINVAL;
 				break;
 			}
+			extensions->splitFreeListAmountForced = true;
 			continue;
 		}
 
@@ -854,6 +858,18 @@ gcParseXXgcArguments(J9JavaVM *vm, char *optArg)
 #endif /* defined(J9VM_GC_MODRON_SCAVENGER) || defined (J9VM_GC_VLHGC) */
 /* End of options relating to dynamicBreadthFirstScanOrdering */
 
+#if defined(J9VM_ENV_DATA64)
+		if (try_scan(&scan_start, "enableIndexableDualHeaderShape")) {
+			vm->isIndexableDualHeaderShapeEnabled = TRUE;
+			continue;
+		}
+
+		if (try_scan(&scan_start, "disableIndexableDualHeaderShape")) {
+			vm->isIndexableDualHeaderShapeEnabled = FALSE;
+			continue;
+		}
+#endif /* defined(J9VM_ENV_DATA64) */
+
 #if defined(J9VM_GC_MODRON_SCAVENGER)	
 		if (try_scan(&scan_start, "scanCacheMinimumSize=")) {
 			/* Read in restricted scan cache size */
@@ -973,7 +989,7 @@ gcParseXXgcArguments(J9JavaVM *vm, char *optArg)
 			continue;
 		}
 		if(try_scan(&scan_start, "softwareRangeCheckReadBarrier")) {
-			extensions->softwareRangeCheckReadBarrier = true;
+			extensions->softwareRangeCheckReadBarrierForced = true;
 			continue;
 		}
 
@@ -1030,6 +1046,18 @@ gcParseXXgcArguments(J9JavaVM *vm, char *optArg)
 			extensions->doFrequentObjectAllocationSampling = true;
 			continue;
 		}
+
+#if defined(J9VM_GC_SPARSE_HEAP_ALLOCATION)
+		if (try_scan(&scan_start, "enableVirtualLargeObjectHeap")) {
+			extensions->isVirtualLargeObjectHeapRequested = true;
+			continue;
+		}
+
+		if (try_scan(&scan_start, "disableVirtualLargeObjectHeap")) {
+			extensions->isVirtualLargeObjectHeapRequested = false;
+			continue;
+		}
+#endif /* defined(J9VM_GC_SPARSE_HEAP_ALLOCATION) */
 
 		if (try_scan(&scan_start, "largeObjectAllocationProfilingThreshold=")) {
 			if (!scan_udata_helper(vm, &scan_start, &extensions->largeObjectAllocationProfilingThreshold, "largeObjectAllocationProfilingThreshold=")) {
@@ -1167,7 +1195,7 @@ gcParseXXgcArguments(J9JavaVM *vm, char *optArg)
 				returnValue = JNI_EINVAL;
 				break;
 			}
-			extensions->gcOnIdleCompactThreshold = ((float)percentage) / 100.0f;
+			extensions->pageFragmentationCompactThreshold = ((float)percentage) / 100.0f;
 			continue;
 		}
 #endif /* defined(OMR_GC_IDLE_HEAP_MANAGER) */
@@ -1484,6 +1512,16 @@ gcParseXXgcArguments(J9JavaVM *vm, char *optArg)
 			continue;
 		}
 
+		if (try_scan(&scan_start, "noRecycleRemainders")) {
+			extensions->recycleRemainders = false;
+			continue;
+		}
+
+		if (try_scan(&scan_start, "recycleRemainders")) {
+			extensions->recycleRemainders = true;
+			continue;
+		}
+
 		if (try_scan(&scan_start, "stringDedupPolicy=")) {
 			if (try_scan(&scan_start, "disabled")) {
 				extensions->stringDedupPolicy = MM_GCExtensions::J9_JIT_STRING_DEDUP_POLICY_DISABLED;
@@ -1502,6 +1540,45 @@ gcParseXXgcArguments(J9JavaVM *vm, char *optArg)
 				returnValue = JNI_EINVAL;
 				break;
 			}
+			continue;
+		}
+
+		if (try_scan(&scan_start, "disableContinuationList")) {
+			extensions->continuationListOption = MM_GCExtensions::disable_continuation_list;
+			continue;
+		}
+
+		if (try_scan(&scan_start, "enableContinuationList")) {
+			extensions->continuationListOption = MM_GCExtensions::enable_continuation_list;
+			continue;
+		}
+
+		if (try_scan(&scan_start, "verifyContinuationList")) {
+			extensions->continuationListOption = MM_GCExtensions::verify_continuation_list;
+			continue;
+		}
+
+		if (try_scan(&scan_start, "AddContinuationInListOnStarted")) {
+			extensions->timingAddContinuationInList = MM_GCExtensions::onStarted;
+			continue;
+		}
+
+		if (try_scan(&scan_start, "AddContinuationInListOnCreated")) {
+			extensions->timingAddContinuationInList = MM_GCExtensions::onCreated;
+			continue;
+		}
+
+		if (try_scan(&scan_start, "forceGPFOnHeapInitializationError")) {
+			extensions->forceGPFOnHeapInitializationError = true;
+			continue;
+		}
+
+		if (try_scan(&scan_start, "regionSizeWithOverride=")) {
+			if(!scan_udata_memory_size_helper(vm, &scan_start, &extensions->regionSize, "regionSizeWithOverride=")) {
+				returnValue = JNI_EINVAL;
+				break;
+			}
+			extensions->isRegionSizeWithOverrideSpecified = true;
 			continue;
 		}
 

@@ -1,6 +1,6 @@
-/*[INCLUDE-IF Sidecar18-SE]*/
-/*******************************************************************************
- * Copyright (c) 2011, 2020 IBM Corp. and others
+/*[INCLUDE-IF JAVA_SPEC_VERSION >= 8]*/
+/*
+ * Copyright IBM Corp. and others 2011
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,10 +16,10 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
 package com.ibm.jvm.dtfjview.commands;
 
 import static com.ibm.jvm.dtfjview.ExitCodes.JDMPVIEW_SYNTAX_ERROR;
@@ -106,7 +106,7 @@ public class OpenCommand extends BaseJdmpviewCommand {
 				Logger.getLogger("j9ddr.view.dtfj").setLevel(Level.WARNING);
 			}
 			// at this point the existence of either -core or -zip has been checked
-			long current = System.currentTimeMillis();
+			final long current = System.nanoTime();
 			File file1 = new File(args[0]);
 			Image[] images = new Image[1]; // default to a single image
 			if (args.length == 1) {
@@ -119,7 +119,8 @@ public class OpenCommand extends BaseJdmpviewCommand {
 				File file2 = new File(args[1]);
 				images[0] = factory.getImage(file1, file2);
 			}
-			logger.fine(String.format("Time taken to load image %d ms", System.currentTimeMillis() - current));
+			final long duration = System.nanoTime() - current;
+			logger.fine(String.format("Time taken to load image %d ns", duration));
 			for (Image image : images) {
 				createContexts(image, args[0]);
 			}

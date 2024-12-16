@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #pragma csect(CODE,"J9ZJ9CPU#C")
@@ -52,9 +52,16 @@ J9::Z::CPU::detectRelocatable(OMRPortLibrary * const omrPortLib)
    omrsysinfo_get_processor_description(&processorDescription);
 
    if (processorDescription.processor > OMR_PROCESSOR_S390_Z10)
-      { 
+      {
       processorDescription.processor = OMR_PROCESSOR_S390_Z10;
       processorDescription.physicalProcessor = OMR_PROCESSOR_S390_Z10;
+      }
+
+   const uint32_t disabledFeatures [] = {OMR_FEATURE_S390_TRANSACTIONAL_EXECUTION_FACILITY,
+                                         OMR_FEATURE_S390_CONSTRAINED_TRANSACTIONAL_EXECUTION_FACILITY};
+   for (size_t i = 0; i < sizeof(disabledFeatures)/sizeof(uint32_t); i++)
+      {
+      omrsysinfo_processor_set_feature(&processorDescription, disabledFeatures[i], FALSE);
       }
 
    return TR::CPU::customize(processorDescription);
@@ -76,7 +83,8 @@ J9::Z::CPU::customize(OMRProcessorDesc processorDescription)
 
    if (processorDescription.processor < OMR_PROCESSOR_S390_ZEC12)
       {
-      omrsysinfo_processor_set_feature(&processorDescription, OMR_FEATURE_S390_TE, FALSE);
+      omrsysinfo_processor_set_feature(&processorDescription, OMR_FEATURE_S390_CONSTRAINED_TRANSACTIONAL_EXECUTION_FACILITY, FALSE);
+      omrsysinfo_processor_set_feature(&processorDescription, OMR_FEATURE_S390_TRANSACTIONAL_EXECUTION_FACILITY, FALSE);
       omrsysinfo_processor_set_feature(&processorDescription, OMR_FEATURE_S390_RI, FALSE);
       }
 
@@ -98,6 +106,11 @@ J9::Z::CPU::customize(OMRProcessorDesc processorDescription)
       omrsysinfo_processor_set_feature(&processorDescription, OMR_FEATURE_S390_MISCELLANEOUS_INSTRUCTION_EXTENSION_3, FALSE);
       omrsysinfo_processor_set_feature(&processorDescription, OMR_FEATURE_S390_VECTOR_FACILITY_ENHANCEMENT_2, FALSE);
       omrsysinfo_processor_set_feature(&processorDescription, OMR_FEATURE_S390_VECTOR_PACKED_DECIMAL_ENHANCEMENT_FACILITY, FALSE);
+      }
+
+   if (processorDescription.processor < OMR_PROCESSOR_S390_Z16)
+      {
+      omrsysinfo_processor_set_feature(&processorDescription, OMR_FEATURE_S390_VECTOR_PACKED_DECIMAL_ENHANCEMENT_FACILITY_2, FALSE);
       }
 
    // This variable is used internally by the j9sysinfo macros below and cannot be folded away
@@ -138,14 +151,16 @@ void
 J9::Z::CPU::enableFeatureMasks()
    {
    // Only enable the features that compiler currently uses
-   const uint32_t utilizedFeatures [] = {OMR_FEATURE_S390_DFP, OMR_FEATURE_S390_TE, OMR_FEATURE_S390_FPE,
+   const uint32_t utilizedFeatures [] = {OMR_FEATURE_S390_DFP, OMR_FEATURE_S390_TRANSACTIONAL_EXECUTION_FACILITY,
+                                         OMR_FEATURE_S390_CONSTRAINED_TRANSACTIONAL_EXECUTION_FACILITY, OMR_FEATURE_S390_FPE,
                                          OMR_FEATURE_S390_RI, OMR_FEATURE_S390_VECTOR_FACILITY, OMR_FEATURE_S390_HIGH_WORD,
                                          OMR_FEATURE_S390_MISCELLANEOUS_INSTRUCTION_EXTENSION_2,
                                          OMR_FEATURE_S390_GUARDED_STORAGE, OMR_FEATURE_S390_VECTOR_PACKED_DECIMAL,
                                          OMR_FEATURE_S390_VECTOR_FACILITY_ENHANCEMENT_1,
                                          OMR_FEATURE_S390_VECTOR_FACILITY_ENHANCEMENT_2,
                                          OMR_FEATURE_S390_MISCELLANEOUS_INSTRUCTION_EXTENSION_3,
-                                         OMR_FEATURE_S390_VECTOR_PACKED_DECIMAL_ENHANCEMENT_FACILITY};
+                                         OMR_FEATURE_S390_VECTOR_PACKED_DECIMAL_ENHANCEMENT_FACILITY,
+                                         OMR_FEATURE_S390_VECTOR_PACKED_DECIMAL_ENHANCEMENT_FACILITY_2};
 
    memset(_supportedFeatureMasks.features, 0, OMRPORT_SYSINFO_FEATURES_SIZE*sizeof(uint32_t));
    OMRPORT_ACCESS_FROM_OMRPORT(TR::Compiler->omrPortLib);

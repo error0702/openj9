@@ -1,6 +1,6 @@
 /*[INCLUDE-IF Sidecar17]*/
-/*******************************************************************************
- * Copyright (c) 2016, 2019 IBM Corp. and others
+/*
+ * Copyright IBM Corp. and others 2016
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,15 +16,14 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
 package com.sun.management.internal;
 
 import java.lang.management.MemoryUsage;
 import java.lang.reflect.Constructor;
-import java.security.AccessController;
 import java.security.PrivilegedAction;
 import java.util.Map;
 
@@ -40,16 +39,20 @@ import com.ibm.java.lang.management.internal.MemoryUsageUtil;
 import com.sun.management.GcInfo;
 
 /**
- * Support for the {@link GcInfo} class. 
+ * Support for the {@link GcInfo} class.
  */
 public final class GcInfoUtil {
 
 	private static CompositeType compositeType;
 
 	private static Constructor<GcInfo> gcInfoPrivateConstructor = null;
+
+	/*[IF JAVA_SPEC_VERSION >= 17]*/
+	@SuppressWarnings("removal")
+	/*[ENDIF] JAVA_SPEC_VERSION >= 17 */
 	private static Constructor<GcInfo> getGcInfoPrivateConstructor() {
 		if (null == gcInfoPrivateConstructor) {
-			gcInfoPrivateConstructor = AccessController.doPrivileged(new PrivilegedAction<Constructor<GcInfo>>() {
+			gcInfoPrivateConstructor = java.security.AccessController.doPrivileged(new PrivilegedAction<Constructor<GcInfo>>() {
 				@Override
 				public Constructor<GcInfo> run() {
 					try {
@@ -124,16 +127,16 @@ public final class GcInfoUtil {
 	}
 
 	/**
-     * @param index
-     * 			  the identifier of this garbage collection which is the number of collections that this collector has done
-     * @param startTime
-     * 			  the start time of the collection in milliseconds since the Java virtual machine was started.
-     * @param endTime
-     * 			  the end time of the collection in milliseconds since the Java virtual machine was started.
-     * @param usageBeforeGc
-     * 			  the memory usage of all memory pools at the beginning of this GC.
-     * @param usageAfterGc
-     * 			  the memory usage of all memory pools at the end of this GC.
+	 * @param index
+	 * 			  the identifier of this garbage collection which is the number of collections that this collector has done
+	 * @param startTime
+	 * 			  the start time of the collection in milliseconds since the Java virtual machine was started.
+	 * @param endTime
+	 * 			  the end time of the collection in milliseconds since the Java virtual machine was started.
+	 * @param usageBeforeGc
+	 * 			  the memory usage of all memory pools at the beginning of this GC.
+	 * @param usageAfterGc
+	 * 			  the memory usage of all memory pools at the end of this GC.
 	 * @return a <code>GcInfo</code> object
 	 */
 	public static GcInfo newGcInfoInstance(long index, long startTime, long endTime, Map<String,MemoryUsage> usageBeforeGc, Map<String,MemoryUsage> usageAfterGc) {

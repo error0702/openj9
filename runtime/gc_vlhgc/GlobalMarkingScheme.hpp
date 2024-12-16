@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 /**
@@ -78,7 +78,7 @@ private:
 	MM_GlobalMarkingScheme *_markingScheme;
 	const MarkAction _action; /**< specify which action Mark Setup to do*/
 	bool _timeLimitWasHit;	/**< true if any requests to check the time came in after we had hit our time threshold */
-	const I_64 _timeThreshold;	/**< The millisecond which represents the end of this increment */
+	const U_64 _timeThreshold;	/**< The ticks which represents the end of this increment */
 	MM_CycleState *_cycleState; /**< Current cycle state information */
 	
 public:
@@ -111,7 +111,7 @@ public:
 			MM_ParallelDispatcher *dispatcher, 
 			MM_GlobalMarkingScheme *markingScheme, 
 			MarkAction action,
-			I_64 timeThreshold,
+			U_64 timeThreshold,
 			MM_CycleState *cycleState) :
 		MM_ParallelTask(env, dispatcher)
 		,_markingScheme(markingScheme)
@@ -167,7 +167,7 @@ public:
 			UDATA bytesToScan,
 			volatile bool *forceExit,
 			MM_CycleState *cycleState) :
-		MM_ParallelGlobalMarkTask(env, dispatcher, markingScheme, action, I_64_MAX, cycleState)
+		MM_ParallelGlobalMarkTask(env, dispatcher, markingScheme, action, U_64_MAX, cycleState)
 		, _bytesToScan(bytesToScan)
 		, _bytesScanned(0)
 		, _didReturnEarly(false)
@@ -273,6 +273,12 @@ private:
 	 */
 	void scanOwnableSynchronizerObjects(MM_EnvironmentVLHGC *env);
 
+	/**
+	 * Scan all continuation objects in the collection set.
+	 * @param env[in] the current thread
+	 */
+	void scanContinuationObjects(MM_EnvironmentVLHGC *env);
+
 	bool isMarked(J9Object *objectPtr);
 
 	/**
@@ -313,6 +319,9 @@ private:
 	 */
 	void scanMixedObject(MM_EnvironmentVLHGC *env, J9Object *objectPtr, ScanReason reason);
 	
+	void scanContinuationNativeSlots(MM_EnvironmentVLHGC *env, J9Object *objectPtr, ScanReason reason);
+	void scanContinuationObject(MM_EnvironmentVLHGC *env, J9Object *objectPtr, ScanReason reason);
+
 	/**
 	 * Scan the specified instance of java.lang.Class.
 	 * 1. Scan the object itself, as in scanMixedObject()
@@ -504,6 +513,7 @@ public:
 	 */
 	void flushBuffers(MM_EnvironmentVLHGC *env);
 	
+	void doStackSlot(MM_EnvironmentVLHGC *env, J9Object *fromObject, J9Object** slotPtr, J9StackWalkState *walkState, const void *stackLocation);
 	/**
 	 * Create a GlobalMarkingScheme object.
 	 */
@@ -530,5 +540,11 @@ public:
 	friend class MM_GlobalMarkingSchemeRootMarker;
 	friend class MM_GlobalMarkingSchemeRootClearer;
 };
+
+typedef struct StackIteratorData4GlobalMarkingScheme {
+	MM_GlobalMarkingScheme *globalMarkingScheme;
+	MM_EnvironmentVLHGC *env;
+	J9Object *fromObject;
+} StackIteratorData4GlobalMarkingScheme;
 
 #endif /* GLOBALMARKINGSCHEME_HPP_ */

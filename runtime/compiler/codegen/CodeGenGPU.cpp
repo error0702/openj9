@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 /**
@@ -46,7 +46,7 @@
 
 static const char* getOpCodeName(TR::ILOpCodes opcode) {
 
-   TR_ASSERT(opcode < TR::NumIlOps, "Wrong opcode");
+   TR_ASSERT(opcode < TR::NumAllIlOps, "Wrong opcode");
 
    switch(opcode)
       {
@@ -490,16 +490,17 @@ static const char* getOpCodeName(TR::ILOpCodes opcode) {
 }
 
 
-char *nvvmTypeNames[TR::NumTypes] =
+const char *nvvmTypeNames[TR::NumOMRTypes] =
    {
-   "void",    // "TR::NoType"
-   "i8",      // "TR::Int8"
-   "i16",     // "TR::Int16"
-   "i32",     // "TR::Int32"
-   "i64",     // "TR::Int64"
-   "float",   // "TR::Float"
-   "double",  // "TR::Double"
-   "i8*"      // "TR::Address"
+   "void",    // TR::NoType
+   "i8",      // TR::Int8
+   "i16",     // TR::Int16
+   "i32",     // TR::Int32
+   "i64",     // TR::Int64
+   "float",   // TR::Float
+   "double",  // TR::Double
+   "i8*",     // TR::Address
+   "aggr"     // TR::Aggregate: not used
    };
 
 static const char* getTypeName(TR::DataType type) {
@@ -514,16 +515,17 @@ static const char* getTypeName(TR::DataType type) {
        }
 }
 
-char *nvvmVarTypeNames[TR::NumTypes] =
+const char *nvvmVarTypeNames[TR::NumOMRTypes] =
    {
-   "void",    // "TR::NoType"
-   "i8",      // "TR::Int8"
-   "i16",     // "TR::Int16"
-   "i32",     // "TR::Int32"
-   "i64",     // "TR::Int64"
-   "f32",     // "TR::Float"
-   "f64",     // "TR::Double"
-   "p64"      // "TR::Address"
+   "void",    // TR::NoType
+   "i8",      // TR::Int8
+   "i16",     // TR::Int16
+   "i32",     // TR::Int32
+   "i64",     // TR::Int64
+   "f32",     // TR::Float
+   "f64",     // TR::Double
+   "p64",     // TR::Address
+   "paggr"    // TR::Aggregate: not used
    };
 
 static const char* getVarTypeName(TR::DataType type) {
@@ -570,7 +572,7 @@ class NVVMIRBuffer
       buffer = (char*)m->allocateHeapMemory(size);
       s = buffer;
       }
-   void print(char *format, ...)
+   void print(const char *format, ...)
       {
       va_list args;
       va_start (args, format);
@@ -669,7 +671,7 @@ static void getNodeName(TR::Node* node, char * s, TR::Compilation *comp)
       }
    }
 
-char* getNVVMMathFunctionName(TR::Node *node)
+const char* getNVVMMathFunctionName(TR::Node *node)
    {
    switch (((TR::MethodSymbol*)node->getSymbolReference()->getSymbol())->getRecognizedMethod())
       {
@@ -1119,7 +1121,7 @@ bool isThisPointer(TR::SymbolReference * symRef)
           ((TR::ParameterSymbol *)symRef->getSymbol())->getSlot() == 0;
    }
 
-char * getTypeNameFromSignature(char* sig, int32_t sigLength)
+const char *getTypeNameFromSignature(char* sig, int32_t sigLength)
    {
    TR_ASSERT(sigLength == 2 && sig[0] == '[', "only handling static shared arrays");
    switch (sig[1])

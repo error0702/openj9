@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #if !defined(OBJECTHASH_HPP_)
@@ -203,14 +203,89 @@ public:
 		return inlineConvertValueToHash(vm, (UDATA)objectPointer);
 	}
 
-
 	/**
-	 * Fetch objectPointer's hashcode
+	 * Fetch objectPointer's hashcode when objectPointer is a contiguous object.
 	 *
 	 * @pre objectPointer must be a valid object reference
 	 *
 	 * @param vm			a java VM
-	 * @param objectPointer 	a valid object reference.
+	 * @param objectPointer 	a valid object reference
+	 * @param objectClass 	class of objectPointer
+	 * @param offset 	objectPointer size offset
+	 */
+	static VMINLINE I_32
+	inlineIndexableContiguousObjectHashCode(J9JavaVM *vm, j9object_t objectPointer, J9Class *objectClass, UDATA offset)
+	{
+		J9ROMArrayClass *romClass = (J9ROMArrayClass *)objectClass->romClass;
+		offset = ROUND_UP_TO_POWEROF2((offset << (romClass->arrayShape & 0x0000FFFF)) + vm->contiguousIndexableHeaderSize, sizeof(I_32));
+		return *(I_32 *)((UDATA)objectPointer + offset);
+	}
+
+	/**
+	 * Fetch the objectPointer's hashcode when compressed references are enabled.
+	 *
+	 * @pre objectPointer must be a valid object reference
+	 *
+	 * @param vm			a java VM
+	 * @param objectPointer 	a valid object reference
+	 * @param objectClass 	class of objectPointer
+	 */
+	static VMINLINE I_32
+	inlineIndexableObjectHashCodeCompressed(J9JavaVM *vm, j9object_t objectPointer, J9Class *objectClass)
+	{
+		I_32 hashValue = 0;
+		UDATA offset = ((J9IndexableObjectContiguousCompressed *)objectPointer)->size;
+		if (0 != offset) {
+			hashValue = inlineIndexableContiguousObjectHashCode(vm, objectPointer, objectClass, offset);
+		} else {
+			if (0 == ((J9IndexableObjectDiscontiguousCompressed *)objectPointer)->size) {
+				/* Zero-sized array */
+				hashValue = *(I_32 *)((UDATA)objectPointer + vm->discontiguousIndexableHeaderSize);
+			} else {
+				/* Discontiguous array */
+				hashValue = vm->memoryManagerFunctions->j9gc_objaccess_getObjectHashCode(vm, objectPointer);
+			}
+		}
+
+		return hashValue;
+	}
+
+	/**
+	 * Fetch the objectPointer's hashcode when compressed references are disabled.
+	 *
+	 * @pre objectPointer must be a valid object reference
+	 *
+	 * @param vm			a java VM
+	 * @param objectPointer 	a valid object reference
+	 * @param objectClass 	class of objectPointer
+	 */
+	static VMINLINE I_32
+	inlineIndexableObjectHashCodeFull(J9JavaVM *vm, j9object_t objectPointer, J9Class *objectClass)
+	{
+		I_32 hashValue = 0;
+		UDATA offset = ((J9IndexableObjectContiguousFull *)objectPointer)->size;
+		if (0 != offset) {
+			hashValue = inlineIndexableContiguousObjectHashCode(vm, objectPointer, objectClass, offset);
+		} else {
+			if (0 == ((J9IndexableObjectDiscontiguousFull *)objectPointer)->size) {
+				/* Zero-sized array */
+				hashValue = *(I_32 *)((UDATA)objectPointer + vm->discontiguousIndexableHeaderSize);
+			} else {
+				/* Discontiguous array */
+				hashValue = vm->memoryManagerFunctions->j9gc_objaccess_getObjectHashCode(vm, objectPointer);
+			}
+		}
+
+		return hashValue;
+	}
+
+	/**
+	 * Fetch the objectPointer's hashcode.
+	 *
+	 * @pre objectPointer must be a valid object reference
+	 *
+	 * @param vm			a java VM
+	 * @param objectPointer 	a valid object reference
 	 */
 	static VMINLINE I_32
 	inlineObjectHashCode(J9JavaVM *vm, j9object_t objectPointer)
@@ -226,40 +301,12 @@ public:
 			if (J9_ARE_ANY_BITS_SET(flags, OBJECT_HEADER_HAS_BEEN_MOVED_IN_CLASS)) {
 				if (J9CLASS_IS_ARRAY(objectClass)) {
 					if (J9JAVAVM_COMPRESS_OBJECT_REFERENCES(vm)) {
-						UDATA offset = ((J9IndexableObjectContiguousCompressed*)objectPointer)->size;
-						if (0 != offset) {
-							/* Contiguous array */
-							J9ROMArrayClass *romClass = (J9ROMArrayClass*)objectClass->romClass;
-							offset = ROUND_UP_TO_POWEROF2((offset << (romClass->arrayShape & 0x0000FFFF)) + sizeof(J9IndexableObjectContiguousCompressed), sizeof(I_32));
-							hashValue = *(I_32*)((UDATA)objectPointer + offset);
-						} else {
-							if (0 == ((J9IndexableObjectDiscontiguousCompressed*)objectPointer)->size) {
-								/* Zero-sized array */
-								hashValue = *(I_32*)((J9IndexableObjectDiscontiguousCompressed*)objectPointer + 1);
-							} else {
-								/* Discontiguous array */
-								hashValue = vm->memoryManagerFunctions->j9gc_objaccess_getObjectHashCode(vm, objectPointer);
-							}
-						}
+						hashValue = inlineIndexableObjectHashCodeCompressed(vm, objectPointer, objectClass);
 					} else {
-						UDATA offset = ((J9IndexableObjectContiguousFull*)objectPointer)->size;
-						if (0 != offset) {
-							/* Contiguous array */
-							J9ROMArrayClass *romClass = (J9ROMArrayClass*)objectClass->romClass;
-							offset = ROUND_UP_TO_POWEROF2((offset << (romClass->arrayShape & 0x0000FFFF)) + sizeof(J9IndexableObjectContiguousFull), sizeof(I_32));
-							hashValue = *(I_32*)((UDATA)objectPointer + offset);
-						} else {
-							if (0 == ((J9IndexableObjectDiscontiguousFull*)objectPointer)->size) {
-								/* Zero-sized array */
-								hashValue = *(I_32*)((J9IndexableObjectDiscontiguousFull*)objectPointer + 1);
-							} else {
-								/* Discontiguous array */
-								hashValue = vm->memoryManagerFunctions->j9gc_objaccess_getObjectHashCode(vm, objectPointer);
-							}
-						}
+						hashValue = inlineIndexableObjectHashCodeFull(vm, objectPointer, objectClass);
 					}
 				} else {
-					hashValue = *(I_32*)((UDATA)objectPointer + objectClass->backfillOffset);
+					hashValue = *(I_32 *)((UDATA)objectPointer + objectClass->backfillOffset);
 				}
 
 			} else {

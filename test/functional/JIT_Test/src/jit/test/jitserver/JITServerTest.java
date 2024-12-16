@@ -1,5 +1,5 @@
-/*******************************************************************************
- * Copyright (c) 2020, 2021 IBM Corp. and others
+/*
+ * Copyright IBM Corp. and others 2020
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,10 +15,10 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
 package jit.test.jitserver;
 
 import java.util.Arrays;
@@ -26,9 +26,15 @@ import java.util.Random;
 import java.util.concurrent.TimeUnit;
 import java.util.Scanner;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileReader;
+import java.io.FilenameFilter;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.io.FileNotFoundException;
+import java.net.Socket;
 
 import org.testng.AssertJUnit;
 import org.testng.SkipException;
@@ -44,6 +50,7 @@ public class JITServerTest {
 	private static final int SERVER_START_WAIT_TIME_MS = 5 * 1000;
 	private static final int CLIENT_TEST_TIME_MS = 45 * 1000;
 	private static final int SUCCESS_RETURN_VALUE = 0;
+	private static final int DESTROY_SCC_WAIT_TIME_MS = 1500;
 
 	private final ProcessBuilder clientBuilder;
 	private final ProcessBuilder serverBuilder;
@@ -51,12 +58,20 @@ public class JITServerTest {
 
 	private static final String SERVER_PORT_ENV_VAR_NAME = "JITServerTest_SERVER_PORT";
 	private static final String JITSERVER_PORT_OPTION_FORMAT_STRING = "-XX:JITServerPort=%d";
+	private final String aotCacheOption = "-XX:+JITServerUseAOTCache";
+
+	private static final String CLIENT_EXE = System.getProperty("CLIENT_EXE");
+	// This handy regex pattern uses positive lookahead to match a string containing either zero or an even number of " (double quote) characters.
+	// If a character is followed by this pattern it means that the character itself is not in a quoted string, otherwise it would be followed by
+	// an odd number of " characters. Note that this doesn't handle ' (single quote) characters.
+	private static final String QUOTES_LOOKAHEAD_PATTERN = "(?=([^\"]*\"[^\"]*\")*[^\"]*$)";
+    // We want to split the client program string on whitespace, unless the space appears in a quoted string.
+    private static final String SPLIT_ARGS_PATTERN = "\\s+" + QUOTES_LOOKAHEAD_PATTERN;
 
 	JITServerTest() {
 		AssertJUnit.assertEquals("Tests have only been validated on Linux. Other platforms are currently unsupported.", "Linux", System.getProperty("os.name"));
 
 		final String SERVER_EXE = System.getProperty("SERVER_EXE");
-		final String CLIENT_EXE = System.getProperty("CLIENT_EXE");
 		final String CLIENT_PROGRAM = System.getProperty("CLIENT_PROGRAM");
 		// -Xjit options may already be on the command line so add extra JIT options via TR_Options instead to avoid one overriding the other.
 		final String JIT_LOG_ENV_OPTION = "verbose={compileEnd|JITServer|heartbeat}";
@@ -74,15 +89,11 @@ public class JITServerTest {
 			updatePorts = true;
 		}
 
-		// This handy regex pattern uses positive lookahead to match a string containing either zero or an even number of " (double quote) characters.
-		// If a character is followed by this pattern it means that the character itself is not in a quoted string, otherwise it would be followed by
-		// an odd number of " characters. Note that this doesn't handle ' (single quote) characters.
-		final String QUOTES_LOOKAHEAD_PATTERN = "(?=([^\"]*\"[^\"]*\")*[^\"]*$)";
-		// We want to split the client program string on whitespace, unless the space appears in a quoted string.
-		final String SPLIT_ARGS_PATTERN = "\\s+" + QUOTES_LOOKAHEAD_PATTERN;
-
 		clientBuilder = new ProcessBuilder(stripQuotesFromEachArg(String.join(" ", CLIENT_EXE, portOption, "-XX:+UseJITServer", CLIENT_PROGRAM).split(SPLIT_ARGS_PATTERN)));
-		serverBuilder = new ProcessBuilder(stripQuotesFromEachArg(String.join(" ", SERVER_EXE, portOption).split(SPLIT_ARGS_PATTERN)));
+		if (CLIENT_PROGRAM.contains(aotCacheOption))
+			serverBuilder = new ProcessBuilder(stripQuotesFromEachArg(String.join(" ", SERVER_EXE, portOption, "-XX:-JITServerHealthProbes", aotCacheOption).split(SPLIT_ARGS_PATTERN)));
+		else
+			serverBuilder = new ProcessBuilder(stripQuotesFromEachArg(String.join(" ", SERVER_EXE, portOption, "-XX:-JITServerHealthProbes").split(SPLIT_ARGS_PATTERN)));
 
 		// Redirect stderr to stdout, one log for each of the client and server is sufficient.
 		clientBuilder.redirectErrorStream(true);
@@ -133,8 +144,59 @@ public class JITServerTest {
 		// The only way to avoid most of the races is to have the server choose a random port (and retry if it is busy) and for us read the port
 		// from the server log. We still need to worry about tests where we stop and restart the server, because we need to keep using the same
 		// port but someone may grab it in the interim.
-		final int randomPort = EPHEMERAL_PORTS_START + new Random().nextInt(EPHEMERAL_PORTS_LAST - EPHEMERAL_PORTS_START + 1);
+		int randomPort = EPHEMERAL_PORTS_START + new Random().nextInt(EPHEMERAL_PORTS_LAST - EPHEMERAL_PORTS_START + 1);
+		while (!isPortOpen(randomPort)) {
+			String[] portInfo = infoOfProcessUsingPort(randomPort);
+			if (0 != portInfo.length) {
+				logger.info("Port " + randomPort + " is busy. Process info:");
+				for (int i = 0; i < portInfo.length; ++i) {
+					logger.info(portInfo[i]);
+				}
+			} else {
+				logger.info("Port " + randomPort + " is busy");
+			}
+
+			randomPort = EPHEMERAL_PORTS_START + new Random().nextInt(EPHEMERAL_PORTS_LAST - EPHEMERAL_PORTS_START + 1);
+		}
 		return String.format(JITSERVER_PORT_OPTION_FORMAT_STRING, randomPort);
+	}
+
+	private static boolean isPortOpen(int port) {
+		Socket s = null;
+		try {
+			// Connect to the port as a client. If this succeeds, then something else is using that port.
+			s = new Socket((String)null, port);
+			s.close();
+			return false;
+		} catch (IOException e) {
+			// A client connection could not be established, so nothing is using the port.
+			return true;
+		} catch (SecurityException e) {
+			// Access to the port is forbidden.
+			return false;
+		}
+	}
+
+	private static String[] infoOfProcessUsingPort(int port) {
+		String[] output = {};
+		if (System.getProperty("os.name").toLowerCase().contains("linux")) {
+			try {
+				Process proc = new ProcessBuilder("lsof", "-i", ":" + port).start();
+				proc.waitFor();
+				if (proc.exitValue() == 0) {
+					BufferedReader stdOutput = new BufferedReader(new InputStreamReader(proc.getInputStream()));
+					ArrayList<String> al = new ArrayList<String>();
+					String line = null;
+					while ((line = stdOutput.readLine()) != null) {
+						al.add(line);
+					}
+					output = al.toArray(new String[0]);
+				}
+			} catch (IOException|InterruptedException e) {
+				// Do nothing.
+			}
+		}
+		return output;
 	}
 
 	private static String[] stripQuotesFromEachArg(String[] args) {
@@ -160,6 +222,109 @@ public class JITServerTest {
 		}
 	}
 
+	// Count the number of lines that contain a match for the given regex
+	private static int countRegexLinesInFile(String regexToLookFor, File file1) throws FileNotFoundException,IOException {
+		int count = 0;
+		String line = null;
+		String[] buffer;
+
+		BufferedReader bfReader = new BufferedReader(new FileReader(file1));
+		while((line = bfReader.readLine()) != null)   {
+			if (line.split(regexToLookFor, 2).length > 1)
+				count++;
+		}
+		logger.info("File: "+file1.getName()+" has "+count+" lines with the regex \""+regexToLookFor+"\"");
+		bfReader.close();
+		return count;
+        }
+
+	private static boolean checkLogFiles(String fileNamePattern, String regexToLookFor) {
+		boolean foundMatch = false;
+		try{
+			File f = new File(System.getProperty("user.dir"));
+			FilenameFilter filter = new FilenameFilter() {
+				public boolean accept(File f, String name){
+					return name.matches(fileNamePattern);
+				}
+			};
+
+			//List all the log files matching the criteria in the order of last modified
+			File[] files = f.listFiles(filter);
+			Arrays.sort(files, Comparator.comparingLong(File::lastModified).reversed());
+
+			if(files == null)
+				logger.info("No files matching the pattern " + fileNamePattern + " in current directory.");
+
+			for (int i = 0; i < files.length; i++) {
+				logger.info("Checking file " + files[i] + " for string "+ regexToLookFor );
+				if (countRegexLinesInFile(regexToLookFor,files[i]) > 0){
+					foundMatch = true;
+					break;
+				}
+			}
+		} catch (FileNotFoundException e) {
+			System.err.println("FileNotFoundException in checkLogFiles: " + e.getMessage());
+		} catch (IOException e) {
+                        System.err.println("IOException in checkLogFiles: " + e.getMessage());
+		}
+		return foundMatch;
+	}
+
+	private static boolean runSCCCommand(String cmd, String cacheName) {
+		boolean found = false;
+		try {
+			ProcessBuilder pb = new ProcessBuilder(stripQuotesFromEachArg(String.join(" ", CLIENT_EXE, cmd).split(SPLIT_ARGS_PATTERN)));
+			pb.redirectErrorStream(true);
+			Process proc = pb.start();
+			BufferedReader stdOutput = new BufferedReader(new InputStreamReader(proc.getInputStream()));
+			String line = null;
+			while ((line = stdOutput.readLine()) != null) {
+				if (cmd.contains("listallcaches")){
+					if (line.startsWith(cacheName)) {
+						logger.info(line);
+						found=true;
+						break;
+					}
+				} else if(cmd.contains("printallstats=aot")) {
+					if (line.contains("# AOT Methods")) {
+						logger.info(line);
+						int value = Integer.parseInt(line.replaceAll("[^0-9]", ""));
+						if (value > 0)
+							found = true;
+						break;
+					}
+				} else if(cmd.contains("destroy")) {
+					if (line.contains("\"" + cacheName + "\""+" has been destroyed")) {
+						logger.info(line);
+						found = true;
+						break;
+					}
+				} else {
+					logger.info(line);
+				}
+			}
+			proc.waitFor();
+		} catch (IOException|InterruptedException e) {
+			// Do nothing.
+		}
+                return found;
+        }
+
+	private static boolean checkCacheExists(String cacheName) {
+                String cmd = "-Xshareclasses:listallcaches";
+                return (runSCCCommand(cmd, cacheName));
+        }
+
+        private static boolean checkAOTCompileExists(String cacheName) {
+                String cmd = "-Xshareclasses:name="+cacheName+",printallstats=aot";
+                return (runSCCCommand(cmd, cacheName));
+        }
+
+        private static boolean destroyCache(String cacheName) {
+                String cmd = "-Xshareclasses:name="+cacheName+",destroy";
+                return (runSCCCommand(cmd, cacheName));
+        }
+
 	private static void destroyAndCheckProcess(final Process p, final ProcessBuilder builder) throws InterruptedException {
 		final int PROCESS_DESTROY_WAIT_TIME_MS = 5 * 1000;
 		// On *nix systems Process.destroy() sends SIGTERM to the process and (unless the process handles it and decides to return something else) the return value will be signum+128.
@@ -169,7 +334,7 @@ public class JITServerTest {
 		p.destroy();
 
 		int waitCount = 0;
-		while (!p.waitFor(PROCESS_DESTROY_WAIT_TIME_MS, TimeUnit.MILLISECONDS) && (waitCount < 6)) {
+		while (!p.waitFor(PROCESS_DESTROY_WAIT_TIME_MS, TimeUnit.MILLISECONDS) && (waitCount < 12)) {
 			waitCount++;
 		}
 
@@ -221,7 +386,7 @@ public class JITServerTest {
 
 	// `pkill` expects a regex pattern as the last argument. We need to pass in a JVM command line, but we don't want any regex-like patterns
 	// (e.g. certain -Xjit sub-options) on the command line to be interpreted as a regex by pkill so we need to escape any special chars.
-	private static String escapeCommandLineRegexChars(final String commandLine) { return commandLine.replaceAll("[{}|]", "\\\\$0"); }
+	private static String escapeCommandLineRegexChars(final String commandLine) { return commandLine.replaceAll("[{+}|]", "\\\\$0"); }
 
 	// "Pause" and "resume" are implemented with SIGSTOP and SIGCONT; they should work on most *nix platforms, but YMMV. Windows would need another solution.
 	private static void pauseProcessWithCommandLine(final String commandLine) throws IOException, InterruptedException {
@@ -435,5 +600,84 @@ public class JITServerTest {
 
 		logger.info("Stopping client...");
 		destroyAndCheckProcess(client, clientBuilder);
+	}
+
+	public void testServerAOTCache() throws IOException, InterruptedException {
+                logger.info("running testServerSCC: INFO and above level logging enabled");
+
+		// Run this tests only for the test variation with AOT Cache option specified
+		if(System.getProperty("CLIENT_PROGRAM").contains(aotCacheOption)) {
+			redirectProcessOutputs(clientBuilder, "testServerAOTCache.client");
+			redirectProcessOutputs(serverBuilder, "testServerAOTCache.server");
+
+			updateJITServerPort();
+
+			if (checkCacheExists("test_jitscc"))
+				destroyCache("test_jitscc");
+
+			final Process server = startProcess(serverBuilder, "server");
+
+			Thread.sleep(SERVER_START_WAIT_TIME_MS);
+
+			Process client = startProcess(clientBuilder, "client");
+
+			logger.info("Waiting for " + CLIENT_TEST_TIME_MS + " millis.");
+			Thread.sleep(CLIENT_TEST_TIME_MS);
+
+			logger.info("Check whether the cache test_jitscc exists.");
+			if(checkCacheExists("test_jitscc"))
+				logger.info("Check if AOT methods exists in the cache test_jitscc:" + checkAOTCompileExists("test_jitscc"));
+			else
+				AssertJUnit.fail("The cache test_jitscc is not created.");
+
+			logger.info("Stopping client...");
+			destroyAndCheckProcess(client, clientBuilder);
+
+			// Destroy the SCC and then restart the client
+			logger.info("Destroy the cache test_jitscc");
+			destroyCache("test_jitscc");
+			Thread.sleep(DESTROY_SCC_WAIT_TIME_MS);
+
+			// Check if the SCC exists and then restart the client
+			logger.info("Check whether the cache test_jitscc exists.");
+			if (checkCacheExists("test_jitscc"))
+				AssertJUnit.fail("The cache test_jitscc should have been destroyed.");
+
+			logger.info("Checking if serialization of methods are logged at the server");
+			if(!checkLogFiles("testServerAOTCache.server.jitverboselog.out.*" , "serialization")) {
+				logger.info("No serialized methods found at the server. Stopping server...");
+				destroyAndCheckProcess(server, serverBuilder);
+				AssertJUnit.fail("There are no serialized methods at the server.");
+			}
+
+			logger.info("Restarting client...");
+			int randomLogId = new Random().nextInt();
+			redirectProcessOutputs(clientBuilder, "testServerAOTCache.client"+randomLogId);
+			client = startProcess(clientBuilder, "client");
+
+			logger.info("Waiting for " + CLIENT_TEST_TIME_MS + " millis.");
+			Thread.sleep(CLIENT_TEST_TIME_MS);
+
+			logger.info("Stopping client...");
+			destroyAndCheckProcess(client, clientBuilder);
+
+			// Destroy the SCC for cleanup
+			logger.info("Destroy the cache test_jitscc");
+			destroyCache("test_jitscc");
+			Thread.sleep(DESTROY_SCC_WAIT_TIME_MS);
+
+			if(!checkLogFiles("testServerAOTCache.client"+randomLogId+".jitverboselog.out.*", "remote deserialized")) {
+				logger.info("No deserialized methods found at the client.");
+				if(!checkLogFiles("testServerAOTCache.client"+randomLogId+".jitverboselog.out.*", "\\+.* remote")) {
+					logger.info("No successful remote compilations found at the client.");
+				}
+				logger.info("Stopping server...");
+				destroyAndCheckProcess(server, serverBuilder);
+				AssertJUnit.fail("There are no deserialized methods at the client.");
+			}
+
+			logger.info("Stopping server...");
+			destroyAndCheckProcess(server, serverBuilder);
+		}
 	}
 }

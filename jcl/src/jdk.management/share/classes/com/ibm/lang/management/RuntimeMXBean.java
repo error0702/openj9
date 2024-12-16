@@ -1,6 +1,6 @@
 /*[INCLUDE-IF Sidecar17]*/
-/*******************************************************************************
- * Copyright (c) 2012, 2020 IBM Corp. and others
+/*
+ * Copyright IBM Corp. and others 2012
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,10 +16,10 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
 package com.ibm.lang.management;
 
 /**
@@ -74,27 +74,28 @@ public interface RuntimeMXBean extends java.lang.management.RuntimeMXBean {
 	 * running on the available processors and the number of runnable entities
 	 * ready and queued to run on the available processors. The averaging
 	 * technique adopted can vary depending on the underlying operating system.
-	 * 
+	 *
 	 * @return normally, the system load average as a double. If the system load
 	 *         average is not obtainable (e.g. because the calculation may
 	 *         involve an unacceptable performance impact) then a negative value
 	 *         is returned.
 	 * @since 1.6
-	 * @see java.lang.management.OperatingSystemMXBean#getSystemLoadAverage()        
+	 * @see java.lang.management.OperatingSystemMXBean#getSystemLoadAverage()
 	 */
 	public double getCPULoad();
 
+/*[IF JAVA_SPEC_VERSION < 19]*/
 	/**
 	 * Returns the native process identifier that identifies the current
-	 * Java process to the operating system. The value is prone to being 
-	 * recycled over a period of time, as considered suitable by the 
+	 * Java process to the operating system. The value is prone to being
+	 * recycled over a period of time, as considered suitable by the
 	 * operating system.
-	 * 
-	 * @return A long representing the process ID (pid) on the underlying 
+	 *
+	 * @return A long representing the process ID (pid) on the underlying
 	 * operating system.
 	/*[IF JAVA_SPEC_VERSION >= 10]
-	 * 
-	 * @deprecated As of Java 10. Use 
+	 *
+	 * @deprecated As of Java 10. Use
 	 * {@link java.lang.management.RuntimeMXBean#getPid() getPid()} instead.
 	 */
 	@Deprecated(forRemoval=true, since="10")
@@ -102,15 +103,16 @@ public interface RuntimeMXBean extends java.lang.management.RuntimeMXBean {
 	 */
 	/*[ENDIF] JAVA_SPEC_VERSION >= 10 */
 	public long getProcessID();
+/*[ENDIF] JAVA_SPEC_VERSION < 19*/
 
 	/**
-	 * Returns a system load average calculated over the minute preceding 
+	 * Returns a system load average calculated over the minute preceding
 	 * the call averaged over the number of CPU available to Java virtual
 	 * machine process.
-	 * 
+	 *
 	 * @return A double indicating the average system load per processor.
 	 * If the system load average is not available, it returns a negative
-	 * value to indicate this. 
+	 * value to indicate this.
 	 */
 	public double getVMGeneratedCPULoad();
 
@@ -125,7 +127,7 @@ public interface RuntimeMXBean extends java.lang.management.RuntimeMXBean {
 	 * @return  true if JVM state is idle. Otherwise returns false
 	 */
 	public boolean isVMIdle();
-	
+
 	/**
 	 * Query the state of the Attach API. Return false if the Attach API is:
 	 * - still initializing
@@ -149,9 +151,9 @@ public interface RuntimeMXBean extends java.lang.management.RuntimeMXBean {
 	public boolean isAttachApiTerminated();
 
 	/**
-	 * This is provided for the benefit of applications which use attach API to load JVMTI agents 
+	 * This is provided for the benefit of applications which use attach API to load JVMTI agents
 	 * into their own JVMs.
-	 * 
+	 *
 	 * @return Attach API Virtual Machine ID of this VM
 	 * @since   1.8
 

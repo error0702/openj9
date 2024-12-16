@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #if !defined(OTI_J9PORT_H_)
@@ -233,6 +233,7 @@
 #define J9SH_BASEDIR "javasharedresources\\"
 #else
 #define J9SH_BASEDIR "javasharedresources/"
+#define J9SH_HIDDENDIR ".cache/"
 #endif
 
 /**
@@ -392,7 +393,9 @@ typedef enum J9ProcessorArchitecture {
 	PROCESSOR_X86_AMDATHLONDURON,
 	PROCESSOR_X86_AMDOPTERON,
 
-	PROCESOR_RISCV64_UNKNOWN,
+	PROCESSOR_RISCV64_UNKNOWN,
+
+	PROCESSOR_AARCH64_UNKNOWN,
 
 	PROCESSOR_DUMMY = 0x40000000 /* force wide enums */
 
@@ -758,6 +761,7 @@ typedef struct J9CacheInfoQuery {
 #define J9PORT_SLOPEN_LAZY OMRPORT_SLOPEN_LAZY
 #define J9PORT_SLOPEN_NO_LOOKUP_MSG_FOR_NOT_FOUND OMRPORT_SLOPEN_NO_LOOKUP_MSG_FOR_NOT_FOUND
 #define J9PORT_SLOPEN_OPEN_EXECUTABLE OMRPORT_SLOPEN_OPEN_EXECUTABLE
+#define J9PORT_SLOPEN_NO_LOAD OMRPORT_SLOPEN_NO_LOAD
 
 #define J9PORT_SL_FOUND OMRPORT_SL_FOUND
 #define J9PORT_SL_NOT_FOUND OMRPORT_SL_NOT_FOUND
@@ -780,6 +784,7 @@ typedef struct J9CacheInfoQuery {
 #define J9PORT_CTLDATA_VECTOR_REGS_SUPPORT_ON OMRPORT_CTLDATA_VECTOR_REGS_SUPPORT_ON
 #define J9PORT_CTLDATA_VMEM_ADVISE_HUGEPAGE OMRPORT_CTLDATA_VMEM_ADVISE_HUGEPAGE
 #define J9PORT_CTLDATA_VMEM_HUGE_PAGES_MMAP_ENABLED OMRPORT_CTLDATA_VMEM_HUGE_PAGES_MMAP_ENABLED
+#define J9PORT_CTLDATA_CRIU_SUPPORT_FLAGS "CRIU_SUPPORT_FLAGS"
 
 #define J9PORT_CPU_ONLINE OMRPORT_CPU_ONLINE
 #define J9PORT_CPU_TARGET OMRPORT_CPU_TARGET
@@ -963,18 +968,12 @@ typedef struct J9CacheInfoQuery {
 #define J9PORT_MMAP_FLAG_SHARED OMRPORT_MMAP_FLAG_SHARED
 #define J9PORT_MMAP_FLAG_COPYONWRITE OMRPORT_MMAP_FLAG_COPYONWRITE
 #define J9PORT_MMAP_SYNC_WAIT OMRPORT_MMAP_SYNC_WAIT
+#if defined(J9ZOS39064)
+#define J9PORT_MMAP_FLAG_ZOS_64BIT OMRPORT_MMAP_FLAG_ZOS_64BIT
+#endif /* defined(J9ZOS39064) */
 
 #define J9PORT_RESOURCE_SHARED_MEMORY OMRPORT_RESOURCE_SHARED_MEMORY
 #define J9PORT_RESOURCE_ADDRESS_SPACE OMRPORT_RESOURCE_ADDRESS_SPACE
-
-#define J9PORT_ARCH_X86 OMRPORT_ARCH_X86
-#define J9PORT_ARCH_HAMMER OMRPORT_ARCH_HAMMER
-#define J9PORT_ARCH_PPC OMRPORT_ARCH_PPC
-#define J9PORT_ARCH_PPC64 OMRPORT_ARCH_PPC64
-#define J9PORT_ARCH_PPC64LE OMRPORT_ARCH_PPC64LE
-#define J9PORT_ARCH_S390 OMRPORT_ARCH_S390
-#define J9PORT_ARCH_S390X OMRPORT_ARCH_S390X
-#define J9PORT_ARCH_RISCV OMRPORT_ARCH_RISCV
 
 #define J9PORT_RESOURCE_CORE_FLAGS OMRPORT_RESOURCE_CORE_FLAGS
 #define J9PORT_RESOURCE_FILE_DESCRIPTORS OMRPORT_RESOURCE_FILE_DESCRIPTORS
@@ -983,5 +982,8 @@ typedef struct J9CacheInfoQuery {
 
 #define J9PORT_PROCINFO_PROC_ONLINE OMRPORT_PROCINFO_PROC_ONLINE
 #define J9PORT_PROCINFO_NOT_AVAILABLE OMRPORT_PROCINFO_NOT_AVAILABLE
+
+#define J9OMRPORT_CRIU_SUPPORT_ENABLED OMRPORT_CRIU_SUPPORT_ENABLED
+#define J9OMRPORT_CRIU_SUPPORT_FINAL_RESTORE OMRPORT_CRIU_SUPPORT_FINAL_RESTORE
 
 #endif /* !defined(OTI_J9PORT_H_) */

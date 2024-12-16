@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "omrformatconsts.h"
@@ -82,6 +82,7 @@ J9::SymbolReferenceTable::SymbolReferenceTable(size_t sizeHint, TR::Compilation 
      _currentThreadDebugEventDataSymbol(0),
      _currentThreadDebugEventDataSymbolRefs(c->trMemory()),
      _constantPoolAddressSymbolRefs(c->trMemory()),
+     _defaultValueAddressSlotSymbolRefs(c->trMemory()),
      _resolvedFieldShadows(
         std::less<ResolvedFieldShadowKey>(),
         getTypedAllocator<ResolvedFieldShadowsEntry>(c->allocator())),
@@ -306,16 +307,33 @@ J9::SymbolReferenceTable::findOrCreateStoreFlattenableArrayElementSymbolRef(TR::
 
 
 TR::SymbolReference *
-J9::SymbolReferenceTable::findOrCreateLookupDynamicInterfaceMethodSymbolRef()
+J9::SymbolReferenceTable::findOrCreateLookupDynamicPublicInterfaceMethodSymbolRef()
    {
-   return findOrCreateRuntimeHelper(TR_jitLookupDynamicInterfaceMethod, false, false, true);
+   return findOrCreateRuntimeHelper(TR_jitLookupDynamicPublicInterfaceMethod, false, true, true);
    }
 
 
 TR::SymbolReference *
-J9::SymbolReferenceTable::findOrCreateLookupDynamicPublicInterfaceMethodSymbolRef()
+J9::SymbolReferenceTable::findOrCreateDispatchJ9MethodSymbolRef()
    {
-   return findOrCreateRuntimeHelper(TR_jitLookupDynamicPublicInterfaceMethod, false, true, true);
+   TR_ASSERT_FATAL(comp()->cg()->enableJitDispatchJ9Method(), "not enabled");
+
+   TR::SymbolReference *symRef = element(jitDispatchJ9MethodSymbol);
+   if (symRef == NULL)
+      {
+      TR::MethodSymbol *sym = TR::MethodSymbol::create(trHeapMemory(), TR_None);
+      sym->setHelper();
+      sym->setIsInlinedByCG();
+      sym->setLinkage(TR_Private);
+      TR::SymbolReference *symRef = new (trHeapMemory()) TR::SymbolReference(
+         self(), jitDispatchJ9MethodSymbol, sym);
+
+      symRef->setCanGCandReturn();
+      symRef->setCanGCandExcept();
+      element(jitDispatchJ9MethodSymbol) = symRef;
+      }
+
+   return element(jitDispatchJ9MethodSymbol);
    }
 
 
@@ -417,26 +435,15 @@ TR::SymbolReference *
 J9::SymbolReferenceTable::findOrCreateInterfaceMethodSymbol(TR::ResolvedMethodSymbol * owningMethodSymbol, int32_t cpIndex)
    {
    owningMethodSymbol->setMayHaveInlineableCall(true);
-
-   TR::SymbolReference * symRef = findOrCreateMethodSymbol(owningMethodSymbol->getResolvedMethodIndex(), cpIndex, 0, TR::MethodSymbol::Interface);
-
-   // javasoft.sqe.tests.vm.instr.invokeinterface.invokeinterface019.invokeinterface01910m1.invokeinterface01910m1
-   // has an invoke interface on a final method in object.
-   //
-   if (symRef->getSymbol()->castToMethodSymbol()->getMethod()->isFinalInObject())
-      {
-      comp()->failCompilation<TR::CompilationException>("Method symbol reference is final in object");
-      }
-
-   return symRef;
+   return findOrCreateMethodSymbol(owningMethodSymbol->getResolvedMethodIndex(), cpIndex, 0, TR::MethodSymbol::Interface);
    }
 
 
 TR::SymbolReference *
-J9::SymbolReferenceTable::findOrCreateDynamicMethodSymbol(TR::ResolvedMethodSymbol * owningMethodSymbol, int32_t callSiteIndex, bool * unresolvedInCP)
+J9::SymbolReferenceTable::findOrCreateDynamicMethodSymbol(TR::ResolvedMethodSymbol * owningMethodSymbol, int32_t callSiteIndex, bool * unresolvedInCP, bool * isInvokeCacheAppendixNull)
    {
 #if defined(J9VM_OPT_OPENJDK_METHODHANDLE)
-   TR_ResolvedMethod  * method = owningMethodSymbol->getResolvedMethod()->getResolvedDynamicMethod(comp(), callSiteIndex, unresolvedInCP);
+   TR_ResolvedMethod  * method = owningMethodSymbol->getResolvedMethod()->getResolvedDynamicMethod(comp(), callSiteIndex, unresolvedInCP, isInvokeCacheAppendixNull);
    if (method)
       owningMethodSymbol->setMayHaveInlineableCall(true);
 
@@ -470,17 +477,19 @@ J9::SymbolReferenceTable::findOrCreateHandleMethodSymbol(TR::ResolvedMethodSymbo
 
 
 TR::SymbolReference *
-J9::SymbolReferenceTable::findOrCreateHandleMethodSymbol(TR::ResolvedMethodSymbol * owningMethodSymbol, int32_t cpIndex, bool * unresolvedInCP)
+J9::SymbolReferenceTable::findOrCreateHandleMethodSymbol(TR::ResolvedMethodSymbol * owningMethodSymbol, int32_t cpIndex, bool * unresolvedInCP, bool * isInvokeCacheAppendixNull)
    {
-   TR_ResolvedMethod  * method = owningMethodSymbol->getResolvedMethod()->getResolvedHandleMethod(comp(), cpIndex, unresolvedInCP);
-   if (method)
-      owningMethodSymbol->setMayHaveInlineableCall(true);
-
 #if defined(J9VM_OPT_OPENJDK_METHODHANDLE)
+   TR_ResolvedMethod  * method = owningMethodSymbol->getResolvedMethod()->getResolvedHandleMethod(comp(), cpIndex, unresolvedInCP, isInvokeCacheAppendixNull);
    TR::SymbolReference * symRef = findOrCreateMethodSymbol(owningMethodSymbol->getResolvedMethodIndex(), cpIndex, method, TR::MethodSymbol::Static);
+   if (*unresolvedInCP)
+      symRef->getSymbol()->setDummyResolvedMethod(); // linkToStatic is a dummy TR_ResolvedMethod
 #else
+   TR_ResolvedMethod  * method = owningMethodSymbol->getResolvedMethod()->getResolvedHandleMethod(comp(), cpIndex, unresolvedInCP);
    TR::SymbolReference * symRef = findOrCreateMethodSymbol(owningMethodSymbol->getResolvedMethodIndex(), cpIndex, method, TR::MethodSymbol::ComputedVirtual);
 #endif /* J9VM_OPT_OPENJDK_METHODHANDLE */
+   if (method)
+      owningMethodSymbol->setMayHaveInlineableCall(true);
    return symRef;
    }
 
@@ -627,7 +636,7 @@ J9::SymbolReferenceTable::methodSymRefWithSignature(TR::SymbolReference *origina
 
    int32_t fullSignatureLength = originalMethod->classNameLength() + 1 + originalMethod->nameLength() + effectiveSignatureLength;
    char *fullSignature = (char*)trMemory()->allocateMemory(1 + fullSignatureLength, stackAlloc);
-   sprintf(fullSignature, "%.*s.%.*s%.*s", originalMethod->classNameLength(), originalMethod->classNameChars(), originalMethod->nameLength(), originalMethod->nameChars(), effectiveSignatureLength, effectiveSignature);
+   snprintf(fullSignature, 1 + fullSignatureLength, "%.*s.%.*s%.*s", originalMethod->classNameLength(), originalMethod->classNameChars(), originalMethod->nameLength(), originalMethod->nameChars(), effectiveSignatureLength, effectiveSignature);
    TR_ASSERT(strlen(fullSignature) == fullSignatureLength, "Computed fullSignatureLength must match actual length of fullSignature");
    CS2::HashIndex hashIndex = 0;
    static char *ignoreMBSCache = feGetEnv("TR_ignoreMBSCache");
@@ -690,29 +699,17 @@ J9::SymbolReferenceTable::findOrCreateArrayClassRomPtrSymbolRef()
    }
 
 
-TR::SymbolReference *
-J9::SymbolReferenceTable::findOrCreateJavaLangReferenceReferentShadowSymbol(
-      TR::ResolvedMethodSymbol * owningMethodSymbol,
-      bool isResolved,
-      TR::DataType type,
-      uint32_t offset, bool isUnresolvedInCP)
-   {
-   TR_ResolvedMethod * owningMethod = owningMethodSymbol->getResolvedMethod();
-
-   TR::SymbolReference * symRef = NULL;
-   symRef = findJavaLangReferenceReferentShadowSymbol(owningMethod, TR::Address, offset);
-   if (!symRef)
-      {
-      symRef = createShadowSymbolWithoutCpIndex(owningMethodSymbol, true, TR::Address, offset, false);
-      }
-   return symRef;
-   }
-
-
 // Right now it only works for private fields or fields that are guaranteed to be accessed only from one class
 // because searchRecognizedField only does a name comparison, t does not work if the field is accessed from a subclass of the expected one
 TR::SymbolReference *
-J9::SymbolReferenceTable::findOrFabricateShadowSymbol(TR::ResolvedMethodSymbol * owningMethodSymbol, TR::Symbol::RecognizedField recognizedField, TR::DataType type, uint32_t offset, bool isVolatile, bool isPrivate, bool isFinal, char* name)
+J9::SymbolReferenceTable::findOrFabricateShadowSymbol(TR::ResolvedMethodSymbol *owningMethodSymbol,
+                                                      TR::Symbol::RecognizedField recognizedField,
+                                                      TR::DataType type,
+                                                      uint32_t offset,
+                                                      bool isVolatile,
+                                                      bool isPrivate,
+                                                      bool isFinal,
+                                                      const char *name)
    {
    TR_ResolvedMethod * owningMethod = owningMethodSymbol->getResolvedMethod();
 
@@ -829,6 +826,11 @@ J9::SymbolReferenceTable::findOrFabricateShadowSymbol(
       qualifiedFieldName,
       TR::Symbol::UnknownField);
 
+   TR_J9VM *fej9 = reinterpret_cast<TR_J9VM *>(fe());
+   TR_OpaqueClassBlock *declaredClass = fej9->getClassFromSignature(signature, (int32_t)strlen(signature), containingClass);
+   if (declaredClass != NULL)
+      sym->setDeclaredClass(declaredClass);
+
    mcount_t methodIndex = mcount_t::valueOf(0);
    int32_t cpIndex = -1;
    symRef = new (trHeapMemory()) TR::SymbolReference(
@@ -844,6 +846,28 @@ J9::SymbolReferenceTable::findOrFabricateShadowSymbol(
    _resolvedFieldShadows.insert(std::make_pair(key, symRef));
    return symRef;
    }
+
+#if defined(J9VM_OPT_OPENJDK_METHODHANDLE)
+TR::SymbolReference *
+J9::SymbolReferenceTable::findOrFabricateMemberNameVmTargetShadow()
+   {
+   bool isVolatile = false;
+   bool isPrivate = false;
+   bool isFinal = true;
+   TR::SymbolReference *symRef = self()->findOrFabricateShadowSymbol(
+      comp()->getMethodSymbol(),
+      TR::Symbol::Java_lang_invoke_MemberName_vmtarget,
+      TR::Address,
+      comp()->fej9()->getVMTargetOffset(),
+      isVolatile,
+      isPrivate,
+      isFinal,
+      "java/lang/invoke/MemberName.vmtarget J");
+
+   symRef->getSymbol()->setNotCollected();
+   return symRef;
+   }
+#endif
 
 TR::SymbolReference *
 J9::SymbolReferenceTable::findFlattenedArrayElementFieldShadow(
@@ -874,16 +898,14 @@ TR::SymbolReference *
 J9::SymbolReferenceTable::findOrFabricateFlattenedArrayElementFieldShadowSymbol(
    TR_OpaqueClassBlock *arrayComponentClass,
    TR::DataType type,
-   uint32_t fieldOffset,
+   int32_t fieldOffset,
    bool isPrivate,
    const char *fieldName,
    const char *fieldSignature)
    {
-   int32_t flattenedFieldOffset = (int32_t)fieldOffset - (int32_t)TR::Compiler->om.objectHeaderSizeInBytes();
+   TR_ASSERT_FATAL(fieldOffset >= 0, "fieldOffset %d is invalid: fieldOffset %u objectHeaderSizeInBytes %" OMR_PRIuPTR " \n", fieldOffset, fieldOffset, TR::Compiler->om.objectHeaderSizeInBytes());
 
-   TR_ASSERT_FATAL(flattenedFieldOffset >= 0, "flattenedFieldOffset %d is invalid: fieldOffset %u objectHeaderSizeInBytes %" OMR_PRIuPTR " \n", flattenedFieldOffset, fieldOffset, TR::Compiler->om.objectHeaderSizeInBytes());
-
-   ResolvedFieldShadowKey key(arrayComponentClass, flattenedFieldOffset, type);
+   ResolvedFieldShadowKey key(arrayComponentClass, fieldOffset, type);
 
    TR::SymbolReference *symRef = findFlattenedArrayElementFieldShadow(key, isPrivate);
    if (symRef != NULL)
@@ -923,9 +945,41 @@ J9::SymbolReferenceTable::findOrFabricateFlattenedArrayElementFieldShadowSymbol(
 
    bool isResolved = true;
    bool isUnresolvedInCP = false;
-   initShadowSymbol(NULL, symRef, isResolved, type, flattenedFieldOffset, isUnresolvedInCP);
+   initShadowSymbol(NULL, symRef, isResolved, type, fieldOffset, isUnresolvedInCP);
 
    _flattenedArrayElementFieldShadows.insert(std::make_pair(key, symRef));
+   return symRef;
+   }
+
+TR::SymbolReference *
+J9::SymbolReferenceTable::findOrCreateDefaultValueSymbolRef(void *defaultValueSlotAddress, int32_t cpIndex)
+   {
+   ListIterator<TR::SymbolReference> i(&_defaultValueAddressSlotSymbolRefs);
+   TR::SymbolReference *symRef;
+   for (symRef = i.getFirst(); symRef; symRef = i.getNext())
+      {
+      if (symRef->getSymbol()->getStaticSymbol()->getStaticAddress() == defaultValueSlotAddress)
+         {
+         return symRef;
+         }
+      }
+
+   TR::StaticSymbol *sym = TR::StaticSymbol::create(trHeapMemory(), TR::Address);
+
+   sym->setStaticAddress(defaultValueSlotAddress);
+
+   sym->setNotDataAddress();
+   sym->setStaticDefaultValueInstance();
+
+   symRef = new (trHeapMemory()) TR::SymbolReference(self(), sym);
+
+   symRef->setCPIndex(cpIndex);
+   symRef->setOwningMethodIndex(comp()->getMethodSymbol()->getResolvedMethodIndex());
+
+   // TODO: Is this required?
+   aliasBuilder.addressStaticSymRefs().set(symRef->getReferenceNumber());
+
+   _defaultValueAddressSlotSymbolRefs.add(symRef);
    return symRef;
    }
 
@@ -1032,6 +1086,31 @@ J9::SymbolReferenceTable::findOrCreateShadowSymbol(TR::ResolvedMethodSymbol * ow
          isFinal,
          NULL,
          recognizedField);
+      }
+
+   if (resolved)
+      {
+      int32_t len = 0;
+      const char *sig = owningMethod->fieldSignatureChars(cpIndex, len);
+      TR_OpaqueClassBlock *declaredClass =
+         fe()->getClassFromSignature(sig, len, owningMethod);
+
+      if (declaredClass != NULL)
+         {
+         TR_OpaqueClassBlock *prevDeclaredClass = sym->getDeclaredClass();
+         if (prevDeclaredClass == NULL)
+            {
+            sym->setDeclaredClass(declaredClass);
+            }
+         else
+            {
+            TR_ASSERT_FATAL(
+               prevDeclaredClass == declaredClass,
+               "declared class mismatch: %p vs. prev %p",
+               declaredClass,
+               prevDeclaredClass);
+            }
+         }
       }
 
    int32_t unresolvedIndex = resolved ? 0 : _numUnresolvedSymbols++;
@@ -1193,16 +1272,16 @@ J9::SymbolReferenceTable::findOrCreateClassFlagsSymbolRef()
 
 
 TR::SymbolReference *
-J9::SymbolReferenceTable::findOrCreateClassAndDepthFlagsSymbolRef()
+J9::SymbolReferenceTable::findOrCreateClassDepthAndFlagsSymbolRef()
    {
-   if (!element(isClassAndDepthFlagsSymbol))
+   if (!element(isClassDepthAndFlagsSymbol))
       {
       TR_J9VMBase *fej9 = (TR_J9VMBase *)(fe());
       TR::Symbol * sym = TR::Symbol::createShadow(trHeapMemory(), TR::Int32);
-      element(isClassAndDepthFlagsSymbol) = new (trHeapMemory()) TR::SymbolReference(self(), isClassAndDepthFlagsSymbol, sym);
-      element(isClassAndDepthFlagsSymbol)->setOffset(fej9->getOffsetOfClassAndDepthFlags());
+      element(isClassDepthAndFlagsSymbol) = new (trHeapMemory()) TR::SymbolReference(self(), isClassDepthAndFlagsSymbol, sym);
+      element(isClassDepthAndFlagsSymbol)->setOffset(fej9->getOffsetOfClassDepthAndFlags());
       }
-   return element(isClassAndDepthFlagsSymbol);
+   return element(isClassDepthAndFlagsSymbol);
    }
 
 
@@ -1325,7 +1404,10 @@ J9::SymbolReferenceTable::findOrCreateCurrentThreadSymbolRef()
       TR_J9VMBase *fej9 = (TR_J9VMBase *)(fe());
       TR::Symbol * sym = TR::RegisterMappedSymbol::createMethodMetaDataSymbol(trHeapMemory(), "CurrentThread");
       sym->setDataType(TR::Address);
-      sym->setImmutableField();
+      if (fej9->isJ9VMThreadCurrentThreadImmutable())
+         {
+         sym->setImmutableField();
+         }
       element(currentThreadSymbol) = new (trHeapMemory()) TR::SymbolReference(self(), currentThreadSymbol, sym);
       element(currentThreadSymbol)->setOffset(fej9->thisThreadGetCurrentThreadOffset());
       }
@@ -1463,7 +1545,7 @@ J9::SymbolReferenceTable::findOrCreateStringSymbol(TR::ResolvedMethodSymbol * ow
    else if (!sym->isConstString() &&
             !sym->isNonSpecificConstObject())
       {
-      TR::VMAccessCriticalSection constantCriticalSection(comp()->fej9());
+      // getObjectClassAt will acquire/release VMAccess internally when needed
       TR_OpaqueClassBlock *clazz = comp()->fej9()->getObjectClassAt((uintptr_t)stringConst);
       if (comp()->fej9()->isString(clazz))
          {
@@ -1710,13 +1792,18 @@ J9::SymbolReferenceTable::isFieldClassObject(TR::SymbolReference *symRef)
    {
    int32_t len;
    const char *fieldName = symRef->getOwningMethod(comp())->fieldSignatureChars(symRef->getCPIndex(), len);
-   dumpOptDetails(comp(), "got fieldsig as %s\n", fieldName);
+   dumpOptDetails(comp(), "got fieldsig as %.*s\n", len, fieldName);
    return false;
    }
 
 static bool isSignatureTypeBool(const char *fieldSignature, int32_t len)
    {
    return len == 1 && fieldSignature[0] == 'Z';
+   }
+
+static bool isSignatureTypeChar(const char *fieldSignature, int32_t len)
+   {
+   return len == 1 && fieldSignature[0] == 'C';
    }
 
 static bool isSignatureReturnTypeBool(const char *methodSignature, int32_t len)
@@ -1731,7 +1818,7 @@ J9::SymbolReferenceTable::isFieldTypeBool(TR::SymbolReference *symRef)
    {
    int32_t len;
    const char *fieldSignature = symRef->getOwningMethod(comp())->fieldSignatureChars(symRef->getCPIndex(), len);
-   dumpOptDetails(comp(), "got field signature as %s\n", fieldSignature);
+   dumpOptDetails(comp(), "got field signature as %.*s\n", len, fieldSignature);
    return isSignatureTypeBool(fieldSignature, len);
    }
 
@@ -1740,9 +1827,28 @@ J9::SymbolReferenceTable::isStaticTypeBool(TR::SymbolReference *symRef)
    {
    int32_t len;
    const char *fieldSignature = symRef->getOwningMethod(comp())->staticSignatureChars(symRef->getCPIndex(), len);
-   dumpOptDetails(comp(), "got static signature as %s\n", fieldSignature);
+   dumpOptDetails(comp(), "got static signature as %.*s\n", len, fieldSignature);
    return isSignatureTypeBool(fieldSignature, len);
    }
+
+bool
+J9::SymbolReferenceTable::isFieldTypeChar(TR::SymbolReference *symRef)
+   {
+   int32_t len;
+   const char *fieldSignature = symRef->getOwningMethod(comp())->fieldSignatureChars(symRef->getCPIndex(), len);
+   dumpOptDetails(comp(), "got field signature as %.*s\n", len, fieldSignature);
+   return isSignatureTypeChar(fieldSignature, len);
+   }
+
+bool
+J9::SymbolReferenceTable::isStaticTypeChar(TR::SymbolReference *symRef)
+   {
+   int32_t len;
+   const char *fieldSignature = symRef->getOwningMethod(comp())->staticSignatureChars(symRef->getCPIndex(), len);
+   dumpOptDetails(comp(), "got static signature as %.*s\n", len, fieldSignature);
+   return isSignatureTypeChar(fieldSignature, len);
+   }
+
 
 bool
 J9::SymbolReferenceTable::isReturnTypeBool(TR::SymbolReference *symRef)
@@ -1837,8 +1943,23 @@ J9::SymbolReferenceTable::findOrCreateStaticSymbol(TR::ResolvedMethodSymbol * ow
    TR::KnownObjectTable::Index knownObjectIndex = TR::KnownObjectTable::UNKNOWN;
    if (resolved && isFinal && type == TR::Address)
       {
-      knownObjectIndex = TR::TransformUtil::knownObjectFromFinalStatic(
-         comp(), owningMethod, cpIndex, dataAddress);
+      TR_OpaqueClassBlock *declaringClass =
+         owningMethod->getDeclaringClassFromFieldOrStatic(comp(), cpIndex);
+
+      TR::Symbol::RecognizedField recField = sym->getRecognizedField();
+      TR_YesNoMaybe canFold =
+         TR::TransformUtil::canFoldStaticFinalField(
+            comp(), declaringClass, recField, owningMethod, cpIndex);
+
+      if (canFold == TR_yes)
+         {
+         TR::AnyConst value = TR::AnyConst::makeAddress(0);
+         bool gotValue = TR::TransformUtil::staticFinalFieldValue(
+            comp(), owningMethod, cpIndex, dataAddress, TR::Address, recField, &value);
+
+         if (gotValue && value.isKnownObject())
+            knownObjectIndex = value.getKnownObjectIndex();
+         }
       }
 
    symRef = new (trHeapMemory()) TR::SymbolReference(self(), sym, owningMethodSymbol->getResolvedMethodIndex(), cpIndex, unresolvedIndex, knownObjectIndex);
@@ -2146,13 +2267,13 @@ J9::SymbolReferenceTable::findOrCreateUnsafeSymbolRef(TR::DataType type, bool ja
       if (javaStaticReference)
          {
          if (_unsafeJavaStaticVolatileSymRefs == NULL)
-            _unsafeJavaStaticVolatileSymRefs = new (trHeapMemory()) TR_Array<TR::SymbolReference *>(comp()->trMemory(), TR::NumTypes);
+            _unsafeJavaStaticVolatileSymRefs = new (trHeapMemory()) TR_Array<TR::SymbolReference *>(comp()->trMemory(), TR::NumAllTypes);
          unsafeSymRefs = _unsafeJavaStaticVolatileSymRefs;
          }
       else
          {
          if (_unsafeVolatileSymRefs == NULL)
-            _unsafeVolatileSymRefs = new (trHeapMemory()) TR_Array<TR::SymbolReference *>(comp()->trMemory(), TR::NumTypes);
+            _unsafeVolatileSymRefs = new (trHeapMemory()) TR_Array<TR::SymbolReference *>(comp()->trMemory(), TR::NumAllTypes);
          unsafeSymRefs = _unsafeVolatileSymRefs;
          }
       }
@@ -2161,13 +2282,13 @@ J9::SymbolReferenceTable::findOrCreateUnsafeSymbolRef(TR::DataType type, bool ja
       if (javaStaticReference)
          {
          if (_unsafeJavaStaticSymRefs == NULL)
-            _unsafeJavaStaticSymRefs = new (trHeapMemory()) TR_Array<TR::SymbolReference *>(comp()->trMemory(), TR::NumTypes);
+            _unsafeJavaStaticSymRefs = new (trHeapMemory()) TR_Array<TR::SymbolReference *>(comp()->trMemory(), TR::NumAllTypes);
          unsafeSymRefs = _unsafeJavaStaticSymRefs;
          }
       else
          {
          if (_unsafeSymRefs == NULL)
-            _unsafeSymRefs = new (trHeapMemory()) TR_Array<TR::SymbolReference *>(comp()->trMemory(), TR::NumTypes);
+            _unsafeSymRefs = new (trHeapMemory()) TR_Array<TR::SymbolReference *>(comp()->trMemory(), TR::NumAllTypes);
          unsafeSymRefs = _unsafeSymRefs;
          }
       }
@@ -2567,6 +2688,17 @@ J9::SymbolReferenceTable::findOrCreateObjectEqualityComparisonSymbolRef()
    }
 
 TR::SymbolReference *
+J9::SymbolReferenceTable::findOrCreateEncodeASCIISymbolRef()
+   {
+   TR::SymbolReference *symRef = element(encodeASCIISymbol);
+   if (symRef != NULL)
+      return symRef;
+
+   symRef = self()->findOrCreateCodeGenInlinedHelper(encodeASCIISymbol);
+   return symRef;
+   }
+
+TR::SymbolReference *
 J9::SymbolReferenceTable::findOrCreateNonNullableArrayNullStoreCheckSymbolRef()
    {
    TR::SymbolReference *symRef = element(nonNullableArrayNullStoreCheckSymbol);
@@ -2574,6 +2706,30 @@ J9::SymbolReferenceTable::findOrCreateNonNullableArrayNullStoreCheckSymbolRef()
       return symRef;
 
    symRef = self()->findOrCreateCodeGenInlinedHelper(nonNullableArrayNullStoreCheckSymbol);
+   symRef->setCanGCandExcept();
+   return symRef;
+   }
+
+TR::SymbolReference *
+J9::SymbolReferenceTable::findOrCreateLoadFlattenableArrayElementNonHelperSymbolRef()
+   {
+   TR::SymbolReference *symRef = element(loadFlattenableArrayElementNonHelperSymbol);
+   if (symRef != NULL)
+      return symRef;
+
+   symRef = self()->findOrCreateCodeGenInlinedHelper(loadFlattenableArrayElementNonHelperSymbol);
+   symRef->setCanGCandExcept();
+   return symRef;
+   }
+
+TR::SymbolReference *
+J9::SymbolReferenceTable::findOrCreateStoreFlattenableArrayElementNonHelperSymbolRef()
+   {
+   TR::SymbolReference *symRef = element(storeFlattenableArrayElementNonHelperSymbol);
+   if (symRef != NULL)
+      return symRef;
+
+   symRef = self()->findOrCreateCodeGenInlinedHelper(storeFlattenableArrayElementNonHelperSymbol);
    symRef->setCanGCandExcept();
    return symRef;
    }

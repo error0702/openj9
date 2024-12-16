@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 /**************************************************************************
@@ -202,7 +202,7 @@ J9::Symbol::searchRecognizedField(TR::Compilation * comp, TR_ResolvedMethod * ow
       int32_t  totalLen;
       char    *fieldName;
       fieldName = owningMethod->staticName(cpIndex, totalLen, comp->trMemory());  // totalLen = strlen("<class>" + "<field>" + "<sig>") + 3
-      static char *assertionsDisabledStr = "$assertionsDisabled Z";
+      static const char *assertionsDisabledStr = "$assertionsDisabled Z";
       //string will be of the form "<class>.$assertionsDisabled Z"
       if (declaringClass
           && totalLen >= 22

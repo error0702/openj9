@@ -1,6 +1,6 @@
 /*[INCLUDE-IF Sidecar18-SE]*/
-/*******************************************************************************
- * Copyright (c) 2004, 2017 IBM Corp. and others
+/*
+ * Copyright IBM Corp. and others 2004
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,10 +16,10 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
 package com.ibm.dtfj.image.j9;
 
 import java.util.Collections;
@@ -50,9 +50,9 @@ public class ImageProcess implements com.ibm.dtfj.image.ImageProcess
 	private long _faultingNativeID = 0;		//the ID of the native thread which caused the GPF (if there was one)
 	private int _signalNumber = 0;
 	private Exception _runtimeCheckFailure;
-	private static final String JAVA_COMMAND_LINE_ENVIRONMENT_VARIABLE = "IBM_JAVA_COMMAND_LINE";
-	
-	
+	private static final String JAVA_COMMAND_LINE_ENVIRONMENT_VARIABLE = "OPENJ9_JAVA_COMMAND_LINE";
+	private static final String LEGACY_JAVA_COMMAND_LINE_ENVIRONMENT_VARIABLE = "IBM_JAVA_COMMAND_LINE";
+
 	public ImageProcess(String pid, String commandLine, Properties environment, ImageThread currentThread, Iterator threads, ImageModule executable, Iterator libraries, int pointerSize)
 	{
 		_id = pid;
@@ -77,10 +77,17 @@ public class ImageProcess implements com.ibm.dtfj.image.ImageProcess
 		// all platforms we now try that first, with the core reader as a fallback.
 		Properties environment = getEnvironment();
 		String javaCommandLine = environment.getProperty(JAVA_COMMAND_LINE_ENVIRONMENT_VARIABLE);
-		
+
 		if (javaCommandLine != null) {
 			return javaCommandLine;
 		}
+
+		javaCommandLine = environment.getProperty(LEGACY_JAVA_COMMAND_LINE_ENVIRONMENT_VARIABLE);
+
+		if (javaCommandLine != null) {
+			return javaCommandLine;
+		}
+
 		if (_commandLine == null) {
 			throw new DataUnavailable("Command line unavailable from core dump");
 		}
@@ -157,11 +164,11 @@ public class ImageProcess implements com.ibm.dtfj.image.ImageProcess
 	public com.ibm.dtfj.image.ImageThread getCurrentThread() throws CorruptDataException
 	{
 		ImageThread current = _currentThread;
-		
+
 		if (0 != _faultingNativeID) {
 			//look up this thread
 			Iterator threads = getThreads();
-			
+
 			while (threads.hasNext()) {
 				Object next = threads.next();
 				if (next instanceof CorruptData)
@@ -187,7 +194,7 @@ public class ImageProcess implements com.ibm.dtfj.image.ImageProcess
 	{
 		//left un-initialized so the compiler will warn us if we miss a code path
 		Iterator iter;
-		
+
 		if (null == _runtimeCheckFailure)
 		{
 			//this is the normal case where we have a real list of runtimes to work with so just return the iterator
@@ -195,7 +202,7 @@ public class ImageProcess implements com.ibm.dtfj.image.ImageProcess
 		}
 		else
 		{
-			// If something went wrong during startup to the point where we didn't even get to see what the JavaRuntime 
+			// If something went wrong during startup to the point where we didn't even get to see what the JavaRuntime
 			// is (currently this happens if the XML is corrupt), fake up a corrupt data object and return it.
 			iter = Collections.singleton(new CorruptData("No runtimes due to early startup error:  " + _runtimeCheckFailure.getMessage(), null)).iterator();
 		}
@@ -272,7 +279,7 @@ public class ImageProcess implements com.ibm.dtfj.image.ImageProcess
 			// At this point we have a signal number to convert to a name which really should be done by
 			// something platform specific like the corereader.  There is a separate problem in that sometimes
 			// on a GPF we get a 'generic' signal which would need some tricky mapping.  To simplify this situation
-			// we have chosen to merge the signal names for Windows and Unix and have a single routine to do 
+			// we have chosen to merge the signal names for Windows and Unix and have a single routine to do
 			// the conversion.
 			int num = getSignalNumber();
 			return resolvePlatformName(num);
@@ -291,7 +298,7 @@ public class ImageProcess implements com.ibm.dtfj.image.ImageProcess
 	{
 		_runtimes.add(vm);
 	}
-	
+
 	public void setFaultingThreadID(long nativeID)
 	{
 		_faultingNativeID = nativeID;
@@ -299,7 +306,7 @@ public class ImageProcess implements com.ibm.dtfj.image.ImageProcess
 
 	/**
 	 * TODO:  REMOVE THIS once there is a reliable way to find signal numbers from ImageThreads on all platforms!
-	 * 
+	 *
 	 * @param signalNumber
 	 */
 	public void setSignalNumber(int signalNumber)
@@ -310,7 +317,7 @@ public class ImageProcess implements com.ibm.dtfj.image.ImageProcess
 	/**
 	 * Called if the early extraction of the data from the meta-data and core file failed in some unrecoverable way.  If this is called it
 	 * essentially means that we are stuck in native Image data and can't describe anything from the Java side.
-	 * 
+	 *
 	 * @param e The exception which caused the failure
 	 */
 	public void runtimeExtractionFailed(Exception e)

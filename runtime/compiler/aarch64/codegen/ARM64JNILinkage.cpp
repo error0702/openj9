@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2019, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2019
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "codegen/ARM64JNILinkage.hpp"
@@ -37,6 +37,10 @@
 #include "il/StaticSymbol.hpp"
 #include "il/SymbolReference.hpp"
 #include "infra/Assert.hpp"
+
+#if defined(OSX)
+#include "env/j9method.h"
+#endif
 
 J9::ARM64::JNILinkage::JNILinkage(TR::CodeGenerator *cg)
    : J9::ARM64::PrivateLinkage(cg)
@@ -74,7 +78,7 @@ void J9::ARM64::JNILinkage::releaseVMAccess(TR::Node *callNode, TR::Register *vm
    //    addimmx scratch0, vmThreadReg, #publicFlagsOffset
    //    movzx   scratch1, constReleaseVMAccessOutOfLineMask
    //
-   //    dmb ishst
+   //    dmb ish
    // loopHead:
    //    ldxrx   scratch2, [scratch0]
    //    tst     scratch2, scratch1
@@ -89,11 +93,11 @@ void J9::ARM64::JNILinkage::releaseVMAccess(TR::Node *callNode, TR::Register *vm
 
    generateTrg1Src1ImmInstruction(cg(), TR::InstOpCode::addimmx, callNode, scratchReg0, vmThreadReg, fej9->thisThreadGetPublicFlagsOffset());
    loadConstant64(cg(), callNode, fej9->constReleaseVMAccessOutOfLineMask(), scratchReg1);
-   // dmb ishst (Inner Shareable store barrier)
+   // dmb ish (Inner Shareable full barrier)
    // Arm Architecture Reference Manual states:
    // "This architecture assumes that all PEs that use the same operating system or hypervisor are in the same Inner Shareable shareability domain"
    // thus, inner shareable dmb suffices
-   generateSynchronizationInstruction(cg(), TR::InstOpCode::dmb, callNode, 0xb);
+   generateSynchronizationInstruction(cg(), TR::InstOpCode::dmb, callNode, TR::InstOpCode::ish);
 
    TR::LabelSymbol *loopHead = generateLabelSymbol(cg());
    generateLabelInstruction(cg(), TR::InstOpCode::label, callNode, loopHead);
@@ -161,7 +165,7 @@ void J9::ARM64::JNILinkage::acquireVMAccess(TR::Node *callNode, TR::Register *vm
    generateTrg1MemSrc1Instruction(cg(), TR::InstOpCode::stxrx, callNode, scratchReg2, TR::MemoryReference::createWithDisplacement(cg(), scratchReg0, 0), scratchReg1);
    generateCompareBranchInstruction(cg(), TR::InstOpCode::cbnzx, callNode, scratchReg2, loopHead);
    // dmb ishld (Inner Shareable load barrier)
-   generateSynchronizationInstruction(cg(), TR::InstOpCode::dmb, callNode, 0x9);
+   generateSynchronizationInstruction(cg(), TR::InstOpCode::dmb, callNode, TR::InstOpCode::ishld);
 
    generateLabelInstruction(cg(), TR::InstOpCode::label, callNode, reacquireVMAccessRestartLabel);
    }
@@ -226,7 +230,7 @@ void J9::ARM64::JNILinkage::acquireVMAccessAtomicFree(TR::Node *callNode, TR::Re
    static_assert(static_cast<uint64_t>(J9_PUBLIC_FLAGS_VM_ACCESS) < (1 << 12), "J9_PUBLIC_FLAGS_VM_ACCESS must fit in immediate");
    auto strInNativeInstr = generateMemSrc1Instruction(cg(), TR::InstOpCode::strimmx, callNode, TR::MemoryReference::createWithDisplacement(cg(), vmThreadReg, offsetof(J9VMThread, inNative)), zeroReg);
 #ifndef J9VM_INTERP_ATOMIC_FREE_JNI_USES_FLUSH
-   generateSynchronizationInstruction(cg(), TR::InstOpCode::dmb, callNode, 0xb);
+   generateSynchronizationInstruction(cg(), TR::InstOpCode::dmb, callNode, TR::InstOpCode::ish);
 #endif
    auto ldrPubliFlagsInstr = generateTrg1MemInstruction(cg(), TR::InstOpCode::ldrimmx, callNode, scratchReg0, TR::MemoryReference::createWithDisplacement(cg(), vmThreadReg, fej9->thisThreadGetPublicFlagsOffset()));
    if (debugObj)
@@ -253,6 +257,16 @@ void J9::ARM64::JNILinkage::buildJNICallOutFrame(TR::Node *callNode, bool isWrap
                                                  TR::Register *vmThreadReg, TR::Register *javaStackReg, TR::Register *scratchReg0, TR::Register *scratchReg1)
    {
    TR_J9VMBase *fej9 = reinterpret_cast<TR_J9VMBase *>(fe());
+
+#if JAVA_SPEC_VERSION >= 19
+   /**
+     * For virtual threads, bump the callOutCounter.  It is safe and most efficient to
+     * do this unconditionally.  No need to check for overflow.
+     */
+   generateTrg1MemInstruction(cg(), TR::InstOpCode::ldrimmx, callNode, scratchReg1, TR::MemoryReference::createWithDisplacement(cg(), vmThreadReg, fej9->thisThreadGetCallOutCountOffset()));
+   generateTrg1Src1ImmInstruction(cg(), TR::InstOpCode::addimmx, callNode, scratchReg1, scratchReg1, 1);
+   generateMemSrc1Instruction(cg(), TR::InstOpCode::strimmx, callNode, TR::MemoryReference::createWithDisplacement(cg(), vmThreadReg, fej9->thisThreadGetCallOutCountOffset()), scratchReg1);
+#endif
 
    // begin: mask out the magic bit that indicates JIT frames below
    loadConstant64(cg(), callNode, 0, scratchReg1);
@@ -340,6 +354,16 @@ void J9::ARM64::JNILinkage::restoreJNICallOutFrame(TR::Node *callNode, bool tear
    {
    TR_J9VMBase *fej9 = reinterpret_cast<TR_J9VMBase *>(fe());
 
+#if JAVA_SPEC_VERSION >= 19
+   /**
+     * For virtual threads, decrement the callOutCounter.  It is safe and most efficient to
+     * do this unconditionally.  No need to check for underflow.
+     */
+   generateTrg1MemInstruction(cg(), TR::InstOpCode::ldrimmx, callNode, scratchReg, TR::MemoryReference::createWithDisplacement(cg(), vmThreadReg, fej9->thisThreadGetCallOutCountOffset()));
+   generateTrg1Src1ImmInstruction(cg(), TR::InstOpCode::subimmx, callNode, scratchReg, scratchReg, 1);
+   generateMemSrc1Instruction(cg(), TR::InstOpCode::strimmx, callNode, TR::MemoryReference::createWithDisplacement(cg(), vmThreadReg, fej9->thisThreadGetCallOutCountOffset()), scratchReg);
+#endif
+
    // restore stack pointer: need to deal with growable stack -- stack may already be moved.
    generateTrg1MemInstruction(cg(), TR::InstOpCode::ldrimmx, callNode, scratchReg, TR::MemoryReference::createWithDisplacement(cg(), vmThreadReg, fej9->thisThreadGetJavaLiteralsOffset()));
    generateTrg1MemInstruction(cg(),TR::InstOpCode::ldrimmx, callNode, javaStackReg, TR::MemoryReference::createWithDisplacement(cg(), vmThreadReg, fej9->thisThreadGetJavaSPOffset()));
@@ -371,7 +395,6 @@ size_t J9::ARM64::JNILinkage::buildJNIArgs(TR::Node *callNode, TR::RegisterDepen
    {
    const TR::ARM64LinkageProperties &properties = _systemLinkage->getProperties();
    TR::ARM64MemoryArgument *pushToMemory = NULL;
-   TR::Register *argMemReg;
    TR::Register *tempReg;
    int32_t argIndex = 0;
    int32_t numMemArgs = 0;
@@ -384,6 +407,15 @@ size_t J9::ARM64::JNILinkage::buildJNIArgs(TR::Node *callNode, TR::RegisterDepen
    TR::Node *child;
    TR::DataType childType;
    TR::DataType resType = callNode->getType();
+
+#if defined(OSX)
+   TR::SymbolReference *methodSymRef = callNode->getSymbolReference();
+   TR::MethodSymbol *methodSymbol = methodSymRef->getSymbol()->castToMethodSymbol();
+   TR::Method *method = methodSymbol->getMethod();
+   const char *sig = method->signatureChars();
+   int32_t sigLen = method->signatureLength();
+   char *sigCursor = (char *)sig;
+#endif
 
    uint32_t firstArgumentChild = callNode->getFirstArgumentIndex();
    if (passThread)
@@ -417,15 +449,13 @@ size_t J9::ARM64::JNILinkage::buildJNIArgs(TR::Node *callNode, TR::RegisterDepen
 #if defined(LINUX)
                totalSize += 8;
 #elif defined(OSX)
-               if (childType == TR::Address || childType == TR::Int64)
+               TR::DataType nativeType = OMR::Symbol::convertSigCharToType(*sigCursor);
+               int32_t nativeTypeSize = TR::DataType::getSize(nativeType);
+               if (nativeTypeSize > 1)
                   {
-                  totalSize = (totalSize + 7) & ~7; // adjust to 8-byte boundary
-                  totalSize += 8;
+                  totalSize = (totalSize + nativeTypeSize - 1) & ~(nativeTypeSize - 1);
                   }
-               else
-                  {
-                  totalSize += 4;
-                  }
+               totalSize += nativeTypeSize;
 #else
 #error Unsupported platform
 #endif
@@ -460,6 +490,10 @@ size_t J9::ARM64::JNILinkage::buildJNIArgs(TR::Node *callNode, TR::RegisterDepen
          default:
             TR_ASSERT(false, "Argument type %s is not supported\n", childType.toString());
          }
+
+#if defined(OSX)
+         sigCursor = nextSignatureArgument(sigCursor);
+#endif
       }
 
    // From here, down, any new stack allocations will expire / die when the function returns
@@ -468,12 +502,18 @@ size_t J9::ARM64::JNILinkage::buildJNIArgs(TR::Node *callNode, TR::RegisterDepen
    if (numMemArgs > 0)
       {
       pushToMemory = new (trStackMemory()) TR::ARM64MemoryArgument[numMemArgs];
-
-      argMemReg = cg()->allocateRegister();
       }
 
    // align to 16-byte boundary
    totalSize = (totalSize + 15) & (~15);
+   /*
+    * We have J9_INLINE_JNI_MAX_ARG_COUNT (32) slots in interpreter frame.
+    * If the size of the native stack used for passing parameters exceeds this size,
+    * it will overwrite preserved registers.
+    * The number of parameters is guaranteed to be <= J9_INLINE_JNI_MAX_ARG_COUNT
+    * when HasFixedFrameC_CallingConvention codegen flag is set.
+    */
+   TR_ASSERT_FATAL(totalSize <= sizeof(UDATA) * J9_INLINE_JNI_MAX_ARG_COUNT, "totalSize must not be larger than J9_INLINE_JNI_MAX_ARG_COUNT slots");
 
    numIntegerArgs = 0;
    numFloatArgs = 0;
@@ -483,6 +523,11 @@ size_t J9::ARM64::JNILinkage::buildJNIArgs(TR::Node *callNode, TR::RegisterDepen
       // first argument is JNIenv
       numIntegerArgs += 1;
       }
+
+#if defined(OSX)
+   sigCursor = (char *)sig;
+#endif
+   TR::RealRegister *sp = cg()->machine()->getRealRegister(properties.getStackPointerRegister());
 
    for (i = firstArgumentChild; i < callNode->getNumChildren(); i++)
       {
@@ -510,17 +555,17 @@ size_t J9::ARM64::JNILinkage::buildJNIArgs(TR::Node *callNode, TR::RegisterDepen
             else
                argRegister = pushIntegerWordArg(child);
 
+            if (checkSplit && !cg()->canClobberNodesRegister(child, 0))
+               {
+               if (argRegister->containsCollectedReference())
+                  tempReg = cg()->allocateCollectedReferenceRegister();
+               else
+                  tempReg = cg()->allocateRegister();
+               generateMovInstruction(cg(), callNode, tempReg, argRegister);
+               argRegister = tempReg;
+               }
             if (numIntegerArgs < properties.getNumIntArgRegs())
                {
-               if (checkSplit && !cg()->canClobberNodesRegister(child, 0))
-                  {
-                  if (argRegister->containsCollectedReference())
-                     tempReg = cg()->allocateCollectedReferenceRegister();
-                  else
-                     tempReg = cg()->allocateRegister();
-                  generateMovInstruction(cg(), callNode, tempReg, argRegister);
-                  argRegister = tempReg;
-                  }
                if (numIntegerArgs == 0 &&
                   (resType.isAddress() || resType.isInt32() || resType.isInt64()))
                   {
@@ -542,26 +587,37 @@ size_t J9::ARM64::JNILinkage::buildJNIArgs(TR::Node *callNode, TR::RegisterDepen
                {
                // numIntegerArgs >= properties.getNumIntArgRegs()
                int offsetInc;
-               if (childType == TR::Address || childType == TR::Int64)
-                  {
-                  op = TR::InstOpCode::strimmx;
-                  offsetInc = 8;
-#if defined(OSX)
-                  argOffset = (argOffset + 7) & ~7; // adjust to 8-byte boundary
-#endif
-                  }
-               else
-                  {
-                  op = TR::InstOpCode::strimmw;
 #if defined(LINUX)
-                  offsetInc = 8;
+               offsetInc = 8; // always 8-byte aligned
+               op = (childType == TR::Address || childType == TR::Int64) ?
+                    TR::InstOpCode::strimmx : TR::InstOpCode::strimmw;
 #elif defined(OSX)
-                  offsetInc = 4;
+               TR::DataType nativeType = OMR::Symbol::convertSigCharToType(*sigCursor);
+               int32_t nativeTypeSize = TR::DataType::getSize(nativeType);
+               offsetInc = nativeTypeSize;
+               if (nativeTypeSize > 1)
+                  {
+                  argOffset = (argOffset + nativeTypeSize - 1) & ~(nativeTypeSize - 1);
+                  }
+               switch (nativeTypeSize)
+                  {
+                  case 8:
+                     op = TR::InstOpCode::strimmx;
+                     break;
+                  case 4:
+                     op = TR::InstOpCode::strimmw;
+                     break;
+                  case 2:
+                     op = TR::InstOpCode::strhimm;
+                     break;
+                  case 1:
+                     op = TR::InstOpCode::strbimm;
+                     break;
+                  }
 #else
 #error Unsupported platform
 #endif
-                  }
-               getOutgoingArgumentMemRef(argMemReg, argOffset, argRegister, op, pushToMemory[argIndex++]);
+               getOutgoingArgumentMemRef(sp, argOffset, argRegister, op, pushToMemory[argIndex++]);
                argOffset += offsetInc;
                }
             numIntegerArgs++;
@@ -574,15 +630,15 @@ size_t J9::ARM64::JNILinkage::buildJNIArgs(TR::Node *callNode, TR::RegisterDepen
             else
                argRegister = pushDoubleArg(child);
 
+            if (!cg()->canClobberNodesRegister(child, 0))
+               {
+               tempReg = cg()->allocateRegister(TR_FPR);
+               op = (childType == TR::Float) ? TR::InstOpCode::fmovs : TR::InstOpCode::fmovd;
+               generateTrg1Src1Instruction(cg(), op, callNode, tempReg, argRegister);
+               argRegister = tempReg;
+               }
             if (numFloatArgs < properties.getNumFloatArgRegs())
                {
-               if (!cg()->canClobberNodesRegister(child, 0))
-                  {
-                  tempReg = cg()->allocateRegister(TR_FPR);
-                  op = (childType == TR::Float) ? TR::InstOpCode::fmovs : TR::InstOpCode::fmovd;
-                  generateTrg1Src1Instruction(cg(), op, callNode, tempReg, argRegister);
-                  argRegister = tempReg;
-                  }
                if ((numFloatArgs == 0 && resType.isFloatingPoint()))
                   {
                   TR::Register *resultReg;
@@ -622,12 +678,16 @@ size_t J9::ARM64::JNILinkage::buildJNIArgs(TR::Node *callNode, TR::RegisterDepen
 #error Unsupported platform
 #endif
                   }
-               getOutgoingArgumentMemRef(argMemReg, argOffset, argRegister, op, pushToMemory[argIndex++]);
+               getOutgoingArgumentMemRef(sp, argOffset, argRegister, op, pushToMemory[argIndex++]);
                argOffset += offsetInc;
                }
             numFloatArgs++;
             break;
          } // end of switch
+
+#if defined(OSX)
+         sigCursor = nextSignatureArgument(sigCursor);
+#endif
       } // end of for
 
    for (int32_t i = TR::RealRegister::FirstGPR; i <= TR::RealRegister::LastGPR; ++i)
@@ -682,19 +742,22 @@ size_t J9::ARM64::JNILinkage::buildJNIArgs(TR::Node *callNode, TR::RegisterDepen
          }
       }
 
+   /* Spills all vector registers */
+   if (killsVectorRegisters())
+      {
+      TR::Register *tmpReg = cg()->allocateRegister();
+      dependencies->addPostCondition(tmpReg, TR::RealRegister::KillVectorRegs);
+      cg()->stopUsingRegister(tmpReg);
+      }
+
    if (numMemArgs > 0)
       {
-      TR::RealRegister *sp = cg()->machine()->getRealRegister(properties.getStackPointerRegister());
-      generateTrg1Src1ImmInstruction(cg(), TR::InstOpCode::subimmx, callNode, argMemReg, sp, totalSize);
-
       for (argIndex = 0; argIndex < numMemArgs; argIndex++)
          {
          TR::Register *aReg = pushToMemory[argIndex].argRegister;
          generateMemSrc1Instruction(cg(), pushToMemory[argIndex].opCode, callNode, pushToMemory[argIndex].argMemory, aReg);
          cg()->stopUsingRegister(aReg);
          }
-
-      cg()->stopUsingRegister(argMemReg);
       }
 
    return totalSize;
@@ -920,13 +983,19 @@ TR::Instruction *J9::ARM64::JNILinkage::generateMethodDispatch(TR::Node *callNod
          reloType = TR_NoRelocation;
          TR_ASSERT(0, "JNI relocation not supported.");
          }
-      cg()->addExternalRelocation(new (trHeapMemory()) TR::BeforeBinaryEncodingExternalRelocation(
-                                                            firstInstruction,
-                                                            reinterpret_cast<uint8_t *>(callNode->getSymbolReference()),
-                                                            reinterpret_cast<uint8_t *>(callNode->getInlinedSiteIndex()),
-                                                            reloType, cg()),
-                                                          __FILE__,__LINE__, callNode);
 
+      TR_RelocationRecordInformation *info = new (comp()->trHeapMemory()) TR_RelocationRecordInformation();
+      info->data1 = 0;
+      info->data2 = reinterpret_cast<uintptr_t>(callNode->getSymbolReference());
+      info->data3 = static_cast<uintptr_t>(callNode->getInlinedSiteIndex());
+
+      cg()->addExternalRelocation(
+         new (trHeapMemory()) TR::BeforeBinaryEncodingExternalRelocation(
+            firstInstruction,
+            reinterpret_cast<uint8_t *>(info),
+            reloType,
+            cg()),
+         __FILE__,__LINE__, callNode);
       }
 
    // Add the first instruction of address materialization sequence to JNI call sites
@@ -980,27 +1049,17 @@ TR::Register *J9::ARM64::JNILinkage::buildDirectDispatch(TR::Node *callNode)
    cg()->machine()->setLinkRegisterKilled(true);
 
    const int maxRegisters = getProperties()._numAllocatableIntegerRegisters + getProperties()._numAllocatableFloatRegisters;
+   // Extra post dependency for killing vector registers (see KillVectorRegs)
+   const int extraPostReg = killsVectorRegisters() ? 1 : 0;
 #ifdef J9VM_INTERP_ATOMIC_FREE_JNI
-   const int maxPostRegisters = maxRegisters + 1;
+   // Extra post dependency for xzr
+   const int maxPostRegisters = maxRegisters + extraPostReg + 1;
 #else
-   const int maxPostRegisters = maxRegisters;
+   const int maxPostRegisters = maxRegisters + extraPostReg;
 #endif
    TR::RegisterDependencyConditions *deps = new (trHeapMemory()) TR::RegisterDependencyConditions(maxRegisters, maxPostRegisters, trMemory());
 
-   size_t spSize = buildJNIArgs(callNode, deps, passThread, passReceiver, killNonVolatileGPRs);
-   TR::RealRegister *sp = machine()->getRealRegister(_systemLinkage->getProperties().getStackPointerRegister());
-
-   if (spSize > 0)
-      {
-      if (constantIsUnsignedImm12(spSize))
-         {
-         generateTrg1Src1ImmInstruction(cg(), TR::InstOpCode::subimmx, callNode, sp, sp, spSize);
-         }
-      else
-         {
-         TR_ASSERT_FATAL(false, "Too many arguments.");
-         }
-      }
+   buildJNIArgs(callNode, deps, passThread, passReceiver, killNonVolatileGPRs);
 
    TR::Register *returnRegister = getReturnRegisterFromDeps(callNode, deps);
 
@@ -1039,18 +1098,6 @@ TR::Register *J9::ARM64::JNILinkage::buildDirectDispatch(TR::Node *callNode)
 
    TR::Instruction *callInstr = generateMethodDispatch(callNode, isJNIGCPoint, deps, targetAddress, x9Reg);
    generateLabelInstruction(cg(), TR::InstOpCode::label, callNode, returnLabel, callInstr);
-
-   if (spSize > 0)
-      {
-      if (constantIsUnsignedImm12(spSize))
-         {
-         generateTrg1Src1ImmInstruction(cg(), TR::InstOpCode::addimmx, callNode, sp, sp, spSize);
-         }
-      else
-         {
-         TR_ASSERT_FATAL(false, "Too many arguments.");
-         }
-      }
 
    if (dropVMAccess)
       {

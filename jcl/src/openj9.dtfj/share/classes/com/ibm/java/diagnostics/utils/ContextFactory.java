@@ -1,6 +1,6 @@
 /*[INCLUDE-IF Sidecar18-SE]*/
-/*******************************************************************************
- * Copyright (c) 2011, 2017 IBM Corp. and others
+/*
+ * Copyright IBM Corp. and others 2011
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,10 +16,10 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
 package com.ibm.java.diagnostics.utils;
 
 import com.ibm.dtfj.image.Image;
@@ -28,32 +28,38 @@ import com.ibm.dtfj.image.ImageProcess;
 import com.ibm.dtfj.java.JavaRuntime;
 
 /**
- * Factory for creating different types of context
- * 
- * @author adam
+ * Factory for creating different types of contexts.
  *
+ * @author adam
  */
 public class ContextFactory {
-	
+
+	private ContextFactory() {
+		/* no instances needed */
+	}
+
 	/**
-	 * Create a DTFJ context
-	 * 
+	 * Create a DTFJ context.
+	 *
 	 * @param major DTFJ API major version to be supported
 	 * @param minor DTFJ minor version to be supported
+	 * @param image the source image for the context
 	 * @param space address space for this context (cannot be null)
-	 * @param process in this address space
-	 * @param rt Java runtime for this context (may be null)
+	 * @param process process in this address space
+	 * @param runtime Java runtime for this context (may be null)
 	 * @return the context
 	 */
-	public static IDTFJContext getContext(final int major, final int minor,final Image image, final ImageAddressSpace space, final ImageProcess proc, final JavaRuntime rt) {
-		DTFJContext ctx = new DTFJContext(major, minor, image, space, proc, rt);
+	public static IDTFJContext getContext(final int major, final int minor, final Image image, final ImageAddressSpace space, final ImageProcess process, final JavaRuntime runtime) {
+		DTFJContext ctx = new DTFJContext(major, minor, image, space, process, runtime);
 		ctx.refresh();
 		return ctx;
 	}
-	
+
 	/**
-	 * Create a stub DTFJ context which just contains the global commands
-	 * 
+	 * Create a stub DTFJ context which just contains the global commands.
+	 *
+	 * @param major DTFJ API major version to be supported
+	 * @param minor DTFJ minor version to be supported
 	 * @return the context
 	 */
 	public static IDTFJContext getEmptyContext(final int major, final int minor) {

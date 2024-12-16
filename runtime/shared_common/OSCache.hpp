@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2001
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 #if !defined(OSCACHE_HPP_INCLUDED)
 #define OSCACHE_HPP_INCLUDED
@@ -61,7 +61,7 @@
 #define OSCACHE_LOWEST_ACTIVE_GEN 1
 
 /* Always increment this value by 2. For testing we use the (current generation - 1) and expect the cache contents to be compatible. */
-#define OSCACHE_CURRENT_CACHE_GEN 43
+#define OSCACHE_CURRENT_CACHE_GEN 45
 #define OSCACHE_CURRENT_LAYER_LAYER 0
 
 #define J9SH_VERSION(versionMajor, versionMinor) (versionMajor*100 + versionMinor)
@@ -238,9 +238,9 @@ public:
   	
 	virtual void *attach(J9VMThread* currentThread, J9PortShcVersion* expectedVersionData) = 0;
 
-#if defined (J9SHR_MSYNC_SUPPORT)
+#if defined(J9VM_OPT_SHR_MSYNC_SUPPORT)
 	virtual IDATA syncUpdates(void* start, UDATA length, U_32 flags) = 0;
-#endif
+#endif /* defined(J9VM_OPT_SHR_MSYNC_SUPPORT) */
 	
 	virtual IDATA getError(void) = 0;
 	

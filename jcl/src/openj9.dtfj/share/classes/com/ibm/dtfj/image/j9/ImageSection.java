@@ -1,6 +1,6 @@
 /*[INCLUDE-IF Sidecar18-SE]*/
-/*******************************************************************************
- * Copyright (c) 2004, 2017 IBM Corp. and others
+/*
+ * Copyright IBM Corp. and others 2004
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,10 +16,10 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
 package com.ibm.dtfj.image.j9;
 
 import java.util.Properties;
@@ -35,13 +35,13 @@ public abstract class ImageSection implements com.ibm.dtfj.image.ImageSection
 {
 	private ImagePointer _start;
 	private long _size;
-	
+
 	protected ImageSection(ImagePointer start, long size)
 	{
 		_start = start;
 		_size = size;
 	}
-	
+
 	public ImagePointer getBaseAddress()
 	{
 		return _start;
@@ -51,8 +51,7 @@ public abstract class ImageSection implements com.ibm.dtfj.image.ImageSection
 	{
 		return _size;
 	}
-	
-	
+
 	//in general, we don't get image section permission bits (the specific sub-classes can give us more information and override these methods)
 
 	public boolean isExecutable() throws DataUnavailable
@@ -69,7 +68,7 @@ public abstract class ImageSection implements com.ibm.dtfj.image.ImageSection
 	{
 		return _start.isShared();
 	}
-	
+
 	public Properties getProperties() {
 		return _start.getProperties();
 	}

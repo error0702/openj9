@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2019, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2019
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #ifndef JIT_CLIENT_SESSION_H
@@ -203,12 +203,15 @@ public:
       TR_OpaqueClassBlock *_hostClass;
       TR_OpaqueClassBlock *_componentClass; // caching the componentType of the J9ArrayClass
       TR_OpaqueClassBlock *_arrayClass;
+      TR_OpaqueClassBlock *_nullRestrictedArrayClass;
       uintptr_t _totalInstanceSize;
       J9ConstantPool *_constantPool;
       uintptr_t _classFlags;
       uintptr_t _classChainOffsetIdentifyingLoader;
       std::string _classNameIdentifyingLoader;
       const AOTCacheClassRecord *_aotCacheClassRecord;
+      int32_t _arrayElementSize;
+      j9object_t * _defaultValueSlotAddress;
 
       PersistentUnorderedMap<int32_t, TR_OpaqueClassBlock *> _classOfStaticCache;
       PersistentUnorderedMap<int32_t, TR_OpaqueClassBlock *> _constantClassPoolCache;
@@ -274,7 +277,10 @@ public:
       bool _elgibleForPersistIprofileInfo;
       bool _reportByteCodeInfoAtCatchBlock;
       TR_OpaqueClassBlock *_arrayTypeClasses[8];
-      TR_OpaqueClassBlock *_byteArrayClass;
+      TR_OpaqueClassBlock *_byteArrayOpaqueClass;
+      bool _isIndexableDataAddrPresent;
+      uintptr_t _contiguousIndexableHeaderSize;
+      uintptr_t _discontiguousIndexableHeaderSize;
       MM_GCReadBarrierType _readBarrierType;
       MM_GCWriteBarrierType _writeBarrierType;
       bool _compressObjectReferences;
@@ -302,20 +308,51 @@ public:
       void *_helperAddresses[TR_numRuntimeHelpers];
 #endif
       bool _isHotReferenceFieldRequired;
+      bool _isOffHeapAllocationEnabled;
       UDATA _osrGlobalBufferSize;
       bool _needsMethodTrampolines;
       int32_t _objectAlignmentInBytes;
-      bool _isGetImplInliningSupported;
+      bool _isGetImplAndRefersToInliningSupported;
       bool _isAllocateZeroedTLHPagesEnabled;
       uint32_t _staticObjectAllocateFlags;
       void *_referenceArrayCopyHelperAddress;
 #if defined(J9VM_OPT_OPENJDK_METHODHANDLE)
       UDATA _vmtargetOffset;
       UDATA _vmindexOffset;
+      bool _shareLambdaForm;
 #endif /* defined(J9VM_OPT_OPENJDK_METHODHANDLE) */
       bool _useAOTCache;
+      // Should we use server offsets (idAndType of AOT cache serialization records) instead of
+      // local SCC offsets during AOT cache compilations?
+      bool _useServerOffsets;
       TR_AOTHeader _aotHeader;
       TR_OpaqueClassBlock *_JavaLangObject;
+      TR_OpaqueClassBlock *_JavaStringObject;
+      // The following three fields refer to CRIU support
+      // Do not protect them with #if defined(J9VM_OPT_CRIU_SUPPORT) because we want JITServer to be
+      // able to handle all clients whether or not they have CRIU support enabled
+      bool _inSnapshotMode;
+      bool _isPortableRestoreMode;
+      bool _isSnapshotModeEnabled;
+      bool _isNonPortableRestoreMode;
+      // The reflect and array class pointers for the server to identify the classes
+      void *_voidReflectClassPtr;
+      void *_booleanReflectClassPtr;
+      void *_charReflectClassPtr;
+      void *_floatReflectClassPtr;
+      void *_doubleReflectClassPtr;
+      void *_byteReflectClassPtr;
+      void *_shortReflectClassPtr;
+      void *_intReflectClassPtr;
+      void *_longReflectClassPtr;
+      void *_booleanArrayClass;
+      void *_charArrayClass;
+      void *_floatArrayClass;
+      void *_doubleArrayClass;
+      void *_byteArrayClass;
+      void *_shortArrayClass;
+      void *_intArrayClass;
+      void *_longArrayClass;
       }; // struct VMInfo
 
    /**
@@ -332,7 +369,7 @@ public:
 
    struct ClassChainData
       {
-      uintptr_t *_classChain;
+      uintptr_t _classChainOffset;
       const AOTCacheClassChainRecord *_aotCacheClassChainRecord;
       };
 
@@ -457,19 +494,42 @@ public:
       return _aotHeaderRecord;
       }
 
-   const AOTCacheClassRecord *getClassRecord(J9Class *clazz, JITServer::ServerStream *stream);
+   // If this function sets the missingLoaderInfo flag then a NULL result is due to missing class loader info;
+   // otherwise that result is due to reaching the AOT cache size limit. If this function (or any other function
+   // in this class that takes a scratchSegmentProvider) is called outside of a compilation (e.g., at the start
+   // of processing a client compilation request), must pass a scratchSegmentProvider that will be used for
+   // scratch memory allocations when re-packing a runtime-generated ROMClass to compute its deterministic hash.
+   const AOTCacheClassRecord *getClassRecord(J9Class *clazz, JITServer::ServerStream *stream, bool &missingLoaderInfo,
+                                             J9::J9SegmentProvider *scratchSegmentProvider = NULL);
    const AOTCacheMethodRecord *getMethodRecord(J9Method *method, J9Class *definingClass, JITServer::ServerStream *stream);
-   const AOTCacheClassChainRecord *getClassChainRecord(J9Class *clazz, uintptr_t *classChain,
-                                                       const std::vector<J9Class *> &ramClassChain, JITServer::ServerStream *stream);
+   // If this function sets the missingLoaderInfo flag then a NULL result is due to missing class loader info;
+   // otherwise that result is due to reaching the AOT cache size limit.
+   const AOTCacheClassChainRecord *getClassChainRecord(J9Class *clazz, uintptr_t classChainOffset,
+                                                       const std::vector<J9Class *> &ramClassChain,
+                                                       JITServer::ServerStream *stream, bool &missingLoaderInfo,
+                                                       J9::J9SegmentProvider *scratchSegmentProvider = NULL);
+   const AOTCacheWellKnownClassesRecord *getWellKnownClassesRecord(const AOTCacheClassChainRecord *const *chainRecords,
+                                                                   size_t length, uintptr_t includedClasses);
 
    JITServerAOTCache::KnownIdSet &getAOTCacheKnownIds() { return _aotCacheKnownIds; }
    TR::Monitor *getAOTCacheKnownIdsMonitor() const { return _aotCacheKnownIdsMonitor; }
 
+   bool useServerOffsets(JITServer::ServerStream *stream);
+
 private:
    void destroyMonitors();
 
-   const AOTCacheClassRecord *getClassRecord(ClientSessionData::ClassInfo &classInfo);
-   const AOTCacheClassRecord *getClassRecord(J9Class *clazz, bool &missingLoaderRecord);
+   // If this function sets the missingLoaderInfo flag then a NULL result is due to missing class loader info;
+   // otherwise that result is due to either the base component (returned via non-NULL uncachedBaseComponent)
+   // of the array class being uncached, or having reached the AOT cache size limit.
+   const AOTCacheClassRecord *getClassRecord(ClassInfo &classInfo, bool &missingLoaderInfo,
+                                             J9Class *&uncachedBaseComponent,
+                                             J9::J9SegmentProvider *scratchSegmentProvider = NULL);
+   // If this function sets one of the two boolean flags or uncachedBaseComponent then a NULL result is due to
+   // one of those error conditions; otherwise that result is due to having reached the AOT cache size limit.
+   const AOTCacheClassRecord *getClassRecord(J9Class *clazz, bool &missingLoaderInfo,
+                                             bool &uncachedClass, J9Class *&uncachedBaseComponent,
+                                             J9::J9SegmentProvider *scratchSegmentProvider = NULL);
 
    const uint64_t _clientUID;
    int64_t  _timeOfLastAccess; // in ms
@@ -546,8 +606,9 @@ private:
    bool _isInStartupPhase;
 
    std::string _aotCacheName;
-   JITServerAOTCache *_aotCache;
-   const AOTCacheAOTHeaderRecord *_aotHeaderRecord;
+   JITServerAOTCache *volatile _aotCache;
+   bool _useServerOffsets;
+   const AOTCacheAOTHeaderRecord *volatile _aotHeaderRecord;
 
    JITServerAOTCache::KnownIdSet _aotCacheKnownIds;
    TR::Monitor *_aotCacheKnownIdsMonitor;
@@ -562,7 +623,7 @@ private:
    that we can access client session data without going through the hashtable.
    Accesss to this hashtable must be protected by the compilation monitor.
    Compilation threads may purge old entries periodically at the beginning of a
-   compilation. The StatistcisThread can also perform purging duties.
+   compilation. The StatisticsThread can also perform purging duties.
    Entried with inUse > 0 must not be purged.
  */
 class ClientSessionHT
@@ -581,7 +642,7 @@ class ClientSessionHT
    private:
    PersistentUnorderedMap<uint64_t, ClientSessionData*> _clientSessionMap;
 
-   uint64_t _timeOfLastPurge;
+   int64_t _timeOfLastPurge;
    TR::CompilationInfo *_compInfo;
    const int64_t TIME_BETWEEN_PURGES; // ms; this defines how often we are willing to scan for old entries to be purged
    const int64_t OLD_AGE;// ms; this defines what an old entry means

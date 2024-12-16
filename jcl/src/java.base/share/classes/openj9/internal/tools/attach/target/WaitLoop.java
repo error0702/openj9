@@ -1,6 +1,6 @@
-/*[INCLUDE-IF Sidecar18-SE]*/
-/*******************************************************************************
- * Copyright (c) 2017, 2021 IBM Corp. and others
+/*[INCLUDE-IF JAVA_SPEC_VERSION >= 8]*/
+/*
+ * Copyright IBM Corp. and others 2017
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,10 +16,10 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
 package openj9.internal.tools.attach.target;
 
 import java.io.IOException;
@@ -29,8 +29,8 @@ import static openj9.internal.tools.attach.target.IPC.LOGGING_DISABLED;
 final class WaitLoop extends Thread {
 
 	WaitLoop() {
+		super("Attach API wait loop"); //$NON-NLS-1$
 		setDaemon(true);
-		setName("Attach API wait loop"); //$NON-NLS-1$
 		/*[PR Jazz 33224 go to max priority to prevent starvation]*/
 		/*
 		 * Give the handler thread increased priority so it responds promptly to
@@ -62,7 +62,7 @@ final class WaitLoop extends Thread {
 		if (LOGGING_DISABLED != loggingStatus) {
 			IPC.logMessage("iteration ", AttachHandler.notificationCount, " waitForNotification starting wait"); //$NON-NLS-1$ //$NON-NLS-2$
 		}
-		
+
 		int status = CommonDirectory.SEMAPHORE_OKAY;
 		if (AttachHandler.startWaitingForSemaphore()) { /* check if we are shutting down */
 			status = CommonDirectory.waitSemaphore(AttachHandler.vmId);
@@ -74,7 +74,7 @@ final class WaitLoop extends Thread {
 
 		if (AttachHandler.isAttachApiTerminated()) {
 			/*
-			 * Now that I have woken up, eat the remaining posts to the semaphore 
+			 * Now that I have woken up, eat the remaining posts to the semaphore
 			 * to avoid waking other processes.
 			 */
 			if (AttachHandler.getDoCancelNotify()) {
@@ -84,7 +84,7 @@ final class WaitLoop extends Thread {
 				CommonDirectory.cancelNotify(AttachHandler.getNumberOfTargets(), true);
 			}
 			return null;
-		} 
+		}
 
 		if (status != CommonDirectory.SEMAPHORE_OKAY) {
 			if (retry) {
@@ -93,15 +93,15 @@ final class WaitLoop extends Thread {
 					if (!AttachHandler.isAttachApiTerminated()) {
 						try {
 							/*[PR 164751 avoid scanning the directory when an attach API is launching ]*/
-							CommonDirectory.obtainControllerLock("WaitLoop.waitForNotification(" + retry + ")_1"); //$NON-NLS-1$ //$NON-NLS-2$ 
-							status = CommonDirectory.reopenSemaphore(); 
+							CommonDirectory.obtainControllerLock("WaitLoop.waitForNotification(" + retry + ")_1"); //$NON-NLS-1$ //$NON-NLS-2$
+							status = CommonDirectory.reopenSemaphore();
 							CommonDirectory.releaseControllerLock("WaitLoop.waitForNotification(" + retry + ")_2"); //$NON-NLS-1$ //$NON-NLS-2$
-						} catch (IOException e) { 
+						} catch (IOException e) {
 							IPC.logMessage("waitForNotification: IOError on controller lock : ", e.toString()); //$NON-NLS-1$
 						}
 					}
 				}
-				
+
 				/*[PR Jazz 41720 - Recreate notification directory if it is deleted. ]*/
 				if ((CommonDirectory.SEMAPHORE_OKAY == status) && TargetDirectory.ensureMyAdvertisementExists(AttachHandler.getVmId())) {
 					/*[PR 199483] post to the semaphore to test it */
@@ -133,8 +133,8 @@ final class WaitLoop extends Thread {
 		if (LOGGING_DISABLED != loggingStatus) {
 			IPC.logMessage("checkReplyAndCreateAttachment iteration "+ AttachHandler.notificationCount+" waitForNotification obtainLock"); //$NON-NLS-1$ //$NON-NLS-2$
 		}
-		/* the sync file is missing. */
-		if (!AttachHandler.mainHandler.syncFileLock.lockFile(true, "WaitLoop.checkReplyAndCreateAttachment")) { //$NON-NLS-1$ 
+		/* the sync file is missing, use FileLockWatchdogTask for non-CommonControlFile */
+		if (!AttachHandler.mainHandler.syncFileLock.lockFile(true, "WaitLoop.checkReplyAndCreateAttachment", true)) { //$NON-NLS-1$
 			TargetDirectory.createMySyncFile();
 			/* don't bother locking this since the attacher will not have locked it. */
 		} else {
@@ -146,7 +146,7 @@ final class WaitLoop extends Thread {
 		try {
 			/*[PR Jazz 33224 Throttle the loop in to prevent the loop from occupying the semaphore ]*/
 			IPC.logMessage("WaitLoop.checkReplyAndCreateAttachment before sleep"); //$NON-NLS-1$
-			Thread.sleep(1000);
+			Thread.sleep(300);
 		} catch (InterruptedException e) { /* the attach handler thread is interrupted on shutdown */
 			IPC.logMessage("WaitLoop.checkReplyAndCreateAttachment Interrupted"); //$NON-NLS-1$
 			return at;
@@ -165,7 +165,7 @@ final class WaitLoop extends Thread {
 			} catch (IOException e) {
 				IPC.logMessage("WaitLoop.waitForNotification exception: AttachHandler.notificationCount = " + AttachHandler.notificationCount, e.toString()); //$NON-NLS-1$
 				/*[PR CMVC 188652] Suppress OOM output from attach API */
-			} catch (OutOfMemoryError e) { 
+			} catch (OutOfMemoryError e) {
 				IPC.tracepoint(IPC.TRACEPOINT_STATUS_OOM_DURING_WAIT, e.getMessage());
 				try {
 					IPC.logMessage("WaitLoop.waitForNotification OutOfMemoryError before sleep"); //$NON-NLS-1$
@@ -177,6 +177,6 @@ final class WaitLoop extends Thread {
 			}
 			++AttachHandler.notificationCount;
 		}
-		AttachHandler.mainHandler.syncFileLock = null;	
+		AttachHandler.mainHandler.syncFileLock = null;
 	}
 }

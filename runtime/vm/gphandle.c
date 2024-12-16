@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 /* Turn off FPO optimisation on Windows 32-bit to improve native stack traces */
@@ -218,8 +218,12 @@ isCallerClassJavaNio(J9VMThread *currentThread, J9StackWalkState *walkState)
 		UDATA length = J9UTF8_LENGTH(className);
 		U_8 *data = J9UTF8_DATA(className);
 
-		/* Ignore any methods in Unsafe */
-		if (J9UTF8_LITERAL_EQUALS(data, length, "sun/misc/Unsafe") || J9UTF8_LITERAL_EQUALS(data, length, "jdk/internal/misc/Unsafe")) {
+		/* Ignore any methods in Unsafe, and ScopedMemoryAccess with version 17 and later. */
+		if (J9UTF8_LITERAL_EQUALS(data, length, "sun/misc/Unsafe") || J9UTF8_LITERAL_EQUALS(data, length, "jdk/internal/misc/Unsafe")
+#if JAVA_SPEC_VERSION >= 17
+			|| J9UTF8_LITERAL_EQUALS(data, length, "jdk/internal/misc/ScopedMemoryAccess")
+#endif /* JAVA_SPEC_VERSION >= 17 */
+		) {
 			goto done;
 		}
 		if (length >= 9) {
@@ -887,14 +891,13 @@ vmSignalHandler(struct J9PortLibrary* portLibrary, U_32 gpType, void* gpInfo, vo
 static void
 generateSystemDump(struct J9PortLibrary* portLibrary, void* gpInfo)
 {
-	char dumpName[EsMaxPath];
-	UDATA dumpCreateReturnCode;
-	IDATA getEnvForDumpReturnCode;
 	PORT_ACCESS_FROM_PORT(portLibrary);
+	IDATA getEnvForDumpReturnCode = j9sysinfo_get_env(J9DO_NOT_WRITE_DUMP, NULL, 0);
 
-	getEnvForDumpReturnCode = j9sysinfo_get_env(J9DO_NOT_WRITE_DUMP, NULL, 0);
-	if (getEnvForDumpReturnCode != 0) {
+	if (-1 == getEnvForDumpReturnCode) {
 		/* failed to find the env var, so write the dump */
+		char dumpName[EsMaxPath];
+		UDATA dumpCreateReturnCode = 0;
 		*dumpName = '\0';
 #ifdef LINUX
 		/* Ensure that userdata argument is NULL on Linux. */
@@ -968,13 +971,13 @@ writeGPInfo(struct J9PortLibrary* portLibrary, void *writeGPInfoCrashData)
 
 		switch (infoKind) {
 		case J9PORT_SIG_VALUE_16:
-				n = j9str_printf(PORTLIB,  cursor, length, "%s=%04X%c", name, *(U_16 *)value, c);
+				n = j9str_printf(PORTLIB, cursor, length, "%s=%04X%c", name, *(U_16 *)value, c);
 			break;
 		case J9PORT_SIG_VALUE_32:
-				n = j9str_printf(PORTLIB, cursor , length, "%s=%08.8x%c", name, *(U_32 *)value, c);
+				n = j9str_printf(PORTLIB, cursor, length, "%s=%08.8x%c", name, *(U_32 *)value, c);
 			break;
 		case J9PORT_SIG_VALUE_64:
-				n = j9str_printf(PORTLIB, cursor, length,"%s=%016.16llx%c", name, *(U_64 *)value, c);
+				n = j9str_printf(PORTLIB, cursor, length, "%s=%016.16llx%c", name, *(U_64 *)value, c);
 			break;
 		case J9PORT_SIG_VALUE_128:
 			{
@@ -982,22 +985,22 @@ writeGPInfo(struct J9PortLibrary* portLibrary, void *writeGPInfoCrashData)
 				const U_64 h = v->high64;
 				const U_64 l = v->low64;
 
-				n = j9str_printf(PORTLIB, cursor, length,"%s=%016.16llx%016.16llx%c", name, h, l, c);
+				n = j9str_printf(PORTLIB, cursor, length, "%s=%016.16llx%016.16llx%c", name, h, l, c);
 			}
 			break;
 		case J9PORT_SIG_VALUE_STRING:
-				n = j9str_printf(PORTLIB,  cursor, length, "%s=%s%c", name, (char *)value, c);
+				n = j9str_printf(PORTLIB, cursor, length, "%s=%s%c", name, (char *)value, c);
 			break;
 		case J9PORT_SIG_VALUE_ADDRESS:
-				n = j9str_printf(PORTLIB,  cursor, length, "%s=%p%c", name, *(void**)value, c);
+				n = j9str_printf(PORTLIB, cursor, length, "%s=%p%c", name, *(void**)value, c);
 			break;
 		case J9PORT_SIG_VALUE_FLOAT_64:
 			/* make sure when casting to a float that we get least significant 32-bits. */
-				n = j9str_printf(PORTLIB, cursor, length,"%s %016.16llx (f: %f, d: %e)%c", name, *(U_64 *)value, (float)LOW_U32_FROM_DBL_PTR(value), *(double *)value, c);
+				n = j9str_printf(PORTLIB, cursor, length, "%s=%016.16llx (f: %f, d: %e)%c", name, *(U_64 *)value, (float)LOW_U32_FROM_DBL_PTR(value), *(double *)value, c);
 			break;
 		case J9PORT_SIG_VALUE_UNDEFINED:
 		default:
-				n = j9str_printf(PORTLIB,  cursor, length, "%s=<UNDEFINED>%c", name, c);
+				n = j9str_printf(PORTLIB, cursor, length, "%s=<UNDEFINED>%c", name, c);
 			break;
 		}
 
@@ -1313,35 +1316,35 @@ executeAbortHook(struct J9PortLibrary* portLibrary, void* userData)
 }
 
 static void
-printBacktrace(struct J9JavaVM *vm, void* gpInfo)
+printBacktrace(struct J9JavaVM *vm, void *gpInfo)
 {
-	J9PlatformThread thread;
-	J9PlatformStackFrame *frame;
-
 	PORT_ACCESS_FROM_JAVAVM(vm);
+	OMRPORT_ACCESS_FROM_J9PORT(PORTLIB);
+	J9PlatformStackFrame *frame = NULL;
+	J9PlatformThread thread;
 
 	memset(&thread, 0, sizeof(thread));
 
-	j9tty_printf(PORTLIB, "----------- Stack Backtrace -----------\n");
-	j9introspect_backtrace_thread(&thread, NULL, gpInfo);
-	j9introspect_backtrace_symbols(&thread, NULL);
+	omrtty_printf("----------- Stack Backtrace -----------\n");
+	omrintrospect_backtrace_thread(&thread, NULL, gpInfo);
+	omrintrospect_backtrace_symbols_ex(&thread, NULL, 0);
 
 	frame = thread.callstack;
 	while (frame) {
 		J9PlatformStackFrame *tmp = frame;
 
-		if (frame->symbol) {
-			j9tty_printf(PORTLIB, "%s\n", frame->symbol);
-			j9mem_free_memory(frame->symbol);
+		if (NULL != frame->symbol) {
+			omrtty_printf("%s\n", frame->symbol);
+			omrmem_free_memory(frame->symbol);
 		} else {
-			j9tty_printf(PORTLIB, "0x%p\n", (void*)frame->instruction_pointer);
+			omrtty_printf("0x%p\n", (void *)frame->instruction_pointer);
 		}
 
 		frame = frame->parent_frame;
-		j9mem_free_memory(tmp);
+		omrmem_free_memory(tmp);
 	}
 
-	j9tty_printf(PORTLIB, "---------------------------------------\n");
+	omrtty_printf("---------------------------------------\n");
 }
 
 #if defined(J9VM_PORT_ZOS_CEEHDLRSUPPORT)

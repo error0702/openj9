@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1998, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 1998
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 #include <string.h>
 #include <stdlib.h>
@@ -36,6 +36,7 @@
 #include "jclprots.h"
 
 #include "ut_j9jcl.h"
+#include "j9jclnls.h"
 
 #if defined(J9ZOS390)
 #include "atoe.h"
@@ -61,7 +62,6 @@ typedef struct {
 
 jint propertyListAddString( JNIEnv *env, jarray array, jint arrayIndex, const char *value);
 static void JNICALL systemPropertyIterator(char* key, char* value, void* userData);
-char* getDefinedEncoding(JNIEnv *env, char *defArg);
 jobject getPropertyList(JNIEnv *env);
 
 #if JAVA_SPEC_VERSION >= 11
@@ -101,15 +101,19 @@ Java_java_lang_System_initJCLPlatformEncoding(JNIEnv *env, jclass clazz)
  *    1 - platform encoding
  *    2 - file.encoding
  *    3 - os.encoding
+ *    4 - default value of java.io.tmpDir before any -D options
  */
 jstring JNICALL
 Java_java_lang_System_getSysPropBeforePropertiesInitialized(JNIEnv *env, jclass clazz, jint sysPropID)
 {
+	char *envSpace = NULL;
 	const char *sysPropValue = NULL;
 	/* The sysPropValue points to following property which has to be declared at top level. */
 	char property[128] = {0};
 	jstring result = NULL;
 	PORT_ACCESS_FROM_ENV(env);
+	VMI_ACCESS_FROM_ENV(env);
+	JavaVMInitArgs *vmInitArgs = (*VMI)->GetInitArgs(VMI);
 
 	switch (sysPropID) {
 	case 0: /* os.version */
@@ -136,7 +140,7 @@ Java_java_lang_System_getSysPropBeforePropertiesInitialized(JNIEnv *env, jclass 
 		break;
 
 	case 2: /* file.encoding */
-		sysPropValue = getDefinedEncoding(env, "-Dfile.encoding=");
+		sysPropValue = getDefinedArgumentFromJavaVMInitArgs(vmInitArgs, "file.encoding");
 		if (NULL == sysPropValue) {
 #if JAVA_SPEC_VERSION < 18
 			sysPropValue = getPlatformFileEncoding(env, property, sizeof(property), sysPropID);
@@ -158,7 +162,7 @@ Java_java_lang_System_getSysPropBeforePropertiesInitialized(JNIEnv *env, jclass 
 		break;
 
 	case 3: /* os.encoding */
-		sysPropValue = getDefinedEncoding(env, "-Dos.encoding=");
+		sysPropValue = getDefinedArgumentFromJavaVMInitArgs(vmInitArgs, "os.encoding");
 		if (NULL == sysPropValue) {
 #if defined(J9ZOS390) || defined(J9ZTPF)
 			sysPropValue = "ISO8859_1";
@@ -168,11 +172,32 @@ Java_java_lang_System_getSysPropBeforePropertiesInitialized(JNIEnv *env, jclass 
 		}
 		break;
 
+	case 4: /* default value of java.io.tmpDir before any -D options */
+		sysPropValue = getTmpDir(env, &envSpace);
+		break;
+
+#if defined(J9ZOS390) && (JAVA_SPEC_VERSION >= 21)
+	case 5: /* com.ibm.autocvt setting on z/OS */
+		sysPropValue = getDefinedArgumentFromJavaVMInitArgs(vmInitArgs, "com.ibm.autocvt");
+		if (NULL == sysPropValue) {
+			/* As part of better handling of JEP400 constraints on z/OS, the com.ibm.autocvt property
+			 * determines whether file I/O considers file tagging. If not explicitly specified,
+			 * the property defaults to true, unless file.encoding is set.
+			 */
+			const char *fileEncodingValue = getDefinedArgumentFromJavaVMInitArgs(vmInitArgs, "file.encoding");
+			sysPropValue = (NULL == fileEncodingValue) ? "true" : "false";
+		}
+		break;
+#endif /* defined(J9ZOS390) && (JAVA_SPEC_VERSION >= 21) */
+
 	default:
 		break;
 	}
 	if (NULL != sysPropValue) {
 		result = (*env)->NewStringUTF(env, sysPropValue);
+	}
+	if (NULL != envSpace) {
+		jclmem_free_memory(env, envSpace);
 	}
 
 	return result;
@@ -187,7 +212,7 @@ jstring JNICALL Java_java_lang_System_mapLibraryName(JNIEnv * env, jclass unused
 {
 	PORT_ACCESS_FROM_ENV(env);
 	jboolean isCopy = FALSE;
-	char *outNameUTF;	
+	char *outNameUTF;
 	const char *inNameUTF;
 	jstring result;
 
@@ -293,28 +318,6 @@ jobject createSystemPropertyList(JNIEnv *env, const char *defaultValues[], int d
 	return args;
 }
 
-
-char* getDefinedEncoding(JNIEnv *env, char *defArg)
-{
-	VMI_ACCESS_FROM_ENV(env);
-
-	JavaVMInitArgs  *vmInitArgs = (*VMI)->GetInitArgs(VMI);
-	int len = (int)strlen(defArg);
-
-	if (vmInitArgs) {
-		jint optionIndex;
-		JavaVMOption *option = vmInitArgs->options;
-
-		for (optionIndex=0; optionIndex < vmInitArgs->nOptions; optionIndex++) {
-			char *optionValue = option->optionString;
-			if (strncmp(defArg, optionValue, len) == 0)
-				return &optionValue[len];
-			option++;
-		}
-	}
-	return NULL;
-}
-
 /**
  * @return 0 on success, -1 on error
  */
@@ -333,37 +336,40 @@ jobject getPropertyList(JNIEnv *env)
 {
 	PORT_ACCESS_FROM_ENV(env);
 	int propIndex = 0;
-	jobject propertyList;
+	jobject propertyList = NULL;
 #define PROPERTY_COUNT 137
-	char *propertyKey= NULL;
-	const char * language;
-	const char * region;
-	const char * variant;
-	const char *strings[PROPERTY_COUNT];
+	char *propertyKey = NULL;
+	const char * language = NULL;
+	const char * region = NULL;
+	const char * variant = NULL;
+	const char *strings[PROPERTY_COUNT] = {0};
 #define USERNAME_LENGTH 128
-	char username[USERNAME_LENGTH];
+	char username[USERNAME_LENGTH] = {0};
 	char *usernameAlloc = NULL;
-	IDATA result;
+	/* buffer to hold the size of the maximum direct byte buffer allocations */
+	char maxDirectMemBuff[24] = {0};
+	IDATA result = 0;
 
-	J9JavaVM *javaVM = ((J9VMThread *) env)->javaVM;
-	OMR_VM *omrVM = javaVM->omrVM;
+	J9VMThread *currentThread = (J9VMThread*)env;
+	J9JavaVM *javaVM = currentThread->javaVM;
+	J9InternalVMFunctions *vmFuncs = javaVM->internalVMFunctions;
 
-	/* Change the allocation value PROPERTY_COUNT above as you add/remove properties, 
-	 * then follow the propIndex++ convention and consume 2 * slots for each property. 2 * number of property keys is the 
+	/* Change the allocation value PROPERTY_COUNT above as you add/remove properties,
+	 * then follow the propIndex++ convention and consume 2 * slots for each property. 2 * number of property keys is the
 	 * correct allocation.
 	 * Also note the call to addSystemProperties below, which may add some configuration-specific properties.  Be sure to leave
 	 * enough room in the property list for all possibilities.
 	 */
 
-	if (J9_GC_POLICY_METRONOME == (omrVM->gcPolicy)) {
+	if (J9_GC_POLICY_METRONOME == (javaVM->omrVM->gcPolicy)) {
 		strings[propIndex++] = "com.ibm.jvm.realtime";
 		strings[propIndex++] = "soft";
 	}
 
 #if defined(J9VM_OPT_SHARED_CLASSES)
 	strings[propIndex++] = "com.ibm.oti.shared.enabled";
-	if ((((J9VMThread *) env)->javaVM->sharedClassConfig != NULL)
-		&& (J9_ARE_ALL_BITS_SET(((J9VMThread *) env)->javaVM->sharedClassConfig->runtimeFlags, J9SHR_RUNTIMEFLAG_ENABLE_CACHE_NON_BOOT_CLASSES))
+	if ((NULL != javaVM->sharedClassConfig)
+		&& J9_ARE_ALL_BITS_SET(javaVM->sharedClassConfig->runtimeFlags, J9SHR_RUNTIMEFLAG_ENABLE_CACHE_NON_BOOT_CLASSES)
 	) {
 		strings[propIndex++] = "true";
 	} else {
@@ -373,19 +379,19 @@ jobject getPropertyList(JNIEnv *env)
 
 #if defined(JCL_J2SE)
 	strings[propIndex++] = "ibm.signalhandling.sigchain";
-	if (javaVM->sigFlags & J9_SIG_NO_SIG_CHAIN) {
+	if (J9_ARE_ANY_BITS_SET(javaVM->sigFlags, J9_SIG_NO_SIG_CHAIN)) {
 		strings[propIndex++] = "false";
 	} else {
 		strings[propIndex++] = "true";
 	}
 	strings[propIndex++] = "ibm.signalhandling.sigint";
-	if (javaVM->sigFlags & J9_SIG_NO_SIG_INT) {
+	if (J9_ARE_ANY_BITS_SET(javaVM->sigFlags, J9_SIG_NO_SIG_INT)) {
 		strings[propIndex++] = "false";
 	} else {
 		strings[propIndex++] = "true";
 	}
 
-	/* The JCLs use ibm.signalhandling.rs to determine if they should prevent the registration of signal handlers for what 
+	/* The JCLs use ibm.signalhandling.rs to determine if they should prevent the registration of signal handlers for what
 	 * 	we consider to be asynchronous signals.
 	 * The JCLs do not install handlers for any synchronous signals */
 	strings[propIndex++] = "ibm.signalhandling.rs";
@@ -426,22 +432,21 @@ jobject getPropertyList(JNIEnv *env)
 
 	/*[PR 95709]*/
 
-
 	/* Get the language, region and variant */
-	language = j9nls_get_language();	
+	language = j9nls_get_language();
 	region = j9nls_get_region();
 	variant = j9nls_get_variant();
-	
+
 	/* CMVC 144405 : Norwegian Bokmal and Nynorsk need special consideration */
-	if ( (strcmp(language, "nn")== 0) && (strcmp(region, "NO") == 0) ){
+	if ((0 == strcmp(language, "nn")) && (0 == strcmp(region, "NO"))) {
 		variant = "NY";
 	}
-	if ( (strcmp(language, "nn") == 0) || (strcmp(language, "nb") == 0) ) {
+	if ((0 == strcmp(language, "nn")) || (0 == strcmp(language, "nb"))) {
 		language = "no";
 	}
-	
+
 	strings[propIndex++] = "user.language";
-	strings[propIndex++] = language;	
+	strings[propIndex++] = language;
 
 	propertyKey = "user.country";
 	strings[propIndex++] = propertyKey;
@@ -453,40 +458,88 @@ jobject getPropertyList(JNIEnv *env)
 
 	/* Get the User name */
 	strings[propIndex++] = "user.name";
-	result = j9sysinfo_get_username(username, USERNAME_LENGTH);
-	if (!result) {
-		strings[propIndex++] = username;
-	} else {
-		if (result > 0) {
+	strings[propIndex] = "unknown";
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+	/* Skip j9sysinfo_get_username if a checkpoint can be taken.
+	 * https://github.com/eclipse-openj9/openj9/issues/15800
+	 */
+	result = -1;
+	if (!vmFuncs->isCheckpointAllowed(javaVM))
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
+	{
+		result = j9sysinfo_get_username(username, USERNAME_LENGTH);
+		if (0 == result) {
+			strings[propIndex] = username;
+		} else if (result > 0) {
 			usernameAlloc = jclmem_allocate_memory(env, result);
-			if (usernameAlloc) {
+			if (NULL != usernameAlloc) {
 				result = j9sysinfo_get_username(usernameAlloc, result);
+				if (0 == result) {
+					strings[propIndex] = usernameAlloc;
+				} else {
+					/* free the memory, try j9sysinfo_get_env later */
+					jclmem_free_memory(env, usernameAlloc);
+					usernameAlloc = NULL;
+				}
+			} else {
+				vmFuncs->setNativeOutOfMemoryError(currentThread, 0, 0);
+				goto failed;
 			}
 		}
-		strings[propIndex++] = !usernameAlloc || result ? "unknown" : usernameAlloc;
 	}
-
+#if defined(LINUX) || defined(OSX)
+	if (0 != result) {
+		result = j9sysinfo_get_env("USER", username, USERNAME_LENGTH);
+		if (0 == result) {
+			strings[propIndex] = username;
+		} else if (result > 0) {
+			usernameAlloc = jclmem_allocate_memory(env, result);
+			if (NULL != usernameAlloc) {
+				result = j9sysinfo_get_env("USER", usernameAlloc, result);
+				if (0 == result) {
+					if (strlen(usernameAlloc) > 0) {
+						strings[propIndex] = usernameAlloc;
+					}
+					/* keep it as "unknown" if the env value is empty */
+				}
+				/* usernameAlloc to be freed before this method returns */
+			} else {
+				vmFuncs->setNativeOutOfMemoryError(currentThread, 0, 0);
+				goto failed;
+			}
+		}
+	}
+#endif /* defined(LINUX) || defined(OSX) */
+	propIndex += 1;
 #undef USERNAME_LENGTH
 
-#if defined(OPENJ9_BUILD)
+#if defined(OPENJ9_BUILD) && JAVA_SPEC_VERSION == 8
 	/* Set the maximum direct byte buffer allocation property if it has not been set manually */
-	if ((UDATA) -1 == javaVM->directByteBufferMemoryMax) {
+	if ((~(UDATA)0) == javaVM->directByteBufferMemoryMax) {
 		UDATA heapSize = javaVM->memoryManagerFunctions->j9gc_get_maximum_heap_size(javaVM);
 		/* allow up to 7/8 of the heap to be direct byte buffers */
 		javaVM->directByteBufferMemoryMax = heapSize - (heapSize / 8);
 	}
-#endif /* defined(OPENJ9_BUILD) */
-	if ((UDATA) -1 != javaVM->directByteBufferMemoryMax) {
-		/* buffer to hold the size of the maximum direct byte buffer allocations */
-		char maxDirectMemBuff[24];
+#endif /* defined(OPENJ9_BUILD) && JAVA_SPEC_VERSION == 8 */
+#if !defined(OPENJ9_BUILD)
+	/* Don't set a default value for IBM Java 8. */
+	if ((~(UDATA)0) != javaVM->directByteBufferMemoryMax)
+#endif /* !defined(OPENJ9_BUILD) */
+	{
 		strings[propIndex] = "sun.nio.MaxDirectMemorySize";
 		propIndex += 1;
-		j9str_printf(PORTLIB, maxDirectMemBuff, sizeof(maxDirectMemBuff), "%zu", javaVM->directByteBufferMemoryMax);
+		if ((~(UDATA)0) == javaVM->directByteBufferMemoryMax) {
+			strcpy(maxDirectMemBuff, "-1");
+		} else {
+			j9str_printf(PORTLIB, maxDirectMemBuff, sizeof(maxDirectMemBuff), "%zu", javaVM->directByteBufferMemoryMax);
+		}
 		strings[propIndex] = maxDirectMemBuff;
 		propIndex += 1;
 	}
 
 	propertyList = getPlatformPropertyList(env, strings, propIndex);
+
+failed:
 	if (NULL != usernameAlloc) {
 		jclmem_free_memory(env, usernameAlloc);
 	}
@@ -507,12 +560,23 @@ systemPropertyIterator(char* key, char* value, void* userData)
 	if ( iteratorData->errorOccurred ) {
 		return;
 	}
-	
+
 	if (0 == strcmp("com.ibm.oti.shared.enabled", key)) {
 		/* JAZZ103 85641: Prevent com.ibm.oti.shared.enabled from being overwritten by a command line option */
 		return;
 	}
-	
+
+#if JAVA_SPEC_VERSION >= 21
+	if (0 == strcmp("java.compiler", key)) {
+		PORT_ACCESS_FROM_ENV(env);
+		if ((0 == strcmp("jitc", value)) || (0 == strcmp(J9_JIT_DLL_NAME, value))) {
+			j9nls_printf(PORTLIB, J9NLS_WARNING, J9NLS_JCL_JAVA_COMPILER_WARNING_XJIT);
+		} else {
+			j9nls_printf(PORTLIB, J9NLS_WARNING, J9NLS_JCL_JAVA_COMPILER_WARNING_XINT);
+		}
+		return;
+	}
+#endif /* JAVA_SPEC_VERSION >= 21 */
 
 	/* check for overridden system properties, use linear scan for now */
 	for (i=0; i < defaultCount; i+=2) {
@@ -520,7 +584,7 @@ systemPropertyIterator(char* key, char* value, void* userData)
 			defaultValues[i] = NULL;
 			defaultValues[i+1] = NULL;
 			break;
-		} 
+		}
 	}
 
 	/* First do the key */
@@ -548,7 +612,7 @@ Java_java_lang_System_startSNMPAgent(JNIEnv *env, jclass jlClass)
 	if (J9_ARE_ALL_BITS_SET(vm->jclFlags, J9_JCL_FLAG_COM_SUN_MANAGEMENT_PROP)) {
 		jclass smAClass = NULL;
 		jmethodID startAgent = NULL;
-		
+
 		if (J2SE_VERSION(vm) >= J2SE_V11) {
 			smAClass = (*env)->FindClass(env, "jdk/internal/agent/Agent");
 		} else {

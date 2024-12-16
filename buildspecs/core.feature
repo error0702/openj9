@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-Copyright (c) 2006, 2022 IBM Corp. and others
+Copyright IBM Corp. and others 2006
 
 This program and the accompanying materials are made available under
 the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,9 +16,9 @@ Exception [1] and GNU General Public License, version 2 with the
 OpenJDK Assembly Exception [2].
 
 [1] https://www.gnu.org/software/classpath/license.html
-[2] http://openjdk.java.net/legal/assembly-exception.html
+[2] https://openjdk.org/legal/assembly-exception.html
 
-SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
 -->
 
 <feature xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://www.ibm.com/j9/builder/feature" xsi:schemaLocation="http://www.ibm.com/j9/builder/feature feature-v2.xsd" id="core">
@@ -106,23 +106,24 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 		<flag id="module_util_core" value="true"/>
 		<flag id="module_verutil" value="true"/>
 		<flag id="module_vm" value="true"/>
+		<flag id="opt_cracSupport" value="false"/>
 		<flag id="opt_criuSupport" value="false"/>
-		<flag id="opt_ojdkThreadSupport" value="false"/>
 		<flag id="opt_fragmentRamClasses" value="true"/>
 		<flag id="opt_inlineJsrs" value="true"/>
+		<flag id="opt_jfr" value="false"/>
 		<flag id="opt_jitserver" value="false"/>
 		<flag id="opt_methodHandle" value="true"/>
 		<flag id="opt_methodHandleCommon" value="true"/>
-		<flag id="opt_module" value="true"/>
 		<flag id="opt_newObjectHash" value="true"/>
 		<flag id="opt_newRomClassBuilder" value="true"/>
-		<flag id="opt_openjdkMethodhandle" value="false"/>
 		<flag id="opt_openjdkFfi" value="true"/>
+		<flag id="opt_openjdkMethodhandle" value="false"/>
 		<flag id="opt_phpSupport" value="false"/>
 		<flag id="opt_romImageSupport" value="true"/>
 		<flag id="opt_useOmrDdr" value="false"/>
 		<flag id="opt_veeSupport" value="false"/>
 		<flag id="opt_vmLocalStorage" value="true"/>
+		<flag id="prof_continuationAllocation" value="false"/>
 		<flag id="prof_countArgsTemps" value="false"/>
 		<flag id="prof_jvmti" value="false"/>
 		<flag id="thr_extraChecks" value="false"/>

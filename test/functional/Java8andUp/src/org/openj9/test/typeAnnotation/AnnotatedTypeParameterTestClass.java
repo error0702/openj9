@@ -7,8 +7,8 @@ import java.util.Set;
 
 import org.testng.log4testng.Logger;
 
-/*******************************************************************************
- * Copyright (c) 2010, 2018 IBM Corp. and others
+/*
+ * Copyright IBM Corp. and others 2010
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -24,10 +24,10 @@ import org.testng.log4testng.Logger;
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
 /**
  * Test case to exercise type annotations on generics.
  * This generates a class file containing annotations in various locations specified by JSR 308 - Annotations on Types.

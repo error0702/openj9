@@ -1,6 +1,6 @@
-/*[INCLUDE-IF Sidecar17]*/
-/*******************************************************************************
- * Copyright (c) 2005, 2018 IBM Corp. and others
+/*[INCLUDE-IF JAVA_SPEC_VERSION >= 8]*/
+/*
+ * Copyright IBM Corp. and others 2005
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,10 +16,10 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
 package java.lang.management;
 
 /**
@@ -40,7 +40,6 @@ package java.lang.management;
  * &quot;java.lang:type=ClassLoading&quot; for the value of the mxbeanName
  * parameter.</li>
  * </ol>
- * 
  */
 public interface ClassLoadingMXBean extends PlatformManagedObject {
 
@@ -52,28 +51,28 @@ public interface ClassLoadingMXBean extends PlatformManagedObject {
 
 	/**
 	 * Returns a figure for the total number of classes that have been
-	 * loaded by the virtual machine during its lifetime.  
+	 * loaded by the virtual machine during its lifetime.
 	 * @return the total number of classes that have been loaded
 	 */
 	public long getTotalLoadedClassCount();
 
 	/**
-	 * Returns a figure for the total number of classes that have 
+	 * Returns a figure for the total number of classes that have
 	 * been unloaded by the virtual machine over its lifetime.
 	 * @return the total number of unloaded classes
 	 */
 	public long getUnloadedClassCount();
 
 	/**
-	 * Returns a boolean indication of whether the virtual 
-	 * machine's class loading system is producing verbose output. 
+	 * Returns a boolean indication of whether the virtual
+	 * machine's class loading system is producing verbose output.
 	 * @return true if running in verbose mode
 	 */
 	public boolean isVerbose();
 
 	/**
-	 * Updates the virtual machine's class loading system to 
-	 * operate in verbose or non-verbose mode. 
+	 * Updates the virtual machine's class loading system to
+	 * operate in verbose or non-verbose mode.
 	 * @param value true to put the class loading system into verbose
 	 * mode, false to take the class loading system out of verbose mode.
 	 */

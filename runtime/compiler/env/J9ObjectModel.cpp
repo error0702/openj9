@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #if defined(J9ZOS390)
@@ -79,7 +79,8 @@ J9::ObjectModel::initialize()
    result = mmf->j9gc_modron_getConfigurationValueForKey(vm,
                                                          j9gc_modron_configuration_discontiguousArraylets,
                                                          &value);
-   if (result == 1 && value == 1)
+   bool isOffHeapAllocationEnabled = mmf->j9gc_off_heap_allocation_enabled(vm);
+   if (result == 1 && value == 1 && !isOffHeapAllocationEnabled)
       {
       _usesDiscontiguousArraylets = true;
       _arrayLetLeafSize = (int32_t)(vm->memoryManagerFunctions->j9gc_arraylet_getLeafSize(vm));
@@ -110,8 +111,11 @@ J9::ObjectModel::areValueTypesEnabled()
 #if defined(J9VM_OPT_JITSERVER)
    if (auto stream = TR::CompilationInfo::getStream())
       {
-      auto *vmInfo = TR::compInfoPT->getClientData()->getOrCacheVMInfo(stream);
-      return J9_ARE_ALL_BITS_SET(vmInfo->_extendedRuntimeFlags2, J9_EXTENDED_RUNTIME2_ENABLE_VALHALLA);
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+      return true;
+#else /* defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */
+      return false;
+#endif /* defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */
       }
 #endif /* defined(J9VM_OPT_JITSERVER) */
 
@@ -119,6 +123,23 @@ J9::ObjectModel::areValueTypesEnabled()
    return javaVM->internalVMFunctions->areValueTypesEnabled(javaVM);
    }
 
+bool
+J9::ObjectModel::areFlattenableValueTypesEnabled()
+   {
+#if defined(J9VM_OPT_JITSERVER)
+   if (auto stream = TR::CompilationInfo::getStream())
+      {
+#if defined(J9VM_OPT_VALHALLA_FLATTENABLE_VALUE_TYPES)
+      return true;
+#else /* defined(J9VM_OPT_VALHALLA_FLATTENABLE_VALUE_TYPES) */
+      return false;
+#endif /* defined(J9VM_OPT_VALHALLA_FLATTENABLE_VALUE_TYPES) */
+      }
+#endif /* defined(J9VM_OPT_JITSERVER) */
+
+   J9JavaVM * javaVM = TR::Compiler->javaVM;
+   return javaVM->internalVMFunctions->areFlattenableValueTypesEnabled(javaVM);
+   }
 
 bool
 J9::ObjectModel::areValueBasedMonitorChecksEnabled()
@@ -135,6 +156,28 @@ J9::ObjectModel::areValueBasedMonitorChecksEnabled()
    return javaVM->internalVMFunctions->areValueBasedMonitorChecksEnabled(javaVM);
    }
 
+bool
+J9::ObjectModel::isValueTypeArrayFlatteningEnabled()
+   {
+#if defined(J9VM_OPT_JITSERVER)
+   if (auto stream = TR::CompilationInfo::getStream())
+      {
+#if defined(J9VM_OPT_VALHALLA_FLATTENABLE_VALUE_TYPES)
+      auto *vmInfo = TR::compInfoPT->getClientData()->getOrCacheVMInfo(stream);
+      return J9_ARE_ANY_BITS_SET(vmInfo->_extendedRuntimeFlags2, J9_EXTENDED_RUNTIME2_ENABLE_VT_ARRAY_FLATTENING);
+#else /* defined(J9VM_OPT_VALHALLA_FLATTENABLE_VALUE_TYPES) */
+      return false;
+#endif /* defined(J9VM_OPT_VALHALLA_FLATTENABLE_VALUE_TYPES) */
+      }
+#endif /* defined(J9VM_OPT_JITSERVER) */
+
+   J9JavaVM *javaVM = TR::Compiler->javaVM;
+
+   if (javaVM->internalVMFunctions->areFlattenableValueTypesEnabled(javaVM))
+      return J9_ARE_ALL_BITS_SET(javaVM->extendedRuntimeFlags2, J9_EXTENDED_RUNTIME2_ENABLE_VT_ARRAY_FLATTENING);
+   else
+      return false;
+   }
 
 int32_t
 J9::ObjectModel::sizeofReferenceField()
@@ -158,6 +201,18 @@ J9::ObjectModel::isHotReferenceFieldRequired()
    return TR::Compiler->javaVM->memoryManagerFunctions->j9gc_hot_reference_field_required(TR::Compiler->javaVM);
    }
 
+bool
+J9::ObjectModel::isOffHeapAllocationEnabled()
+   {
+#if defined(J9VM_OPT_JITSERVER)
+   if (auto stream = TR::CompilationInfo::getStream())
+      {
+      auto *vmInfo = TR::compInfoPT->getClientData()->getOrCacheVMInfo(stream);
+      return vmInfo->_isOffHeapAllocationEnabled;
+      }
+#endif /* defined(J9VM_OPT_JITSERVER) */
+   return TR::Compiler->javaVM->memoryManagerFunctions->j9gc_off_heap_allocation_enabled(TR::Compiler->javaVM);
+   }
 
 UDATA
 J9::ObjectModel::elementSizeOfBooleanArray()
@@ -290,14 +345,28 @@ J9::ObjectModel::generateCompressedObjectHeaders()
 uintptr_t
 J9::ObjectModel::contiguousArrayHeaderSizeInBytes()
    {
-   return compressObjectReferences() ? sizeof(J9IndexableObjectContiguousCompressed) : sizeof(J9IndexableObjectContiguousFull);
+#if defined(J9VM_OPT_JITSERVER)
+   if (auto stream = TR::CompilationInfo::getStream())
+      {
+      auto *vmInfo = TR::compInfoPT->getClientData()->getOrCacheVMInfo(stream);
+      return vmInfo->_contiguousIndexableHeaderSize;
+      }
+#endif /* defined(J9VM_OPT_JITSERVER) */
+   return TR::Compiler->javaVM->contiguousIndexableHeaderSize;
    }
 
 
 uintptr_t
 J9::ObjectModel::discontiguousArrayHeaderSizeInBytes()
    {
-   return compressObjectReferences() ? sizeof(J9IndexableObjectDiscontiguousCompressed) : sizeof(J9IndexableObjectDiscontiguousFull);
+#if defined(J9VM_OPT_JITSERVER)
+   if (auto stream = TR::CompilationInfo::getStream())
+      {
+      auto *vmInfo = TR::compInfoPT->getClientData()->getOrCacheVMInfo(stream);
+      return vmInfo->_discontiguousIndexableHeaderSize;
+      }
+#endif /* defined(J9VM_OPT_JITSERVER) */
+   return TR::Compiler->javaVM->discontiguousIndexableHeaderSize;
    }
 
 
@@ -514,23 +583,23 @@ J9::ObjectModel::offsetOfDiscontiguousArraySizeField()
    return compressObjectReferences() ? offsetof(J9IndexableObjectDiscontiguousCompressed, size) : offsetof(J9IndexableObjectDiscontiguousFull, size);
    }
 
-#if defined(TR_TARGET_64BIT)
+#if defined(J9VM_ENV_DATA64)
 uintptr_t
 J9::ObjectModel::offsetOfContiguousDataAddrField()
    {
    return compressObjectReferences()
-		? offsetof(J9IndexableObjectContiguousCompressed, dataAddr)
-		: offsetof(J9IndexableObjectContiguousFull, dataAddr);
+		? offsetof(J9IndexableObjectWithDataAddressContiguousCompressed, dataAddr)
+		: offsetof(J9IndexableObjectWithDataAddressContiguousFull, dataAddr);
    }
 
 uintptr_t
 J9::ObjectModel::offsetOfDiscontiguousDataAddrField()
    {
    return compressObjectReferences()
-		? offsetof(J9IndexableObjectDiscontiguousCompressed, dataAddr)
-		: offsetof(J9IndexableObjectDiscontiguousFull, dataAddr);
+		? offsetof(J9IndexableObjectWithDataAddressDiscontiguousCompressed, dataAddr)
+		: offsetof(J9IndexableObjectWithDataAddressDiscontiguousFull, dataAddr);
    }
-#endif /* TR_TARGET_64BIT */
+#endif /* defined(J9VM_ENV_DATA64) */
 
 
 uintptr_t
@@ -572,9 +641,10 @@ J9::ObjectModel::isDiscontiguousArray(TR::Compilation* comp, uintptr_t objectPoi
  *    Pointer to the array.
  *
  * \parm offset
- *    The offset of the element in bytes. It should contain the array header. If
- *    objectPointer is a discontiguous array, offset should be an integer that's
- *    calculated as if the array was a contiguous array.
+ *    The offset of the element in bytes. It should contain the array header,
+ *    except when OffHeap is enabled. If objectPointer is a discontiguous array,
+ *    offset should be an integer that's calculated as if the array was a
+ *    contiguous array.
  *
  * \return
  *    The address of the element.
@@ -588,6 +658,16 @@ J9::ObjectModel::getAddressOfElement(TR::Compilation* comp, uintptr_t objectPoin
              offset < TR::Compiler->om.getArrayLengthInBytes(comp, objectPointer) + TR::Compiler->om.contiguousArrayHeaderSizeInBytes(), "Array is out of bound");
 
    // If the array is contiguous, return the addition of objectPointer and offset
+#if defined(J9VM_GC_SPARSE_HEAP_ALLOCATION)
+   // When OffHeap is enabled, offset trees and passed value do not include headerSize.
+   // If Unsafe accesses reaches this helper offset would not have headerSize included
+   // as Unsafe.arrayBaseOffset returns 0 when OffHeap is enabled.
+   if (TR::Compiler->om.isOffHeapAllocationEnabled())
+      {
+      objectPointer = *(uintptr_t *)(objectPointer + TR::Compiler->om.offsetOfContiguousDataAddrField());
+      return objectPointer + offset;
+      }
+#endif /* J9VM_GC_SPARSE_HEAP_ALLOCATION */
    if (!TR::Compiler->om.isDiscontiguousArray(comp, objectPointer))
       return objectPointer + offset;
 
@@ -664,8 +744,8 @@ J9::ObjectModel::usesDiscontiguousArraylets()
    return _usesDiscontiguousArraylets;
    }
 
-int32_t 
-J9::ObjectModel::arrayletLeafSize() 
+int32_t
+J9::ObjectModel::arrayletLeafSize()
    {
 #if defined(J9VM_OPT_JITSERVER)
    if (auto stream = TR::CompilationInfo::getStream())
@@ -678,7 +758,7 @@ J9::ObjectModel::arrayletLeafSize()
    }
 
 int32_t
-J9::ObjectModel::arrayletLeafLogSize() 
+J9::ObjectModel::arrayletLeafLogSize()
    {
 #if defined(J9VM_OPT_JITSERVER)
    if (auto stream = TR::CompilationInfo::getStream())
@@ -688,6 +768,27 @@ J9::ObjectModel::arrayletLeafLogSize()
       }
 #endif /* defined(J9VM_OPT_JITSERVER) */
    return _arrayLetLeafLogSize;
+   }
+
+/**
+ * Query if the indexable data address field is present within the indexable object header.
+ * @return true if isIndexableDualHeaderShapeEnabled is false OR if option -Xgcpolicy:balanced is specified at runtime, false otherwise
+ */
+bool
+J9::ObjectModel::isIndexableDataAddrPresent()
+   {
+#if defined(J9VM_OPT_JITSERVER)
+   if (auto stream = TR::CompilationInfo::getStream())
+      {
+      auto *vmInfo = TR::compInfoPT->getClientData()->getOrCacheVMInfo(stream);
+      return vmInfo->_isIndexableDataAddrPresent;
+      }
+#endif /* defined(J9VM_OPT_JITSERVER) */
+#if defined(J9VM_ENV_DATA64)
+   return FALSE != TR::Compiler->javaVM->isIndexableDataAddrPresent;
+#else
+   return false;
+#endif /* defined(J9VM_ENV_DATA64) */
    }
 
 MM_GCReadBarrierType

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2018
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include <arpa/inet.h>
@@ -44,134 +44,141 @@
 #include "runtime/CompileService.hpp"
 #include "runtime/Listener.hpp"
 
-static SSL_CTX *
-createSSLContext(TR::PersistentInfo *info)
-   {
-   SSL_CTX *ctx = (*OSSL_CTX_new)((*OSSLv23_server_method)());
-
-   if (!ctx)
-      {
-      perror("can't create SSL context");
-      (*OERR_print_errors_fp)(stderr);
-      exit(1);
-      }
-
-   const char *sessionIDContext = "JITServer";
-   (*OSSL_CTX_set_session_id_context)(ctx, (const unsigned char*)sessionIDContext, strlen(sessionIDContext));
-
-   if ((*OSSL_CTX_set_ecdh_auto)(ctx, 1) != 1)
-      {
-      perror("failed to configure SSL ecdh");
-      (*OERR_print_errors_fp)(stderr);
-      exit(1);
-      }
-
-   TR::CompilationInfo *compInfo = TR::CompilationInfo::get();
-   auto &sslKeys = compInfo->getJITServerSslKeys();
-   auto &sslCerts = compInfo->getJITServerSslCerts();
-   auto &sslRootCerts = compInfo->getJITServerSslRootCerts();
-
-   TR_ASSERT_FATAL(sslKeys.size() == 1 && sslCerts.size() == 1, "only one key and cert is supported for now");
-   TR_ASSERT_FATAL(sslRootCerts.size() == 0, "server does not understand root certs yet");
-
-   // Parse and set private key
-   BIO *keyMem = (*OBIO_new_mem_buf)(&sslKeys[0][0], sslKeys[0].size());
-   if (!keyMem)
-      {
-      perror("cannot create memory buffer for private key (OOM?)");
-      (*OERR_print_errors_fp)(stderr);
-      exit(1);
-      }
-   EVP_PKEY *privKey = (*OPEM_read_bio_PrivateKey)(keyMem, NULL, NULL, NULL);
-   if (!privKey)
-      {
-      perror("cannot parse private key");
-      (*OERR_print_errors_fp)(stderr);
-      exit(1);
-      }
-   if ((*OSSL_CTX_use_PrivateKey)(ctx, privKey) != 1)
-      {
-      perror("cannot use private key");
-      (*OERR_print_errors_fp)(stderr);
-      exit(1);
-      }
-
-   // Parse and set certificate
-   BIO *certMem = (*OBIO_new_mem_buf)(&sslCerts[0][0], sslCerts[0].size());
-   if (!certMem)
-      {
-      perror("cannot create memory buffer for cert (OOM?)");
-      (*OERR_print_errors_fp)(stderr);
-      exit(1);
-      }
-   X509 *certificate = (*OPEM_read_bio_X509)(certMem, NULL, NULL, NULL);
-   if (!certificate)
-      {
-      perror("cannot parse cert");
-      (*OERR_print_errors_fp)(stderr);
-      exit(1);
-      }
-   if ((*OSSL_CTX_use_certificate)(ctx, certificate) != 1)
-      {
-      perror("cannot use cert");
-      (*OERR_print_errors_fp)(stderr);
-      exit(1);
-      }
-
-   // Verify key and cert are valid
-   if ((*OSSL_CTX_check_private_key)(ctx) != 1)
-      {
-      perror("private key check failed");
-      (*OERR_print_errors_fp)(stderr);
-      exit(1);
-      }
-
-   // verify server identity using standard method
-   (*OSSL_CTX_set_verify)(ctx, SSL_VERIFY_PEER, NULL);
-
-   if (TR::Options::getVerboseOption(TR_VerboseJITServer))
-      TR_VerboseLog::writeLineLocked(TR_Vlog_JITServer, "Successfully initialized SSL context (%s)\n", (*OOpenSSL_version)(0));
-
-   return ctx;
-   }
-
 static bool
-handleOpenSSLConnectionError(int connfd, SSL *&ssl, BIO *&bio, const char *errMsg)
+handleOpenSSLConnectionError(int connfd, SSL *&ssl, BIO *&bio, const char *errMsg, int ret, TR::CompilationInfo *compInfo)
    {
+   int errnoCopy = errno;
+   int sslError = SSL_ERROR_NONE;
+   unsigned long errorCode = 0;
+   int errorReason = 0;
+   char errorString[256] = {0};
+
+   // Filter out SSL_R_UNEXPECTED_EOF_WHILE_READING errors that were introduced in SSL version 3
+   // These can appear if Kubernetes readiness/liveness probes are used on the TCP encrypted channel
+   if (ret <= 0)
+      {
+      sslError = (*OSSL_get_error)(ssl, ret);
+      // Get earliest error code from the thread's error queue without modifying it.
+      errorCode = (*OERR_peek_error)();
+      errorReason = ERR_GET_REASON(errorCode);
+      (*OERR_error_string_n)(errorCode, errorString, sizeof(errorString));
+      if (sslError == SSL_ERROR_SSL && errorReason == SSL_R_UNEXPECTED_EOF_WHILE_READING)
+         {
+         // Take this error out of the queue so that it doesn't get printed
+         errorCode = (*OERR_get_error)();
+         }
+      }
    if (TR::Options::getVerboseOption(TR_VerboseJITServer))
-       TR_VerboseLog::writeLineLocked(TR_Vlog_JITServer, "%s: errno=%d", errMsg, errno);
+       TR_VerboseLog::writeLineLocked(TR_Vlog_JITServer, "t=%lu %s: errno=%d sslError=%d errorString=%s",
+                                      (unsigned long)compInfo->getPersistentInfo()->getElapsedTime(),
+                                      errMsg, errnoCopy, sslError, errorString);
+   // Print the error strings for all errors that OpenSSL has recorded and empty the error queue
    (*OERR_print_errors_fp)(stderr);
 
-   close(connfd);
    if (bio)
       {
       (*OBIO_free_all)(bio);
       bio = NULL;
       }
+   close(connfd);
    return false;
    }
 
 static bool
-acceptOpenSSLConnection(SSL_CTX *sslCtx, int connfd, BIO *&bio)
+acceptOpenSSLConnection(SSL_CTX *sslCtx, int connfd, BIO *&bio, TR::CompilationInfo *compInfo)
    {
+   if (TR::Options::getVerboseOption(TR_VerboseJITServer))
+      TR_VerboseLog::writeLineLocked(TR_Vlog_JITServer, "t=%lu Accepting SSL connection on socket 0x%x",
+                                     (unsigned long)compInfo->getPersistentInfo()->getElapsedTime(), connfd);
    SSL *ssl = NULL;
    bio = (*OBIO_new_ssl)(sslCtx, false);
    if (!bio)
-      return handleOpenSSLConnectionError(connfd, ssl, bio, "Error creating new BIO");
+      return handleOpenSSLConnectionError(connfd, ssl, bio, "Error creating new BIO", 1 /*ret*/, compInfo);
 
-   if ((*OBIO_ctrl)(bio, BIO_C_GET_SSL, false, (char *) &ssl) != 1) // BIO_get_ssl(bio, &ssl)
-      return handleOpenSSLConnectionError(connfd, ssl, bio, "Failed to get BIO SSL");
+   int ret = (*OBIO_ctrl)(bio, BIO_C_GET_SSL, false, (char *) &ssl); // BIO_get_ssl(bio, &ssl)
+   if (ret != 1)
+       return handleOpenSSLConnectionError(connfd, ssl, bio, "Failed to get BIO SSL", ret, compInfo);
 
-   if ((*OSSL_set_fd)(ssl, connfd) != 1)
-      return handleOpenSSLConnectionError(connfd, ssl, bio, "Error setting SSL file descriptor");
+   ret = (*OSSL_set_fd)(ssl, connfd);
+   if (ret != 1)
+      return handleOpenSSLConnectionError(connfd, ssl, bio, "Error setting SSL file descriptor", ret, compInfo);
 
-   if ((*OSSL_accept)(ssl) <= 0)
-      return handleOpenSSLConnectionError(connfd, ssl, bio, "Error accepting SSL connection");
+   ret = (*OSSL_accept)(ssl);
+   if (ret != 1)
+      return handleOpenSSLConnectionError(connfd, ssl, bio, "Error accepting SSL connection", ret, compInfo);
 
    if (TR::Options::getVerboseOption(TR_VerboseJITServer))
-      TR_VerboseLog::writeLineLocked(TR_Vlog_JITServer, "SSL connection on socket 0x%x, Version: %s, Cipher: %s\n",
-                                                     connfd, (*OSSL_get_version)(ssl), (*OSSL_get_cipher)(ssl));
+      TR_VerboseLog::writeLineLocked(TR_Vlog_JITServer, "t=%lu SSL connection on socket 0x%x, Version: %s, Cipher: %s",
+                                     (unsigned long)compInfo->getPersistentInfo()->getElapsedTime(),
+                                     connfd, (*OSSL_get_version)(ssl), (*OSSL_get_cipher)(ssl));
    return true;
+   }
+
+static int
+openCommunicationSocket(uint32_t port, uint32_t &boundPort)
+   {
+   int sockfd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
+   if (sockfd < 0)
+      {
+      perror("can't open server socket");
+      return sockfd;
+      }
+      // see `man 7 socket` for option explanations
+   int flag = true;
+   int retCode = 0;
+   retCode = setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &flag, sizeof(flag));
+   if (retCode < 0)
+      {
+      perror("Can't set SO_REUSEADDR");
+      close(sockfd);
+      return retCode;
+      }
+   retCode = setsockopt(sockfd, SOL_SOCKET, SO_KEEPALIVE, &flag, sizeof(flag));
+   if (retCode < 0)
+      {
+      perror("Can't set SO_KEEPALIVE");
+      close(sockfd);
+      return retCode;
+      }
+   struct sockaddr_in serv_addr;
+   memset(&serv_addr, 0, sizeof(serv_addr));
+   serv_addr.sin_family = AF_INET;
+   serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+   serv_addr.sin_port = htons(port);
+
+   retCode = bind(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr));
+   if (retCode < 0)
+      {
+      perror("can't bind server address");
+      close(sockfd);
+      return retCode;
+      }
+   retCode = listen(sockfd, SOMAXCONN);
+   if (retCode < 0)
+      {
+      perror("listen failed");
+      close(sockfd);
+      return retCode;
+      }
+
+   if (port == 0)
+      {
+      struct sockaddr_in sock_desc;
+      socklen_t sock_desc_len = sizeof(sock_desc);
+      retCode = getsockname(sockfd, (struct sockaddr *)&sock_desc, &sock_desc_len);
+      if (retCode < 0)
+         {
+         perror("getsockname failed");
+         close(sockfd);
+         return retCode;
+         }
+      boundPort = ntohs(sock_desc.sin_port);
+      }
+   else
+      {
+      boundPort = port;
+      }
+   return sockfd;
    }
 
 TR_Listener::TR_Listener()
@@ -183,56 +190,70 @@ TR_Listener::TR_Listener()
 void
 TR_Listener::serveRemoteCompilationRequests(BaseCompileDispatcher *compiler)
    {
-   TR::PersistentInfo *info = getCompilationInfo(jitConfig)->getPersistentInfo();
+   TR::CompilationInfo *compInfo = getCompilationInfo(jitConfig);
+   TR::PersistentInfo *info = compInfo->getPersistentInfo();
    SSL_CTX *sslCtx = NULL;
    if (JITServer::CommunicationStream::useSSL())
       {
-      JITServer::CommunicationStream::initSSL();
-      sslCtx = createSSLContext(info);
+      auto &sslKeys = compInfo->getJITServerSslKeys();
+      auto &sslCerts = compInfo->getJITServerSslCerts();
+      auto &sslRootCerts = compInfo->getJITServerSslRootCerts();
+      const char *sessionContextId = "JITServer";
+      if (!JITServer::ServerStream::createSSLContext(sslCtx, sessionContextId, sizeof(sessionContextId), sslKeys, sslCerts, sslRootCerts))
+         {
+         fprintf(stderr, "Failed to initialize the SSL context\n");
+         exit(1);
+         }
       }
 
    uint32_t port = info->getJITServerPort();
-   uint32_t timeoutMs = info->getSocketTimeout();
-   struct pollfd pfd = {0};
-   int sockfd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
-   if (sockfd < 0)
+   uint32_t boundPort = 0;
+   int sockfd = openCommunicationSocket(port, boundPort);
+   if (sockfd >= 0)
       {
-      perror("can't open server socket");
+      info->setJITServerPort(boundPort);
+      if (TR::Options::getVerboseOption(TR_VerboseJITServer))
+         {
+         TR_VerboseLog::writeLineLocked(TR_Vlog_JITServer, "t=%lu Communication socket opened on port %u",
+                                        (unsigned long)compInfo->getPersistentInfo()->getElapsedTime(), boundPort);
+         }
+      }
+   else
+      {
+      fprintf(stderr, "Failed to open server socket on port %d\n", port);
       exit(1);
       }
 
-   // see `man 7 socket` for option explanations
-   int flag = true;
-   if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, (void *)&flag, sizeof(flag)) < 0)
+   // If desired, open readiness/liveness socket to be used by Kubernetes. This is unencrypted.
+   uint32_t healthPort = info->getJITServerHealthPort();
+   uint32_t boundHealthPort = 0;
+   int healthSockfd = -1;
+   if (info->getJITServerUseHealthPort())
       {
-      perror("Can't set SO_REUSEADDR");
-      exit(1);
-      }
-   if (setsockopt(sockfd, SOL_SOCKET, SO_KEEPALIVE, (void *)&flag, sizeof(flag)) < 0)
-      {
-      perror("Can't set SO_KEEPALIVE");
-      exit(1);
-      }
-
-   struct sockaddr_in serv_addr;
-   memset((char *)&serv_addr, 0, sizeof(serv_addr));
-   serv_addr.sin_family = AF_INET;
-   serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-   serv_addr.sin_port = htons(port);
-
-   if (bind(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0)
-      {
-      perror("can't bind server address");
-      exit(1);
-      }
-   if (listen(sockfd, SOMAXCONN) < 0)
-      {
-      perror("listen failed");
-      exit(1);
+      healthSockfd = openCommunicationSocket(healthPort, boundHealthPort);
+      if (healthSockfd >= 0)
+         {
+         info->setJITServerHealthPort(boundHealthPort);
+         if (TR::Options::getVerboseOption(TR_VerboseJITServer))
+            {
+            TR_VerboseLog::writeLineLocked(TR_Vlog_JITServer, "t=%lu Health socket opened on port %u",
+                                           (unsigned long)compInfo->getPersistentInfo()->getElapsedTime(), boundHealthPort);
+            }
+         }
+      else
+         {
+         fprintf(stderr, "Failed to open health socket on port %d\n", healthPort);
+         exit(1);
+         }
       }
 
-   pfd.fd = sockfd;
-   pfd.events = POLLIN;
+   // The following array accomodates two descriptors: healthSockfd and sockfd.
+   // The first one is used for readiness/liveness probes, the second one is used for compilation requests.
+   // If we don't want to use readiness/liveness probes, healthSockfd will be -1 and will be ignored by poll().
+   struct pollfd pfd[2] = {{.fd = healthSockfd, .events = POLLIN, .revents = 0},
+                           {.fd = sockfd,       .events = POLLIN, .revents = 0}
+                          };
+   static const size_t numFds = sizeof(pfd) / sizeof(pfd[0]);
 
    while (!getListenerThreadExitFlag())
       {
@@ -241,7 +262,7 @@ TR_Listener::serveRemoteCompilationRequests(BaseCompileDispatcher *compiler)
       socklen_t clilen = sizeof(cli_addr);
       int connfd = -1;
 
-      rc = poll(&pfd, 1, OPENJ9_LISTENER_POLL_TIMEOUT);
+      rc = poll(pfd, numFds, OPENJ9_LISTENER_POLL_TIMEOUT);
       if (getListenerThreadExitFlag()) // if we are exiting, no need to check poll() status
          {
          break;
@@ -262,55 +283,70 @@ TR_Listener::serveRemoteCompilationRequests(BaseCompileDispatcher *compiler)
             exit(1);
             }
          }
-      else if (pfd.revents != POLLIN)
+      // Check which file descriptor is ready
+      for (size_t fdIndex = 0; fdIndex < numFds; fdIndex++)
          {
-         fprintf(stderr, "Unexpected event occurred during poll for new connection: revents=%d\n", pfd.revents);
-         exit(1);
-         }
-      do
-         {
-         /* at this stage we should have a valid request for new connection */
-         connfd = accept(sockfd, (struct sockaddr *)&cli_addr, &clilen);
-         if (connfd < 0)
+         if (pfd[fdIndex].revents == 0) // No event on this file descriptor
+            continue;
+         // We have an event and that event can only be POLLIN
+         TR_ASSERT_FATAL(pfd[fdIndex].revents == POLLIN, "Unexpected event occurred during poll for new connection: socketIndex=%zu revents=%d\n", fdIndex, pfd[fdIndex].revents);
+
+         // At this stage we should have a valid request for a new connection
+         pfd[fdIndex].revents = 0; // Reset the event for the next poll operation
+         do
             {
-            if ((EAGAIN != errno) && (EWOULDBLOCK != errno))
+            connfd = accept(pfd[fdIndex].fd, (struct sockaddr *)&cli_addr, &clilen);
+            if (connfd < 0)
                {
-               if (TR::Options::getVerboseOption(TR_VerboseJITServer))
+               if ((EAGAIN != errno) && (EWOULDBLOCK != errno))
                   {
-                  TR_VerboseLog::writeLineLocked(TR_Vlog_JITServer, "Error accepting connection: errno=%d", errno);
+                  if (TR::Options::getVerboseOption(TR_VerboseJITServer))
+                     {
+                     TR_VerboseLog::writeLineLocked(TR_Vlog_JITServer, "Error accepting connection: errno=%d: %s",
+                                                   errno, strerror(errno));
+                     }
                   }
                }
-            }
-         else
-            {
-            struct timeval timeoutMsForConnection = {(timeoutMs / 1000), ((timeoutMs % 1000) * 1000)};
-            if (setsockopt(connfd, SOL_SOCKET, SO_RCVTIMEO, (void *)&timeoutMsForConnection, sizeof(timeoutMsForConnection)) < 0)
+            else // accept() succeeded
                {
-               perror("Can't set option SO_RCVTIMEO on connfd socket");
-               exit(1);
-               }
-            if (setsockopt(connfd, SOL_SOCKET, SO_SNDTIMEO, (void *)&timeoutMsForConnection, sizeof(timeoutMsForConnection)) < 0)
-               {
-               perror("Can't set option SO_SNDTIMEO on connfd socket");
-               exit(1);
-               }
+               if (fdIndex == 0) // readiness/liveness probe socket
+                  {
+                  close(connfd);
+                  connfd = -1;
+                  }
+               else // compilation request socket
+                  {
+                  // Set the socket timeout (in milliseconds
+                  uint32_t timeoutMs = info->getSocketTimeout();
+                  struct timeval timeout = { timeoutMs / 1000, (timeoutMs % 1000) * 1000 };
+                  if (setsockopt(connfd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0)
+                     {
+                     perror("Can't set option SO_RCVTIMEO on connfd socket");
+                     exit(1);
+                     }
+                  if (setsockopt(connfd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) < 0)
+                     {
+                     perror("Can't set option SO_SNDTIMEO on connfd socket");
+                     exit(1);
+                     }
 
-            BIO *bio = NULL;
-            if (sslCtx && !acceptOpenSSLConnection(sslCtx, connfd, bio))
-               continue;
+                  BIO *bio = NULL;
+                  if (sslCtx && !acceptOpenSSLConnection(sslCtx, connfd, bio, compInfo))
+                     continue;
 
-            JITServer::ServerStream *stream = new (TR::Compiler->persistentGlobalAllocator()) JITServer::ServerStream(connfd, bio);
-            compiler->compile(stream);
-            }
-         } while ((-1 != connfd) && !getListenerThreadExitFlag());
-      }
+                  JITServer::ServerStream *stream = new (TR::Compiler->persistentGlobalAllocator()) JITServer::ServerStream(connfd, bio);
+                  compiler->compile(stream);
+                  }
+               }
+            } while ((connfd >= 0) && !getListenerThreadExitFlag());
+         }
+      } //  while (!getListenerThreadExitFlag())
 
    // The following piece of code will be executed only if the server shuts down properly
    close(sockfd);
    if (sslCtx)
       {
       (*OSSL_CTX_free)(sslCtx);
-      (*OEVP_cleanup)();
       }
    }
 
@@ -348,9 +384,42 @@ static int32_t J9THREAD_PROC listenerThreadProc(void * entryarg)
       {
       OMRPORT_ACCESS_FROM_J9PORT(PORTLIB);
       char timestamp[32];
+      char zoneName[32];
+      int32_t zoneSecondsEast = 0;
+      TR_VerboseLog::CriticalSection vlogLock;
 
       omrstr_ftime_ex(timestamp, sizeof(timestamp), "%b %d %H:%M:%S %Y", j9time_current_time_millis(), OMRSTR_FTIME_FLAG_LOCAL);
-      TR_VerboseLog::writeLineLocked(TR_Vlog_INFO, "StartTime: %s", timestamp);
+      TR_VerboseLog::writeLine(TR_Vlog_INFO, "StartTime: %s", timestamp);
+
+      TR_VerboseLog::write(TR_Vlog_INFO, "TimeZone: ");
+      if (0 != omrstr_current_time_zone(&zoneSecondsEast, zoneName, sizeof(zoneName)))
+         {
+         TR_VerboseLog::write("(unavailable)");
+         }
+      else
+         {
+         /* Write UTC[+/-]hr:min (zoneName) to the log. */
+         TR_VerboseLog::write("UTC");
+
+         if (0 != zoneSecondsEast)
+            {
+            const char *format = (zoneSecondsEast > 0) ? "+%d" : "-%d";
+            int32_t offset = ((zoneSecondsEast > 0) ? zoneSecondsEast : -zoneSecondsEast) / 60;
+            int32_t hours = offset / 60;
+            int32_t minutes = offset % 60;
+
+            TR_VerboseLog::write(format, hours);
+            if (0 != minutes)
+               {
+               TR_VerboseLog::write(":%02d", minutes);
+               }
+            }
+         if ('\0' != *zoneName)
+            {
+            TR_VerboseLog::write(" (%s)", zoneName);
+            }
+         TR_VerboseLog::write("\n");
+         }
       }
 
    J9CompileDispatcher handler(jitConfig);

@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2017, 2021 IBM Corp. and others
+# Copyright IBM Corp. and others 2017
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
 # OpenJDK Assembly Exception [2].
 #
 # [1] https://www.gnu.org/software/classpath/license.html
-# [2] http://openjdk.java.net/legal/assembly-exception.html
+# [2] https://openjdk.org/legal/assembly-exception.html
 #
-# SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+# SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
 ################################################################################
 
 set(OMR_ENHANCED_WARNINGS OFF)
@@ -25,7 +25,7 @@ set(OMR_ENHANCED_WARNINGS OFF)
 set_source_files_properties("${CMAKE_CURRENT_BINARY_DIR}/generated.c" PROPERTIES GENERATED TRUE)
 
 ################################################################################
-# Redirector
+# The redirector.
 ################################################################################
 j9vm_add_library(jvm_redirect
 	SHARED
@@ -34,23 +34,26 @@ j9vm_add_library(jvm_redirect
 	"${CMAKE_CURRENT_BINARY_DIR}/generated.c"
 	redirector.c
 )
+
 target_link_libraries(jvm_redirect
 	PRIVATE
 		j9vm_interface
 		${CMAKE_DL_LIBS}
 )
+
 target_include_directories(jvm_redirect
 	PRIVATE
 		"${j9vm_SOURCE_DIR}/j9vm"
 		"${j9vm_BINARY_DIR}/j9vm"
 )
+
 if(OMR_OS_ZOS)
 	target_include_directories(jvm_redirect
 		PRIVATE
 			"${omr_SOURCE_DIR}/port/zos390"
 	)
-	# redirector needs getUserExtendedPrivateAreaMemoryType from omrutil,
-	# but we don't want to introduce any transitive dependencies, so we use $<TARGET_FILE>.
+	# The redirector needs zosGetMaxHeapSizeForCR() from omrutil, but we don't
+	# want to introduce any transitive dependencies, so we use $<TARGET_FILE>.
 	target_link_libraries(jvm_redirect PRIVATE $<TARGET_FILE:omrutil>)
 
 	# Ensure that omrutil is built before we attempt to link it.
@@ -70,7 +73,7 @@ set_target_properties(jvm_redirect PROPERTIES
 	ARCHIVE_OUTPUT_DIRECTORY "${archive_dir}"
 )
 
-# The redirector should have the same exports as the jvm
+# The redirector should have the same exports as the main VM shared library.
 get_target_property(jvm_exports jvm EXPORTED_SYMBOLS)
 omr_add_exports(jvm_redirect ${jvm_exports})
 

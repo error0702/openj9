@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1998, 2020 IBM Corp. and others
+ * Copyright IBM Corp. and others 1998
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include <string.h>
@@ -72,8 +72,8 @@
  */
 const char* jclBootstrapClassPath[MAX_BOOTPATH_ENTRIES+1]; /* +1 for null-term */
 
-/* Array of memory-allocated bootpath entries, NULL-terminated. 
- * We need this because in the jclBootstrapClassPath array some entries are 
+/* Array of memory-allocated bootpath entries, NULL-terminated.
+ * We need this because in the jclBootstrapClassPath array some entries are
  * allocated and some are statically declared and this second arrays keeps track
  * of which ones were allocated so that we can free them when appropriate */
 char* jclBootstrapClassPathAllocated[MAX_BOOTPATH_ENTRIES+1] = {NULL}; /* +1 for null-term */
@@ -106,10 +106,10 @@ const U_64 jclConfig = J9CONST64(0x7363617237306200);		/* 'scar70b' */
 
 jint scarInit(J9JavaVM *vm);
 jint scarPreconfigure(J9JavaVM *vm);
-static UDATA addBFUSystemProperties(J9JavaVM* javaVM);
+static UDATA addBFUSystemProperties(J9JavaVM *vm);
 static IDATA addVMSpecificDirectories(J9JavaVM *vm, UDATA *cursor, char *subdirName);
 static IDATA loadClasslibPropertiesFile(J9JavaVM *vm, UDATA *cursor);
-static void setFatalErrorStringInDLLTableEntry(J9JavaVM* vm, char *errorString);
+static void setFatalErrorStringInDLLTableEntry(J9JavaVM *vm, const char *errorString);
 
 jint
 JNICALL JVM_OnLoad(JavaVM * jvm, char *options, void *reserved)
@@ -124,65 +124,65 @@ JNICALL JVM_OnLoad(JavaVM * jvm, char *options, void *reserved)
  * @return J9SYSPROP_ERROR_NONE on success, or a J9SYSPROP_ERROR_* value on failure.
  */
 static UDATA
-addBFUSystemProperties(J9JavaVM* javaVM)
+addBFUSystemProperties(J9JavaVM *vm)
 {
 	int fontPathSize = 0;
 	char* fontPathBuffer = "";
-	char* propValue;
-	UDATA rc;
-	const J9InternalVMFunctions* vmfunc = javaVM->internalVMFunctions;
+	char* propValue = NULL;
+	UDATA rc = 0;
+	const J9InternalVMFunctions* vmfunc = vm->internalVMFunctions;
 
-	PORT_ACCESS_FROM_JAVAVM(javaVM);
+	PORT_ACCESS_FROM_JAVAVM(vm);
 
 	if ( (fontPathSize = (int)j9sysinfo_get_env(JAVA_FONTS_STR, NULL, 0)) > 0 ) {
 		fontPathBuffer = j9mem_allocate_memory(fontPathSize, J9MEM_CATEGORY_VM_JCL);
 		if (fontPathBuffer) {
-			javaVM->jclSysPropBuffer = fontPathBuffer;		/* Use jclSysPropBuffer for all allocated sys prop values */
+			vm->jclSysPropBuffer = fontPathBuffer;		/* Use jclSysPropBuffer for all allocated sys prop values */
 			j9sysinfo_get_env(JAVA_FONTS_STR, fontPathBuffer, fontPathSize);
 		}
 	}
-	
+
 #ifdef WIN32
-	if (J9SYSPROP_ERROR_NOT_FOUND == vmfunc->getSystemProperty(javaVM, "java.awt.fonts", NULL)) {
-		rc = vmfunc->addSystemProperty(javaVM, "java.awt.fonts", fontPathBuffer, 0);
+	if (J9SYSPROP_ERROR_NOT_FOUND == vmfunc->getSystemProperty(vm, "java.awt.fonts", NULL)) {
+		rc = vmfunc->addSystemProperty(vm, "java.awt.fonts", fontPathBuffer, 0);
 		if (J9SYSPROP_ERROR_NONE != rc) {
 			return rc;
 		}
 	}
 #endif /* WIN32 */
 
-	if (J9SYSPROP_ERROR_NOT_FOUND == vmfunc->getSystemProperty(javaVM, "java.awt.graphicsenv", NULL)) {
-		rc = vmfunc->addSystemProperty(javaVM, "java.awt.graphicsenv", J9_AWTGRAPHICSENV_VALUE, 0);
+	if (J9SYSPROP_ERROR_NOT_FOUND == vmfunc->getSystemProperty(vm, "java.awt.graphicsenv", NULL)) {
+		rc = vmfunc->addSystemProperty(vm, "java.awt.graphicsenv", J9_AWTGRAPHICSENV_VALUE, 0);
 		if (J9SYSPROP_ERROR_NONE != rc) {
 			return rc;
 		}
 	}
 
-	if (J9SYSPROP_ERROR_NOT_FOUND == vmfunc->getSystemProperty(javaVM, "awt.toolkit", NULL)) {
-		rc = vmfunc->addSystemProperty(javaVM, "awt.toolkit", J9_AWTTOOLKIT_VALUE, 0);
+	if (J9SYSPROP_ERROR_NOT_FOUND == vmfunc->getSystemProperty(vm, "awt.toolkit", NULL)) {
+		rc = vmfunc->addSystemProperty(vm, "awt.toolkit", J9_AWTTOOLKIT_VALUE, 0);
 		if (J9SYSPROP_ERROR_NONE != rc) {
 			return rc;
 		}
 	}
-	
-	if (J9SYSPROP_ERROR_NOT_FOUND == vmfunc->getSystemProperty(javaVM, "java.awt.printerjob", NULL)) {
-		rc = vmfunc->addSystemProperty(javaVM, "java.awt.printerjob", J9_AWTPRINTERJOB_VALUE, 0);
+
+	if (J9SYSPROP_ERROR_NOT_FOUND == vmfunc->getSystemProperty(vm, "java.awt.printerjob", NULL)) {
+		rc = vmfunc->addSystemProperty(vm, "java.awt.printerjob", J9_AWTPRINTERJOB_VALUE, 0);
 		if (J9SYSPROP_ERROR_NONE != rc) {
 			return rc;
 		}
 	}
 
 #ifdef J9VM_UNIX
-	if (J9SYSPROP_ERROR_NOT_FOUND == vmfunc->getSystemProperty(javaVM, "java.awt.fonts", NULL)) {
-		rc = vmfunc->addSystemProperty(javaVM, "java.awt.fonts", "", 0);
+	if (J9SYSPROP_ERROR_NOT_FOUND == vmfunc->getSystemProperty(vm, "java.awt.fonts", NULL)) {
+		rc = vmfunc->addSystemProperty(vm, "java.awt.fonts", "", 0);
 		if (J9SYSPROP_ERROR_NONE != rc) {
 			return rc;
 		}
 	}
 
 #if defined(J9ZOS390)
-	if (J9SYSPROP_ERROR_NOT_FOUND == vmfunc->getSystemProperty(javaVM, "sun.security.policy.utf8", NULL)) {
-		rc = vmfunc->addSystemProperty(javaVM, "sun.security.policy.utf8", "false", 0);
+	if (J9SYSPROP_ERROR_NOT_FOUND == vmfunc->getSystemProperty(vm, "sun.security.policy.utf8", NULL)) {
+		rc = vmfunc->addSystemProperty(vm, "sun.security.policy.utf8", "false", 0);
 		if (J9SYSPROP_ERROR_NONE != rc) {
 			return rc;
 		}
@@ -190,8 +190,8 @@ addBFUSystemProperties(J9JavaVM* javaVM)
 #endif
 
 	if (fontPathSize >= 0) {
-		if (J9SYSPROP_ERROR_NOT_FOUND == vmfunc->getSystemProperty(javaVM, "sun.java2d.fontpath", NULL)) {
-			rc = vmfunc->addSystemProperty(javaVM, "sun.java2d.fontpath", fontPathBuffer, 0);
+		if (J9SYSPROP_ERROR_NOT_FOUND == vmfunc->getSystemProperty(vm, "sun.java2d.fontpath", NULL)) {
+			rc = vmfunc->addSystemProperty(vm, "sun.java2d.fontpath", fontPathBuffer, 0);
 			if (J9SYSPROP_ERROR_NONE != rc) {
 				return rc;
 			}
@@ -199,13 +199,13 @@ addBFUSystemProperties(J9JavaVM* javaVM)
 	}
 #endif /* J9VM_UNIX */
 
-	if (J9SYSPROP_ERROR_NOT_FOUND == vmfunc->getSystemProperty(javaVM, "sun.arch.data.model", NULL)) {
+	if (J9SYSPROP_ERROR_NOT_FOUND == vmfunc->getSystemProperty(vm, "sun.arch.data.model", NULL)) {
 #if defined(J9VM_ENV_DATA64)
 		propValue = "64";
 #else
 		propValue = "32";
 #endif
-		rc = vmfunc->addSystemProperty(javaVM, "sun.arch.data.model", propValue, 0);
+		rc = vmfunc->addSystemProperty(vm, "sun.arch.data.model", propValue, 0);
 		if (J9SYSPROP_ERROR_NONE != rc) {
 			return rc;
 		}
@@ -216,19 +216,19 @@ addBFUSystemProperties(J9JavaVM* javaVM)
 #else
 	propValue = "UnicodeBig";
 #endif
-	if (J9SYSPROP_ERROR_NOT_FOUND == vmfunc->getSystemProperty(javaVM, "sun.io.unicode.encoding", NULL)) {
-		rc = vmfunc->addSystemProperty(javaVM, "sun.io.unicode.encoding", propValue, 0);
+	if (J9SYSPROP_ERROR_NOT_FOUND == vmfunc->getSystemProperty(vm, "sun.io.unicode.encoding", NULL)) {
+		rc = vmfunc->addSystemProperty(vm, "sun.io.unicode.encoding", propValue, 0);
 		if (J9SYSPROP_ERROR_NONE != rc) {
 			return rc;
 		}
 	}
 
 #if defined(LINUX)
-	if (J9SYSPROP_ERROR_NOT_FOUND == vmfunc->getSystemProperty(javaVM, "sun.desktop", NULL)) {
+	if (J9SYSPROP_ERROR_NOT_FOUND == vmfunc->getSystemProperty(vm, "sun.desktop", NULL)) {
 		char tempString[2];
 		/* We don't care about the value of the env var, just whether it is not null */
 		if (j9sysinfo_get_env("GNOME_DESKTOP_SESSION_ID", tempString, 2) != -1) {
-			rc = vmfunc->addSystemProperty(javaVM, "sun.desktop", "gnome", 0);
+			rc = vmfunc->addSystemProperty(vm, "sun.desktop", "gnome", 0);
 			if (J9SYSPROP_ERROR_NONE != rc) {
 				return rc;
 			}
@@ -237,20 +237,20 @@ addBFUSystemProperties(J9JavaVM* javaVM)
 #endif /* LINUX */
 
 #if defined(WIN32)
-	if (J9SYSPROP_ERROR_NOT_FOUND == vmfunc->getSystemProperty(javaVM, "sun.desktop", NULL)) {
-		rc = vmfunc->addSystemProperty(javaVM, "sun.desktop", "windows", 0);
+	if (J9SYSPROP_ERROR_NOT_FOUND == vmfunc->getSystemProperty(vm, "sun.desktop", NULL)) {
+		rc = vmfunc->addSystemProperty(vm, "sun.desktop", "windows", 0);
 		if (J9SYSPROP_ERROR_NONE != rc) {
 			return rc;
 		}
 	}
 #endif
-	
+
 	return J9SYSPROP_ERROR_NONE;
 }
 
 
 jint
-scarInit(J9JavaVM * vm)
+scarInit(J9JavaVM *vm)
 {
 	J9InternalVMFunctions *vmFuncs = vm->internalVMFunctions;
 	UDATA handle = 0;
@@ -297,7 +297,7 @@ scarInit(J9JavaVM * vm)
 		j9nls_printf(PORTLIB, J9NLS_WARNING, J9NLS_JCL_WARNING_DLL_COULDNOT_BE_REGISTERED_AS_BOOTSTRAP_LIB, dbgwrapperStr, result);
 	}
 #endif /* defined(WIN32) && !defined(OPENJ9_BUILD) */
-	
+
 #if defined(J9VM_INTERP_MINIMAL_JCL)
 	result = standardInit(vm, J9_DLL_NAME);
 #else /* J9VM_INTERP_MINIMAL_JCL */
@@ -320,7 +320,7 @@ scarInit(J9JavaVM * vm)
 
 
 IDATA
-J9VMDllMain(J9JavaVM* vm, IDATA stage, void* reserved)
+J9VMDllMain(J9JavaVM *vm, IDATA stage, void *reserved)
 {
 	PORT_ACCESS_FROM_JAVAVM(vm);
 	IDATA returnVal = J9VMDLLMAIN_OK;
@@ -339,15 +339,15 @@ J9VMDllMain(J9JavaVM* vm, IDATA stage, void* reserved)
 
 			/* TODO: Can this be removed? */
 			vm->jclFlags |=
-				J9_JCL_FLAG_REFERENCE_OBJECTS | 
-				J9_JCL_FLAG_FINALIZATION | 
+				J9_JCL_FLAG_REFERENCE_OBJECTS |
+				J9_JCL_FLAG_FINALIZATION |
 				J9_JCL_FLAG_THREADGROUPS;
 			vm->jclSysPropBuffer = NULL;
-			
-			/* give outside modules a crack at doing the preconfigure.  If there is no hook then 
+
+			/* give outside modules a crack at doing the preconfigure.  If there is no hook then
 			 * run scarPreconfigure directly */
 			TRIGGER_J9HOOK_VM_SCAR_PRECONFIGURE(vm->hookInterface, vm, returnValuePointer, returnPointer);
-			if (result == 0 ){	
+			if (result == 0 ){
 				/* no hook ran so call scarPreconfigure directly */
 				if (scarPreconfigure(vm) != JNI_OK) {
 					returnVal = J9VMDLLMAIN_FAILED;
@@ -364,7 +364,7 @@ J9VMDllMain(J9JavaVM* vm, IDATA stage, void* reserved)
 			break;
 
 		case ALL_VM_ARGS_CONSUMED :
-			FIND_AND_CONSUME_ARG(STARTSWITH_MATCH, VMOPT_XJCL_COLON, NULL);
+			FIND_AND_CONSUME_VMARG(STARTSWITH_MATCH, VMOPT_XJCL_COLON, NULL);
 			break;
 
 		case JCL_INITIALIZED :
@@ -390,7 +390,7 @@ J9VMDllMain(J9JavaVM* vm, IDATA stage, void* reserved)
 				}
 			}
 			break;
-			
+
 		case VM_INITIALIZATION_COMPLETE :
 			returnVal = SunVMI_LifecycleEvent(vm, VM_INITIALIZATION_COMPLETE, NULL);
 			break;
@@ -409,12 +409,6 @@ J9VMDllMain(J9JavaVM* vm, IDATA stage, void* reserved)
 			}
 			freeUnsafeMemory(vm);
 			break;
-			
-		case OFFLOAD_JCL_PRECONFIGURE:
-			if (scarPreconfigure(vm) != JNI_OK) {
-				returnVal = J9VMDLLMAIN_FAILED;
-			}
-			break;
 
 		case INTERPRETER_SHUTDOWN:
 			break;
@@ -425,23 +419,24 @@ J9VMDllMain(J9JavaVM* vm, IDATA stage, void* reserved)
 
 /**
  * Helper function which looks up the entry for this DLL
- * in the VM's table and sets the fatalErrorString specified
+ * in the VM's table and sets the error string specified
  * if the entry is found.
  *
  * @param[in] vm			A pointer to the Java VM
  * @param[in] errorString	The error string to set in the VM's dll entry
  */
 static void
-setFatalErrorStringInDLLTableEntry(J9JavaVM* vm, char *errorString)
+setFatalErrorStringInDLLTableEntry(J9JavaVM *vm, const char *errorString)
 {
 	J9VMDllLoadInfo *loadInfo = FIND_DLL_TABLE_ENTRY(J9_DLL_NAME);
 	if (NULL != loadInfo) {
-		loadInfo->fatalErrorStr = errorString;
+		PORT_ACCESS_FROM_JAVAVM(vm);
+		vm->internalVMFunctions->setErrorJ9dll(PORTLIB, loadInfo, errorString, FALSE);
 	}
 }
 
 jint
-scarPreconfigure(J9JavaVM * vm)
+scarPreconfigure(J9JavaVM *vm)
 {
 	/* There are a fixed number of entries in jclBootstrapClassPath, ensure that you don't exceed the maximum number */
 	UDATA i = 0;
@@ -524,9 +519,9 @@ loadClasslibPropertiesFile(J9JavaVM *vm, UDATA *cursor)
 	UDATA startCount = *cursor;
 	UDATA count = 0;
 
-#define RELATIVE_PROPSPATH DIR_SEPARATOR_STR"lib"DIR_SEPARATOR_STR"classlib.properties"
+#define RELATIVE_PROPSPATH DIR_SEPARATOR_STR "lib" DIR_SEPARATOR_STR "classlib.properties"
 
-	j9str_printf(PORTLIB, propsPath, sizeof(propsPath), "%s"RELATIVE_PROPSPATH, vm->javaHome);
+	j9str_printf(PORTLIB, propsPath, sizeof(propsPath), "%s" RELATIVE_PROPSPATH, vm->javaHome);
 
 #undef RELATIVE_PROPSPATH
 
@@ -535,7 +530,7 @@ loadClasslibPropertiesFile(J9JavaVM *vm, UDATA *cursor)
 		/* File not found is not an error. */
 		return 0;
 	}
-	
+
 	bootpath = props_file_get(classlibProps, "bootpath");
 	if ((NULL != bootpath) && ('\0' != bootpath[0])) {
 		char* currentEntry = NULL;
@@ -581,7 +576,7 @@ loadClasslibPropertiesFile(J9JavaVM *vm, UDATA *cursor)
 }
 
 static IDATA
-addVMSpecificDirectories(J9JavaVM *vm, UDATA *cursor, char * subdirName)
+addVMSpecificDirectories(J9JavaVM *vm, UDATA *cursor, char *subdirName)
 {
 	PORT_ACCESS_FROM_JAVAVM(vm);
 	int javaHomePathLength = (int)strlen((char*)vm->javaHome);

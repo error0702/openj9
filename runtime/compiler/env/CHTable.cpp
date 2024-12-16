@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "env/CHTable.hpp"
@@ -273,7 +273,7 @@ bool TR_CHTable::commit(TR::Compilation *comp)
    if (canSkipCommit(comp))
       return true;
 
-   TR::list<TR_VirtualGuard*> &vguards = comp->getVirtualGuards();
+   const TR::Compilation::GuardSet &vguards = comp->getVirtualGuards();
    TR::list<TR_VirtualGuardSite*> *sideEffectPatchSites = comp->getSideEffectGuardPatchSites();
 
    cleanupNewlyExtendedInfo(comp);
@@ -423,7 +423,8 @@ bool TR_CHTable::commit(TR::Compilation *comp)
    }
 
 void
-TR_CHTable::commitOSRVirtualGuards(TR::Compilation *comp, TR::list<TR_VirtualGuard*> &vguards)
+TR_CHTable::commitOSRVirtualGuards(
+   TR::Compilation *comp, const TR::Compilation::GuardSet &vguards)
    {
    // Count patch sites with OSR assumptions
    int osrSites = 0;
@@ -541,13 +542,13 @@ TR_CHTable::commitVirtualGuard(TR_VirtualGuard *info, List<TR_VirtualGuardSite> 
 
    if ((info->getKind() == TR_HCRGuard) || info->mergedWithHCRGuard())
       {
-      guardedClass = info->getThisClass();
+      TR_OpaqueClassBlock *hcrGuardedClass = info->getThisClass();
       ListIterator<TR_VirtualGuardSite> it(&sites);
       for (TR_VirtualGuardSite *site = it.getFirst(); site; site = it.getNext())
          {
          TR_ASSERT(site->getLocation(), "assertion failure");
          TR_PatchNOPedGuardSiteOnClassRedefinition
-            ::make(comp->fe(), comp->trPersistentMemory(), guardedClass, site->getLocation(), site->getDestination(), comp->getMetadataAssumptionList());
+            ::make(comp->fe(), comp->trPersistentMemory(), hcrGuardedClass, site->getLocation(), site->getDestination(), comp->getMetadataAssumptionList());
          comp->setHasClassRedefinitionAssumptions();
          }
       // if it's not real HCR guard then we need to register
@@ -806,7 +807,7 @@ TR_CHTable::computeDataForCHTableCommit(TR::Compilation *comp)
    cleanupNewlyExtendedInfo(comp);
 
    // collect virtual guard info
-   TR::list<TR_VirtualGuard*> &vguards = comp->getVirtualGuards();
+   const TR::Compilation::GuardSet &vguards = comp->getVirtualGuards();
    std::vector<VirtualGuardForCHTable> serialVGuards;
    serialVGuards.reserve(vguards.size());
 

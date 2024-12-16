@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2020 IBM Corp. and others
+ * Copyright IBM Corp. and others 2001
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #if !defined(CACHEMAP_H_INCLUDED)
@@ -38,6 +38,8 @@
 #define CM_READ_CACHE_FAILED -1
 #define CM_CACHE_CORRUPT -2
 #define CM_CACHE_STORE_PREREQ_ID_FAILED -3
+
+#define CM_CACHE_MAX_METADATA_RELEASES 2
 
 /*
  * The maximum width of the hexadecimal representation of a value of type 'T'.
@@ -263,7 +265,7 @@ public:
 
 	bool isCacheCorruptReported(void);
 
-	IDATA runEntryPointChecks(J9VMThread* currentThread, void* isAddressInCache, const char** subcstr);
+	IDATA runEntryPointChecks(J9VMThread* currentThread, void* isAddressInCache, const char** subcstr, bool canUnlockCache = true);
 
 	void protectPartiallyFilledPages(J9VMThread *currentThread);
 
@@ -278,6 +280,8 @@ public:
 	void getUnstoredBytes(U_32 *softmxUnstoredBytes, U_32 *maxAOTUnstoredBytes, U_32 *maxJITUnstoredBytes) const;
 	
 	bool isAddressInCache(const void *address, UDATA length, bool includeHeaderReadWriteArea, bool useCcHeadOnly) const;
+
+	void setExtraStartupHints(J9VMThread* currentThread);
 
 private:
 	SH_CompositeCacheImpl* _cc;					/* current cache */
@@ -320,7 +324,7 @@ private:
 	UDATA _bytesRead;
 	U_32 _actualSize;
 	J9Pool* _ccPool;
-	bool _metadataReleased;
+	int32_t _metadataReleaseCounter;
 
 	bool _isAssertEnabled; /* flag to turn on/off assertion before acquiring local mutex */
 	
@@ -362,7 +366,7 @@ private:
 
 	UDATA initializeROMSegmentList(J9VMThread* currentThread);
 
-	IDATA checkForCrash(J9VMThread* currentThread, bool hasClassSegmentMutex);
+	IDATA checkForCrash(J9VMThread* currentThread, bool hasClassSegmentMutex, bool canUnlockCache = true);
 	
 	void reportCorruptCache(J9VMThread* currentThread, SH_CompositeCacheImpl* _ccToUse);
 

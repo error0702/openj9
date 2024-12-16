@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020, 2021 IBM Corp. and others
+# Copyright IBM Corp. and others 2020
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,17 +15,18 @@
 # OpenJDK Assembly Exception [2].
 #
 # [1] https://www.gnu.org/software/classpath/license.html
-# [2] http://openjdk.java.net/legal/assembly-exception.html
+# [2] https://openjdk.org/legal/assembly-exception.html
 #
-# SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+# SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
 ################################################################################
 
 list(APPEND OMR_PLATFORM_COMPILE_OPTIONS -O3)
 
 list(APPEND OMR_PLATFORM_CXX_COMPILE_OPTIONS -qnortti)
 
+list(APPEND OMR_PLATFORM_COMPILE_OPTIONS -qstackprotect)
+
 if(NOT OMR_OS_ZOS)
-	list(APPEND OMR_PLATFORM_COMPILE_OPTIONS -qstackprotect)
 	list(APPEND OMR_PLATFORM_CXX_COMPILE_OPTIONS -qsuppress=1540-1087:1540-1088:1540-1090)
 endif()
 
@@ -46,8 +47,8 @@ else()
 	# xlc/xlc++ options
 	if(OMR_OS_ZOS)
 		# Specifying -g on z/OS inhibits compiler optimizations.
-		# Instead we use these flags to info required for DDR without hindering the optimizer.
-		list(APPEND OMR_PLATFORM_COMPILE_OPTIONS -qdebug=nohook -qxplink=noback)
+		# Instead we use these flags to get info required for DDR without hindering the optimizer.
+		list(APPEND OMR_PLATFORM_COMPILE_OPTIONS -qdebug=nohook -qnogonumber -qxplink=noback)
 	else()
 		list(APPEND OMR_PLATFORM_COMPILE_OPTIONS -g)
 	endif()

@@ -1,5 +1,5 @@
-/*******************************************************************************
- * Copyright (c) 2019, 2019 IBM Corp. and others
+/*
+ * Copyright IBM Corp. and others 2019
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,21 +15,21 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
-/*******************************************************************************
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
+/*
  * Portions Copyright (c) 1999-2003 Apple Computer, Inc. All Rights
  * Reserved.
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -37,7 +37,7 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- *******************************************************************************/
+ */
 package com.ibm.j9ddr.corereaders.macho;
 
 import java.io.EOFException;
@@ -78,9 +78,7 @@ import com.ibm.j9ddr.corereaders.osthread.IRegister;
 import com.ibm.j9ddr.corereaders.osthread.Register;
 
 /**
- * There is an implicit assumption in this core reader that the Mach-O cores
- * are generated on a 64-bit Mac OSX machine, since OpenJ9 only supports OSX
- * out of the platforms using the Mach-O format.
+ * This dump reader supports Mach-O core files generated on 64-bit macOS systems.
  */
 public class MachoDumpReader extends AbstractCoreReader implements ILibraryDependentCore
 {
@@ -130,8 +128,9 @@ public class MachoDumpReader extends AbstractCoreReader implements ILibraryDepen
 	private static final int MH_NO_HEAP_EXECUTION = 0x1000000;
 	private static final int MH_APP_EXTENSION_SAFE = 0x02000000;
 
-	private static final int CPU_TYPE_X86 = 0x7;
-	private static final int CPU_TYPE_X86_64 = 0x01000007;
+	static final int CPU_TYPE_X86 = 0x7;
+	static final int CPU_TYPE_X86_64 = 0x01000007;
+	static final int CPU_TYPE_AARCH64 = 0x0100000c;
 
 	private static final int header64Size = 32;
 	private static final int loadCommandSize = 8;
@@ -145,7 +144,7 @@ public class MachoDumpReader extends AbstractCoreReader implements ILibraryDepen
 	private IModule _executable;
 	private List<IModule> _modules;
 	private int _signalNumber = -1;
-	
+
 	public class MachHeader64
 	{
 		public int magic;
@@ -200,10 +199,10 @@ public class MachoDumpReader extends AbstractCoreReader implements ILibraryDepen
 		}
 	}
 
-	public class OSXThread implements IOSThread
+	public abstract static class OSXThread implements IOSThread
 	{
 
-		private final Map<String, Number> registers;
+		final Map<String, Number> registers;
 		private final Properties properties;
 		private final long threadId;
 		private final List<IMemoryRange> memoryRanges = new LinkedList<>();
@@ -214,7 +213,7 @@ public class MachoDumpReader extends AbstractCoreReader implements ILibraryDepen
 			threadId = tid;
 			registers = new TreeMap<>();
 			// Since IOSThread doesn't have a sense of the different types of registers for a thread,
-			// we add all the registers to the OSXThread. The registers all have different names, so 
+			// we add all the registers to the OSXThread. The registers all have different names, so
 			// there should be no conflict.
 			for (ThreadState state : thread.states) {
 				registers.putAll(state.registers);
@@ -230,7 +229,7 @@ public class MachoDumpReader extends AbstractCoreReader implements ILibraryDepen
 		//TODO: unwind stack from the stack pointer
 		public List<? extends IOSStackFrame> getStackFrames()
 		{
-			return null;
+			return Collections.emptyList();
 		}
 
 		public Collection<? extends IRegister> getRegisters()
@@ -239,7 +238,7 @@ public class MachoDumpReader extends AbstractCoreReader implements ILibraryDepen
 			for (String regName : registers.keySet()) {
 				Number value = registers.get(regName);
 
-				regList.add(new Register(regName,value));
+				regList.add(new Register(regName, value));
 			}
 			return regList;
 		}
@@ -247,6 +246,19 @@ public class MachoDumpReader extends AbstractCoreReader implements ILibraryDepen
 		public Collection<? extends IMemoryRange> getMemoryRanges()
 		{
 			return memoryRanges;
+		}
+
+		public Properties getProperties()
+		{
+			return properties;
+		}
+	}
+
+	public static final class OSXAMD64Thread extends OSXThread
+	{
+		public OSXAMD64Thread(long tid, ThreadCommand thread)
+		{
+			super(tid, thread);
 		}
 
 		public long getInstructionPointer()
@@ -263,10 +275,28 @@ public class MachoDumpReader extends AbstractCoreReader implements ILibraryDepen
 		{
 			return registers.get("rsp").longValue();
 		}
+	}
 
-		public Properties getProperties()
+	public static final class OSXAArch64Thread extends OSXThread
+	{
+		public OSXAArch64Thread(long tid, ThreadCommand thread)
 		{
-			return properties;
+			super(tid, thread);
+		}
+
+		public long getInstructionPointer()
+		{
+			return registers.get("pc").longValue();
+		}
+
+		public long getBasePointer()
+		{
+			return registers.get("fp").longValue();
+		}
+
+		public long getStackPointer()
+		{
+			return registers.get("sp").longValue();
 		}
 	}
 
@@ -328,11 +358,11 @@ public class MachoDumpReader extends AbstractCoreReader implements ILibraryDepen
 	public Properties getProperties()
 	{
 		Properties props = new Properties();
-		
+
 		props.setProperty(ICore.SYSTEM_TYPE_PROPERTY, "OSX");
 		props.setProperty(ICore.PROCESSOR_TYPE_PROPERTY, getCpuType());
 		props.setProperty(ICore.PROCESSOR_SUBTYPE_PROPERTY, "");
-		
+
 		return props;
 	}
 
@@ -365,16 +395,28 @@ public class MachoDumpReader extends AbstractCoreReader implements ILibraryDepen
 	public List<? extends IOSThread> getThreads() throws CorruptDataException
 	{
 		List<IOSThread> threads = new ArrayList<>(dumpFile.threads.size());
+		int cpuType = dumpFile.header.cpuType;
 		for (ThreadCommand command : dumpFile.threads) {
-				OSXThread nativeThread = new OSXThread(0, command);
-				threads.add(nativeThread);
-				if (_signalNumber == -1) {
-					// will use the first thread's exception values, which should be the primary thread
-					if (nativeThread.registers.containsKey("err")) {
-						_signalNumber = nativeThread.registers.get("err").intValue();
-					} else {
-						throw new CorruptDataException("Core dump missing thread exception registers.");
-					}
+			OSXThread nativeThread;
+			switch (cpuType) {
+			case CPU_TYPE_X86_64:
+				nativeThread = new OSXAMD64Thread(0, command);
+				break;
+			case CPU_TYPE_AARCH64:
+				nativeThread = new OSXAArch64Thread(0, command);
+				break;
+			default:
+				throw new CorruptDataException("Unrecognized CPU type.");
+			}
+			threads.add(nativeThread);
+			if (_signalNumber == -1) {
+				// will use the first thread's exception values, which should be the primary thread
+				String sigNumReg = (cpuType == CPU_TYPE_X86_64) ? "err" : "esr";
+				if (nativeThread.registers.containsKey(sigNumReg)) {
+					_signalNumber = nativeThread.registers.get(sigNumReg).intValue();
+				} else {
+					throw new CorruptDataException("Core dump missing thread exception registers.");
+				}
 			}
 		}
 		return threads;
@@ -417,19 +459,19 @@ public class MachoDumpReader extends AbstractCoreReader implements ILibraryDepen
 				if (isMACHO(magic)) {
 					MachFile64 innerFile = readMachFile(segment.fileOffset);
 					switch (innerFile.header.fileType) {
-						case MH_EXECUTE:
-							executableMachFile = innerFile;
-							_executable = processExecutableFile(innerFile, segment);
-							break;
-						case MH_DYLIB:
-							dylibMachFiles.add(innerFile);
-							_modules.add(processModuleFile(innerFile, segment));
-							break;
-						case MH_DYLINKER:
-							dylinkerMachFile = innerFile;
-							break;
-						default:
-							break;
+					case MH_EXECUTE:
+						executableMachFile = innerFile;
+						_executable = processExecutableFile(innerFile, segment);
+						break;
+					case MH_DYLIB:
+						dylibMachFiles.add(innerFile);
+						_modules.add(processModuleFile(innerFile, segment));
+						break;
+					case MH_DYLINKER:
+						dylinkerMachFile = innerFile;
+						break;
+					default:
+						break;
 					}
 				}
 			} catch (EOFException e) {
@@ -451,12 +493,11 @@ public class MachoDumpReader extends AbstractCoreReader implements ILibraryDepen
 		}
 		long currentOffset = fileOffset + header64Size;
 		for (int i = 0; i < machfile.header.numCommands; i++) {
-			LoadCommand command = LoadCommand.readFullCommand(_fileReader, currentOffset, fileOffset);
+			LoadCommand command = LoadCommand.readFullCommand(_fileReader, currentOffset, fileOffset, machfile.header.cpuType);
 			if (command instanceof SegmentCommand64) {
-				SegmentCommand64 segment = (SegmentCommand64) command;
-				machfile.segments.add(segment);
+				machfile.segments.add((SegmentCommand64) command);
 			} else if (command instanceof ThreadCommand) {
-				machfile.threads.add((ThreadCommand)command);
+				machfile.threads.add((ThreadCommand) command);
 			} else {
 				machfile.otherLoads.add(command);
 			}
@@ -475,8 +516,7 @@ public class MachoDumpReader extends AbstractCoreReader implements ILibraryDepen
 	{
 		List<ISymbol> symbols = new ArrayList<>();
 		Collection<? extends IMemoryRange> memoryRanges = executableFile.getMemoryRangesWithOffset(container.vmaddr);
-		Module m = new Module(_process, "executable", symbols, memoryRanges, executableFile.streamOffset, new Properties());
-		return m;
+		return new Module(_process, "executable", symbols, memoryRanges, executableFile.streamOffset, new Properties());
 	}
 
 	private IModule processModuleFile(MachFile64 moduleFile, SegmentCommand64 container) throws IOException, InvalidDumpFormatException
@@ -485,8 +525,7 @@ public class MachoDumpReader extends AbstractCoreReader implements ILibraryDepen
 		String moduleName = dylib.dylib.name.value;
 		List<ISymbol> symbols = new ArrayList<>();
 		Collection<? extends IMemoryRange> memoryRanges = moduleFile.getMemoryRangesWithOffset(container.vmaddr);
-		Module m = new Module(_process, moduleName, symbols, memoryRanges, moduleFile.streamOffset, new Properties());
-		return m;
+		return new Module(_process, moduleName, symbols, memoryRanges, moduleFile.streamOffset, new Properties());
 	}
 
 	public MachHeader64 readHeader(long offset) throws IOException, InvalidDumpFormatException
@@ -509,10 +548,11 @@ public class MachoDumpReader extends AbstractCoreReader implements ILibraryDepen
 
 	private String getCpuType()
 	{
-		if (dumpFile.header.cpuType == CPU_TYPE_X86_64) {
+		if (dumpFile.header.cpuType == CPU_TYPE_AARCH64) {
+			return "AARCH64";
+		} else if (dumpFile.header.cpuType == CPU_TYPE_X86_64) {
 			return "X86_64";
-		}
-		else {
+		} else {
 			return "";
 		}
 	}

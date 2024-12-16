@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2001
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "j9protos.h"
@@ -82,15 +82,23 @@ done:
 }
 
 UDATA
-cInterpGetStackClassJEP176Iterator(J9VMThread * currentThread, J9StackWalkState * walkState)
+cInterpGetStackClassJEP176Iterator(J9VMThread *currentThread, J9StackWalkState *walkState)
 {
-	J9JavaVM * vm = currentThread->javaVM;
-	J9Class * currentClass = J9_CLASS_FROM_CP(walkState->constantPool);
+	J9JavaVM *vm = currentThread->javaVM;
+	J9Class *currentClass = J9_CLASS_FROM_CP(walkState->constantPool);
 	J9InternalVMFunctions *vmFuncs = vm->internalVMFunctions;
 
 	Assert_VM_mustHaveVMAccess(currentThread);
 
-	if (J9_ARE_ALL_BITS_SET(J9_ROM_METHOD_FROM_RAM_METHOD(walkState->method)->modifiers, J9AccMethodFrameIteratorSkip)) {
+	if (J9_ARE_ALL_BITS_SET(J9_ROM_METHOD_FROM_RAM_METHOD(walkState->method)->modifiers, J9AccMethodFrameIteratorSkip)
+#if defined(J9VM_OPT_OPENJDK_METHODHANDLE) && (JAVA_SPEC_VERSION <= 11)
+			/* Do not skip InjectedInvoker classes despite them having the J9AccMethodFrameIteratorSkip
+			 * modifier set via the @Hidden attribute. Skipping them causes incorrect, unexpected
+			 * behaviour when using OpenJDK method handles pre-hidden-class support.
+			 */
+			&& J9_ARE_NO_BITS_SET(currentClass->romClass->extraModifiers, J9AccClassIsInjectedInvoker)
+#endif /* defined(J9VM_OPT_OPENJDK_METHODHANDLE) && (JAVA_SPEC_VERSION <= 11) */
+	) {
 		/* Skip methods with java.lang.invoke.FrameIteratorSkip / jdk.internal.vm.annotation.Hidden / java.lang.invoke.LambdaForm$Hidden annotation */
 		return J9_STACKWALK_KEEP_ITERATING;
 	}
@@ -112,8 +120,8 @@ cInterpGetStackClassJEP176Iterator(J9VMThread * currentThread, J9StackWalkState 
 #if JAVA_SPEC_VERSION >= 18
 				|| (walkState->method == vm->jlrMethodInvokeMH)
 #endif /* JAVA_SPEC_VERSION >= 18 */
-				|| (vm->srMethodAccessor && vmFuncs->instanceOfOrCheckCast(currentClass, J9VM_J9CLASS_FROM_HEAPCLASS(currentThread, *((j9object_t*) vm->srMethodAccessor))))
-				|| (vm->srConstructorAccessor && vmFuncs->instanceOfOrCheckCast(currentClass, J9VM_J9CLASS_FROM_HEAPCLASS(currentThread, *((j9object_t*) vm->srConstructorAccessor))))
+				|| (vm->srMethodAccessor && vmFuncs->instanceOfOrCheckCast(currentClass, J9VM_J9CLASS_FROM_HEAPCLASS(currentThread, *((j9object_t *)vm->srMethodAccessor))))
+				|| (vm->srConstructorAccessor && vmFuncs->instanceOfOrCheckCast(currentClass, J9VM_J9CLASS_FROM_HEAPCLASS(currentThread, *((j9object_t *)vm->srConstructorAccessor))))
 		) {
 			/* skip reflection classes and MethodHandle.invokeWithArguments() when reaching depth 0 */
 			return J9_STACKWALK_KEEP_ITERATING;
@@ -158,8 +166,8 @@ convertToNativeArgArray(J9VMThread *currentThread, j9object_t argArray, U_64 *ff
 	UDATA argCount = (UDATA)J9INDEXABLEOBJECT_SIZE(currentThread, argArray);
 	/* 3 means each element of the array to be copied is 8 bytes (64bits) in size
 	 * as specified in memcpyToOrFromArrayContiguous() at ArrayCopyHelpers.hpp.
-	 * Note: all parameters are converted to long in ProgrammableInvoker, so the size of
-	 * element in the argument array must be 64bits.
+	 * Note: all parameters are converted to long in InternalDowncallHandler,
+	 * so the size of element in the argument array must be 64bits.
 	 */
 	VM_ArrayCopyHelpers::memcpyFromArray(currentThread, argArray, 3, 0, argCount, (void*)ffiArgs);
 	return ffiArgs;

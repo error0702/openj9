@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,13 +15,14 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "codegen/PPCPrivateLinkage.hpp"
 
+#include "codegen/OMRLinkage_inlines.hpp"
 #include "codegen/CodeGenerator.hpp"
 #include "codegen/CodeGeneratorUtils.hpp"
 #include "codegen/Linkage_inlines.hpp"
@@ -879,6 +880,18 @@ static int32_t calculateFrameSize(TR::RealRegister::RegNum &intSavedFirst,
    while (intSavedFirst<=TR::RealRegister::LastGPR && !machine->getRealRegister(intSavedFirst)->getHasBeenAssignedInMethod())
       intSavedFirst=(TR::RealRegister::RegNum)((uint32_t)intSavedFirst+1);
 
+   if (comp->target().is64Bit() && comp->compilePortableCode() &&
+      !comp->target().cpu.isAtLeast(OMR_PROCESSOR_PPC_P10) && cg->getSavesNonVolatileGPRsForGC())
+      {
+      // When compiling code that contains a Direct-to-JNI call, we need to save all the non-volatile registers
+      // so the GC will have access to them. If we are compiling portable code (CRIU or PortableAOT) then we
+      // might be compiling code that will run on PWR10 which allows for R16 to be marked collectible. Therefore
+      // we need to save&restore R16 for portable code containing a Direct-to-JNI call in case a GC cycle occurs
+      // while some non-portable code down the stack is using R16 to hold a collectible object.
+      TR_ASSERT_FATAL( intSavedFirst == TR::RealRegister::gr17, "Portable compile expected first saved GPR to be R17" );
+      intSavedFirst = TR::RealRegister::gr16;
+      }
+
    // the registerSaveDescription is emitted as follows:
    // 0000 0000 0000 000 0 0000 0000 0000 0000
    //                    <----           ---->
@@ -1354,6 +1367,13 @@ void J9::Power::PrivateLinkage::createEpilogue(TR::Instruction *cursor)
    while (savedFirst<=TR::RealRegister::LastGPR && !machine->getRealRegister(savedFirst)->getHasBeenAssignedInMethod())
       savedFirst=(TR::RealRegister::RegNum)((uint32_t)savedFirst+1);
 
+   if (comp()->target().is64Bit() && comp()->compilePortableCode() &&
+      !comp()->target().cpu.isAtLeast(OMR_PROCESSOR_PPC_P10) && cg()->getSavesNonVolatileGPRsForGC())
+      {
+      TR_ASSERT_FATAL( savedFirst == TR::RealRegister::gr17, "Portable compile expected first saved GPR to be R17" );
+      savedFirst = TR::RealRegister::gr16;
+      }
+
    if (savedFirst <= TR::RealRegister::LastGPR)
       {
       if (comp()->target().is64Bit() ||
@@ -1462,6 +1482,8 @@ int32_t J9::Power::PrivateLinkage::buildPrivateLinkageArgs(TR::Node             
       case TR::java_lang_invoke_ComputedCalls_dispatchVirtual:
       case TR::com_ibm_jit_JITHelpers_dispatchVirtual:
          specialArgReg = getProperties().getVTableIndexArgumentRegister();
+         break;
+      default:
          break;
       }
 
@@ -1929,7 +1951,7 @@ int32_t J9::Power::PrivateLinkage::buildPrivateLinkageArgs(TR::Node             
       {
       if(comp()->target().isLinux() && comp()->target().is64Bit() && comp()->target().cpu.isLittleEndian())
          {
-         if (!comp()->getOption(TR_DisableTOC))
+         if (!comp()->getOption(TR_DisableTOC) && !comp()->compilePortableCode())
             {
             int32_t helperOffset = (callNode->getSymbolReference()->getReferenceNumber() - 1)*sizeof(intptr_t);
             generateTrg1MemInstruction(cg(), TR::InstOpCode::Op_load, callNode, dependencies->searchPreConditionRegister(TR::RealRegister::gr12),
@@ -2287,7 +2309,7 @@ void J9::Power::PrivateLinkage::buildVirtualDispatch(TR::Node                   
          default:
             if (fej9->needsInvokeExactJ2IThunk(callNode, comp()))
                {
-               TR_J2IThunk *thunk = TR::PPCCallSnippet::generateInvokeExactJ2IThunk(callNode, sizeOfArguments, cg(), methodSymbol->getMethod()->signatureChars());
+               TR_MHJ2IThunk *thunk = TR::PPCCallSnippet::generateInvokeExactJ2IThunk(callNode, sizeOfArguments, cg(), methodSymbol->getMethod()->signatureChars());
                fej9->setInvokeExactJ2IThunk(thunk, comp());
                }
             break;
@@ -2654,6 +2676,8 @@ void inlineCharacterIsMethod(TR::Node *node, TR::MethodSymbol* methodSymbol, TR:
          generateTrg1Src2Instruction(cg, TR::InstOpCode::cmpeqb, node, cnd2Reg, srcReg, rangeReg);
          generateTrg1Src2ImmInstruction(cg, TR::InstOpCode::cror, node, cnd1Reg, cnd2Reg, cnd1Reg, imm);
          break;
+      default:
+         break;
       }
    generateTrg1Src1Instruction(cg, TR::InstOpCode::setb, node, returnRegister, cnd1Reg);
 
@@ -2667,6 +2691,137 @@ void inlineCharacterIsMethod(TR::Node *node, TR::MethodSymbol* methodSymbol, TR:
    cg->stopUsingRegister(srcReg);
    cg->stopUsingRegister(rangeReg);
    cg->stopUsingRegister(tmpReg);
+   }
+
+void buildCRC32CCall(TR::Node *callNode,
+               TR::RegisterDependencyConditions *deps,
+               TR::MethodSymbol* methodSymbol,
+               TR::CodeGenerator *cg,
+               TR::LabelSymbol *&returnLabel,
+               bool crc32m2, bool crc32m3)
+   {
+   TR::Compilation *comp = cg->comp();
+   TR::Register *gr2Reg;
+   TR::Register *gr12Reg = deps->searchPreConditionRegister(TR::RealRegister::gr12);
+   bool aix_style_linkage = comp->target().isAIX() || (comp->target().is64Bit() && comp->target().isLinux());
+
+   if (aix_style_linkage)
+      {
+      gr2Reg = deps->searchPreConditionRegister(TR::RealRegister::gr2);
+      }
+
+   // Assuming pre/postCondition have the same index, we use preCondition to map
+   OMR::RegisterDependencyMap map(deps->getPreConditions()->getRegisterDependency(0), deps->getAddCursorForPre());
+   for (int32_t cnt=0; cnt < deps->getAddCursorForPre(); cnt++)
+      map.addDependency(deps->getPreConditions()->getRegisterDependency(cnt), cnt);
+
+   TR::Register *addrArg, *posArg, *lenArg, *wasteArg;
+   if (crc32m2)
+      {
+      addrArg = map.getSourceWithTarget(TR::RealRegister::gr4);
+      posArg = map.getSourceWithTarget(TR::RealRegister::gr5);
+      lenArg = map.getSourceWithTarget(TR::RealRegister::gr6);
+
+      generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::addi2, callNode, addrArg, addrArg, TR::Compiler->om.contiguousArrayHeaderSizeInBytes());
+      }
+
+   if (crc32m3)
+      {
+      addrArg = map.getSourceWithTarget(comp->target().is64Bit()?(TR::RealRegister::gr4):(TR::RealRegister::gr5));
+      posArg = map.getSourceWithTarget(comp->target().is64Bit()?(TR::RealRegister::gr5):(TR::RealRegister::gr6));
+      lenArg = map.getSourceWithTarget(comp->target().is64Bit()?(TR::RealRegister::gr6):(TR::RealRegister::gr7));
+      if (!comp->target().is64Bit())
+         wasteArg = map.getSourceWithTarget(TR::RealRegister::gr4);
+      }
+   generateTrg1Src2Instruction(cg, TR::InstOpCode::add, callNode, addrArg, addrArg, posArg);
+
+   /* For CRC32C, java uses len arg as offset for crc calculation. To workaround this in vpmsum
+    * where (off + len) is passed as len, perform a sub operation to take offset from len
+    */
+   generateTrg1Src2Instruction(cg, TR::InstOpCode::subf, callNode, lenArg, posArg, lenArg);
+   /* Passing one for the castagnoli parameter of crc32_vpmsum helper. Here we are re-using
+    * posArg in gr6 after the buffer address has been calculated.
+    */
+   generateTrg1ImmInstruction(cg, TR::InstOpCode::li, callNode, posArg, 1);
+
+   deps->getPreConditions()->setDependencyInfo(map.getTargetIndex(TR::RealRegister::gr4), addrArg, TR::RealRegister::gr4, UsesDependentRegister);
+   deps->getPostConditions()->setDependencyInfo(map.getTargetIndex(TR::RealRegister::gr4), addrArg, TR::RealRegister::gr4, UsesDependentRegister);
+
+   deps->getPreConditions()->setDependencyInfo(map.getTargetIndex(TR::RealRegister::gr5), lenArg, TR::RealRegister::gr5, UsesDependentRegister);
+   deps->getPostConditions()->setDependencyInfo(map.getTargetIndex(TR::RealRegister::gr5), lenArg, TR::RealRegister::gr5, UsesDependentRegister);
+
+   deps->getPreConditions()->setDependencyInfo(map.getTargetIndex(TR::RealRegister::gr6), posArg, TR::RealRegister::gr6, UsesDependentRegister);
+   deps->getPostConditions()->setDependencyInfo(map.getTargetIndex(TR::RealRegister::gr6), posArg, TR::RealRegister::gr6, UsesDependentRegister);
+
+   if (crc32m3 && !comp->target().is64Bit())
+      {
+      deps->getPreConditions()->setDependencyInfo(map.getTargetIndex(TR::RealRegister::gr7), wasteArg, TR::RealRegister::gr7, UsesDependentRegister);
+      deps->getPostConditions()->setDependencyInfo(map.getTargetIndex(TR::RealRegister::gr7), wasteArg, TR::RealRegister::gr7, UsesDependentRegister);
+      }
+
+   if (comp->compileRelocatableCode())
+      {
+
+      TR::SymbolReference * vpmsumSymRef = (comp)->getSymRefTab()->findOrCreateRuntimeHelper(TR_PPCcrc32_vpmsum,false,false,false);
+      TR::LabelSymbol *vpmsumSnippetLabel = cg->lookUpSnippet(TR::Snippet::IsHelperCall, vpmsumSymRef);
+
+      if (vpmsumSnippetLabel == NULL)
+         {
+         vpmsumSnippetLabel = generateLabelSymbol(cg);
+         cg->addSnippet(new (cg->trHeapMemory()) TR::PPCHelperCallSnippet(cg, callNode, vpmsumSnippetLabel, vpmsumSymRef));
+         }
+
+      callNode->setSymbolReference(vpmsumSymRef);
+      if(comp->target().isLinux() && comp->target().is64Bit() && comp->target().cpu.isLittleEndian())
+         {
+         if (!comp->getOption(TR_DisableTOC) && !comp->compilePortableCode())
+            {
+            int32_t helperOffset = (callNode->getSymbolReference()->getReferenceNumber() - 1)*sizeof(intptr_t);
+            generateTrg1MemInstruction(cg, TR::InstOpCode::Op_load, callNode, gr12Reg,
+                                      TR::MemoryReference::createWithDisplacement(cg, cg->getTOCBaseRegister(), helperOffset, TR::Compiler->om.sizeofReferenceAddress()));
+            }
+            else
+            {
+            loadAddressConstant(cg, callNode, (int64_t)runtimeHelperValue((TR_RuntimeHelper)vpmsumSymRef->getReferenceNumber()),
+                                gr12Reg, NULL, false, TR_AbsoluteHelperAddress);
+            }
+         }
+         else if (comp->target().isAIX() || (comp->target().isLinux() && comp->target().is64Bit()))
+         {
+         generateTrg1MemInstruction(cg, TR::InstOpCode::Op_load, callNode, gr2Reg,
+                                    TR::MemoryReference::createWithDisplacement(cg, cg->getMethodMetaDataRegister(), offsetof(J9VMThread, jitTOC), TR::Compiler->om.sizeofReferenceAddress()));
+         }
+
+      generateDepLabelInstruction(cg, TR::InstOpCode::bl, callNode, vpmsumSnippetLabel, deps);
+      }
+  else
+      {
+
+      TR::Register *gr0Reg = deps->searchPreConditionRegister(TR::RealRegister::gr0);
+      TR::Register *gr11Reg = deps->searchPreConditionRegister(TR::RealRegister::gr11);
+
+      loadConstant(cg, callNode, (int64_t)crc32_vpmsum, gr12Reg);
+      if (aix_style_linkage &&
+         !((comp)->target().is64Bit()  && ((comp)->target().isLinux()) && (comp)->target().cpu.isLittleEndian()))
+         {
+         // get the target address
+         generateTrg1MemInstruction(cg,TR::InstOpCode::Op_load, callNode, gr0Reg, TR::MemoryReference::createWithDisplacement(cg, gr12Reg, 0, TR::Compiler->om.sizeofReferenceAddress()));
+         // put the target address into the count register
+         generateSrc1Instruction(cg, TR::InstOpCode::mtctr, callNode, gr0Reg);
+         // load the toc register
+         generateTrg1MemInstruction(cg,TR::InstOpCode::Op_load, callNode, gr2Reg, TR::MemoryReference::createWithDisplacement(cg, gr12Reg, TR::Compiler->om.sizeofReferenceAddress(), TR::Compiler->om.sizeofReferenceAddress()));
+         // load the environment register
+         generateTrg1MemInstruction(cg,TR::InstOpCode::Op_load, callNode, gr11Reg, TR::MemoryReference::createWithDisplacement(cg, gr12Reg, 2*TR::Compiler->om.sizeofReferenceAddress(), TR::Compiler->om.sizeofReferenceAddress()));
+         }
+      else
+         {
+         // put the target address into the count register
+         generateSrc1Instruction(cg, TR::InstOpCode::mtctr, callNode, gr12Reg);
+         }
+      generateInstruction(cg, TR::InstOpCode::bctrl, callNode);
+      generateDepLabelInstruction(cg, TR::InstOpCode::label, callNode, returnLabel, deps);
+      }
+
    }
 
 void J9::Power::PrivateLinkage::buildDirectCall(TR::Node *callNode,
@@ -2686,10 +2841,7 @@ void J9::Power::PrivateLinkage::buildDirectCall(TR::Node *callNode,
    if (callSymRef->getReferenceNumber() >= TR_PPCnumRuntimeHelpers)
       fej9->reserveTrampolineIfNecessary(comp(), callSymRef, false);
 
-   bool forceUnresolvedDispatch = fej9->forceUnresolvedDispatch();
-   if (comp()->getOption(TR_UseSymbolValidationManager))
-      forceUnresolvedDispatch = false;
-
+   bool forceUnresolvedDispatch = !fej9->isResolvedDirectDispatchGuaranteed(comp());
    if ((callSymbol->isJITInternalNative() ||
         (!callSymRef->isUnresolved() && !callSymbol->isInterpreted() && ((forceUnresolvedDispatch && callSymbol->isHelper()) || !forceUnresolvedDispatch))))
       {
@@ -2759,10 +2911,25 @@ TR::Register *J9::Power::PrivateLinkage::buildDirectDispatch(TR::Node *callNode)
             inlinedCharacterIsMethod = true;
             inlineCharacterIsMethod(callNode, callNode->getSymbol()->castToMethodSymbol(), cg(), doneLabel);
             break;
+         default:
+            break;
          }
       }
 
-   buildDirectCall(callNode, callSymRef, dependencies, pp, argSize);
+   if (!TR::Compiler->om.canGenerateArraylets() &&
+       !TR::Compiler->om.isOffHeapAllocationEnabled() &&
+       comp()->target().cpu.isAtLeast(OMR_PROCESSOR_PPC_P8) &&
+       comp()->target().cpu.supportsFeature(OMR_FEATURE_PPC_HAS_VSX) &&
+       (callNode->getSymbol()->castToMethodSymbol()->getRecognizedMethod() == TR::java_util_zip_CRC32C_updateBytes ||
+	callNode->getSymbol()->castToMethodSymbol()->getRecognizedMethod() == TR::java_util_zip_CRC32C_updateDirectByteBuffer)) {
+
+      TR::MethodSymbol *callSymbol = callNode->getSymbolReference()->getSymbol()->castToMethodSymbol();
+      bool crc32m2 = (callSymbol->getRecognizedMethod() == TR::java_util_zip_CRC32C_updateBytes);
+      bool crc32m3 = (callSymbol->getRecognizedMethod() == TR::java_util_zip_CRC32C_updateDirectByteBuffer);
+      buildCRC32CCall(callNode, dependencies, callSymbol, cg(), doneLabel, crc32m2, crc32m3);
+   } else {
+      buildDirectCall(callNode, callSymRef, dependencies, pp, argSize);
+   }
    // SG - end
 
    cg()->machine()->setLinkRegisterKilled(true);

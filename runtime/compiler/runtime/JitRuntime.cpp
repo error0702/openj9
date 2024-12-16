@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #ifdef WINDOWS
@@ -45,6 +45,7 @@
 #include "control/Options.hpp"
 #include "control/Options_inlines.hpp"
 #include "control/Recompilation.hpp"
+#include "control/CompilationStrategy.hpp"
 #include "env/CompilerEnv.hpp"
 #include "env/IO.hpp"
 #include "env/J2IThunk.hpp"
@@ -107,20 +108,20 @@ J9::Recompilation::isAlreadyBeingCompiled(
    return TR::Recompilation::isAlreadyPreparedForRecompile(startPC);
    }
 
-void setDllSlip(char*CodeStart,char*CodeEnd,char*dllName, TR::Compilation * comp)
+void setDllSlip(const char *CodeStart, const char *CodeEnd, const char *dllName, TR::Compilation *comp)
 {
 #if defined(J9ZOS390)
-   char  errBuf[512];
-   UDATA rc=0;
+   char errBuf[512];
+   UDATA rc = 0;
    J9PortLibrary *portLib = jitConfig->javaVM->portLibrary;
    PORT_ACCESS_FROM_PORT(portLib);
 
    TR_ASSERT(comp, "Logging requires a compilation object");
-   traceMsg(comp, "code start 0x%016p , code end 0x%016p ,size = %d\n",CodeStart,CodeEnd,CodeStart-CodeEnd);
+   traceMsg(comp, "code start 0x%016p , code end 0x%016p ,size = %d\n", CodeStart, CodeEnd, CodeStart - CodeEnd);
 
-   if (sliphandle==0)
+   if (sliphandle == 0)
       {
-      rc = j9sl_open_shared_library(dllName, &sliphandle, FALSE);
+      rc = j9sl_open_shared_library(const_cast<char *>(dllName), &sliphandle, FALSE);
       if (rc)
          {
          traceMsg(comp, "Failed to open SLIP DLL: %s (%s) %016p\n", dllName, j9error_last_error_message(), sliphandle);
@@ -130,17 +131,17 @@ void setDllSlip(char*CodeStart,char*CodeEnd,char*dllName, TR::Compilation * comp
    if (sliphandle != 0)
       {
       if (do_slip_func == 0)
-         j9sl_lookup_name(sliphandle, "do_slip", &do_slip_func, (char*)NULL);
+         j9sl_lookup_name(sliphandle, "do_slip", &do_slip_func, (char *)NULL);
       if (do_slip_func != 0)
          {
          fptrl=(void (*)(char *, char *, void *, void *, char *, char *, char *))do_slip_func;
-         (*fptrl)(CodeStart,
-                  CodeEnd,
-                  (void*)NULL,
-                  (void*)NULL,
-                  (char*)NULL,
-                  (char*)NULL,
-                  (char*)NULL
+         (*fptrl)(const_cast<char *>(CodeStart),
+                  const_cast<char *>(CodeEnd),
+                  (void *)NULL,
+                  (void *)NULL,
+                  (char *)NULL,
+                  (char *)NULL,
+                  (char *)NULL
                  );
          }
       else if (comp)
@@ -314,6 +315,8 @@ void induceRecompilation_unwrapper(void **argsPtr, void **resultPtr)
    TR_PersistentJittedBodyInfo *bodyInfo = TR::Recompilation::getJittedBodyInfoFromPC(startPC);
    TR_ASSERT(bodyInfo, "A method that can be recompiled must have bodyInfo");
    TR_PersistentMethodInfo  *methodInfo = bodyInfo->getMethodInfo();
+   if (bodyInfo->getHasEdoSnippet())
+      methodInfo->setReasonForRecompilation(TR_PersistentMethodInfo::RecompDueToEdo);
    TR_Hotness level = TR::Options::getJITCmdLineOptions()->getNextHotnessLevel(bodyInfo->getHasLoops(), bodyInfo->getHotness());
    // If there is no next level, lets keep the current one
    if (level == unknownHotness)
@@ -642,6 +645,14 @@ void J9FASTCALL _jitProfileStringValue(uintptr_t value, int32_t charsOffset, int
       {
       readValues = true;
 
+      uintptr_t startOfData = value;
+#if defined(J9VM_GC_SPARSE_HEAP_ALLOCATION)
+      if (TR::Compiler->om.isOffHeapAllocationEnabled())
+         {
+         startOfData = *((uintptr_t *) (value + TR::Compiler->om.offsetOfContiguousDataAddrField()));
+         }
+#endif /* J9VM_GC_SPARSE_HEAP_ALLOCATION */
+
       if (TR::Compiler->om.compressObjectReferences())
          {
          J9JavaVM *jvm = jitConfig->javaVM;
@@ -652,12 +663,17 @@ void J9FASTCALL _jitProfileStringValue(uintptr_t value, int32_t charsOffset, int
          J9VMThread *vmThread = jvm->internalVMFunctions->currentVMThread(jvm);
          int32_t result = mmf->j9gc_objaccess_compressedPointersShift(vmThread);
 
-         chars = (char *) (( (uintptr_t) (*((uint32_t *) (value + charsOffset)))) << result);
+         chars = (char *) (( (uintptr_t) (*((uint32_t *) (startOfData + charsOffset)))) << result);
          }
       else
-         chars = *((char **) (value + charsOffset));
+         chars = *((char **) (startOfData + charsOffset));
 
+#if defined(J9VM_GC_SPARSE_HEAP_ALLOCATION)
+      if (!TR::Compiler->om.isOffHeapAllocationEnabled())
+#endif /* J9VM_GC_SPARSE_HEAP_ALLOCATION */
+      {
       chars = chars + (TR::Compiler->om.contiguousArrayHeaderSizeInBytes());
+      }
 
       length = *((int32_t *) (value + lengthOffset));
       if (length > 128)
@@ -783,7 +799,7 @@ static uint64_t QueryCounter()
    {
    timebasestruct_t tb;
    read_real_time(&tb, sizeof(tb));
-   uint64_t result = tb.tb_high << 32 | tb.tb_low;
+   uint64_t result = (((uint64_t)tb.tb_high) << 32) | tb.tb_low;
    return result;
    }
 #else
@@ -911,7 +927,7 @@ void dumpAllClasses(J9VMThread *vmThread)
    char fileName[256];
    J9Class * clazz = NULL;
 
-   sprintf(fileName, "tracer-classdump-%p.txt", vmThread);
+   snprintf(fileName, sizeof(fileName), "tracer-classdump-%p.txt", vmThread);
 
    if (!(fp = fopen(fileName, "at")))
       {
@@ -919,7 +935,7 @@ void dumpAllClasses(J9VMThread *vmThread)
       return;
       }
 
-   sprintf(fileName, "tracer-methoddump-%p.txt", vmThread);
+   snprintf(fileName, sizeof(fileName), "tracer-methoddump-%p.txt", vmThread);
 
    if (!(methodFP = fopen(fileName, "at")))
       {
@@ -927,7 +943,7 @@ void dumpAllClasses(J9VMThread *vmThread)
       return;
       }
 
-   sprintf(fileName, "tracer-fielddump-%p.txt", vmThread);
+   snprintf(fileName, sizeof(fileName), "tracer-fielddump-%p.txt", vmThread);
 
    if (!(fieldFP = fopen(fileName, "at")))
       {
@@ -935,7 +951,7 @@ void dumpAllClasses(J9VMThread *vmThread)
       return;
       }
 
-   sprintf(fileName, "tracer-staticsdump-%p.txt", vmThread);
+   snprintf(fileName, sizeof(fileName), "tracer-staticsdump-%p.txt", vmThread);
 
    if (!(staticsFP = fopen(fileName, "at")))
       {
@@ -1418,7 +1434,7 @@ static void printMethodHandleArgs(j9object_t methodHandle, void **stack, J9VMThr
       TR_VerboseLog::writeLine(TR_Vlog_FAILURE, "%p   Nearby stack slots:", vmThread);
       for (i = -9; i <= 9; i++)
          {
-         char *tag = "";
+         const char *tag = "";
          void *slotValue = stack[i];
          if (slotValue == methodHandle)
             tag = " <- target MethodHandle is here";
@@ -1476,7 +1492,6 @@ static void printMethodHandleArgs(j9object_t methodHandle, void **stack, J9VMThr
                   break;
                case 'L':
                case '[':
-               case 'Q':
                   TR_VerboseLog::writeLine(vlogTag, "%p     arg " POINTER_PRINTF_FORMAT " %.*s", vmThread, (void*)(*(intptr_t*)stack), nextArg-curArg, curArg);
                   stack -= 1;
                   break;
@@ -1709,12 +1724,12 @@ void *initialInvokeExactThunk(j9object_t methodHandle, J9VMThread *vmThread)
 
    TR::CompilationInfo * compInfo = TR::CompilationInfo::get(jitConfig);
    TR::PersistentInfo *persistentInfo = compInfo->getPersistentInfo();
-   TR_J2IThunkTable *j2iThunks = persistentInfo->getInvokeExactJ2IThunkTable();
+   TR_MHJ2IThunkTable *j2iThunks = persistentInfo->getInvokeExactJ2IThunkTable();
 
    void *addressToDispatch = NULL;
    if (j2iThunks)
       {
-      TR_J2IThunk *thunk = j2iThunks->getThunk(thunkSignature, fej9);
+      TR_MHJ2IThunk *thunk = j2iThunks->getThunk(thunkSignature, fej9);
       addressToDispatch = thunk->entryPoint();
       if (details)
          TR_VerboseLog::writeLineLocked(TR_Vlog_MHD, "%p   J2I thunk is %p %s", vmThread, addressToDispatch, thunk->terseSignature());

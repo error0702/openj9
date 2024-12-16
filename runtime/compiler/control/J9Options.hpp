@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #ifndef J9_OPTIONS_INCL
@@ -38,11 +38,102 @@ namespace J9 { typedef J9::Options OptionsConnector; }
 #include "control/OptionsUtil.hpp"
 #include "env/jittypes.h"
 #if defined(J9VM_OPT_JITSERVER)
+namespace TR { class CompilationInfo; }
 namespace TR { class CompilationInfoPerThreadBase; }
 #endif /* defined(J9VM_OPT_JITSERVER) */
 
+struct J9VMInitArgs;
+
 namespace J9
 {
+/**
+ * This enum and the associated string array _externalOptionStrings
+ * in J9Options.cpp should be kept in sync.
+ */
+enum ExternalOptions
+   {
+   TR_FirstExternalOption                      = 0,
+   Xnodfpbd                                    = 0,
+   Xdfpbd                                      = 1,
+   Xhysteresis                                 = 2,
+   Xnoquickstart                               = 3,
+   Xquickstart                                 = 4,
+   Xtuneelastic                                = 5,
+   XtlhPrefetch                                = 6,
+   XnotlhPrefetch                              = 7,
+   Xlockword                                   = 8,
+   XlockReservation                            = 9,
+   XjniAcc                                     = 10,
+   Xlp                                         = 11,
+   Xlpcodecache                                = 12,
+   Xcodecache                                  = 13,
+   Xcodecachetotal                             = 14,
+   XXcodecachetotal                            = 15,
+   XXplusPrintCodeCache                        = 16,
+   XXminusPrintCodeCache                       = 17,
+   XsamplingExpirationTime                     = 18,
+   XcompilationThreads                         = 19,
+   XaggressivenessLevel                        = 20,
+   Xnoclassgc                                  = 21,
+   Xjit                                        = 22,
+   Xnojit                                      = 23,
+   Xjitcolon                                   = 24,
+   Xaot                                        = 25,
+   Xnoaot                                      = 26,
+   Xaotcolon                                   = 27,
+   XXdeterministic                             = 28,
+   XXplusRuntimeInstrumentation                = 29,
+   XXminusRuntimeInstrumentation               = 30,
+   XXplusPerfTool                              = 31,
+   XXminusPerfTool                             = 32,
+   XXdoNotProcessJitEnvVars                    = 33,
+   XXplusMergeCompilerOptions                  = 34,
+   XXminusMergeCompilerOptions                 = 35,
+   XXLateSCCDisclaimTimeOption                 = 36,
+   XXplusUseJITServerOption                    = 37,
+   XXminusUseJITServerOption                   = 38,
+   XXplusJITServerTechPreviewMessageOption     = 39,
+   XXminusJITServerTechPreviewMessageOption    = 40,
+   XXJITServerAddressOption                    = 41,
+   XXJITServerPortOption                       = 42,
+   XXJITServerTimeoutOption                    = 43,
+   XXJITServerSSLKeyOption                     = 44,
+   XXJITServerSSLCertOption                    = 45,
+   XXJITServerSSLRootCertsOption               = 46,
+   XXplusJITServerUseAOTCacheOption            = 47,
+   XXminusJITServerUseAOTCacheOption           = 48,
+   XXplusRequireJITServerOption                = 49,
+   XXminusRequireJITServerOption               = 50,
+   XXplusJITServerLogConnections               = 51,
+   XXminusJITServerLogConnections              = 52,
+   XXJITServerAOTmxOption                      = 53,
+   XXplusJITServerLocalSyncCompilesOption      = 54,
+   XXminusJITServerLocalSyncCompilesOption     = 55,
+   XXplusMetricsServer                         = 56,
+   XXminusMetricsServer                        = 57,
+   XXJITServerMetricsPortOption                = 58,
+   XXJITServerMetricsSSLKeyOption              = 59,
+   XXJITServerMetricsSSLCertOption             = 60,
+   XXplusJITServerShareROMClassesOption        = 61,
+   XXminusJITServerShareROMClassesOption       = 62,
+   XXplusJITServerAOTCachePersistenceOption    = 63,
+   XXminusJITServerAOTCachePersistenceOption   = 64,
+   XXJITServerAOTCacheDirOption                = 65,
+   XXJITServerAOTCacheNameOption               = 66,
+   XXcodecachetotalMaxRAMPercentage            = 67,
+   XXplusJITServerAOTCacheDelayMethodRelocation  = 68,
+   XXminusJITServerAOTCacheDelayMethodRelocation = 69,
+   XXplusIProfileDuringStartupPhase            = 70,
+   XXminusIProfileDuringStartupPhase           = 71,
+   XXplusJITServerAOTCacheIgnoreLocalSCC       = 72,
+   XXminusJITServerAOTCacheIgnoreLocalSCC      = 73,
+   XXplusHealthProbes                          = 74,
+   XXminusHealthProbes                         = 75,
+   XXJITServerHealthProbePortOption            = 76,
+   XXplusTrackAOTDependencies                  = 77,
+   XXminusTrackAOTDependencies                 = 78,
+   TR_NumExternalOptions                       = 79
+   };
 
 class OMR_EXTENSIBLE Options : public OMR::OptionsConnector
    {
@@ -63,7 +154,14 @@ class OMR_EXTENSIBLE Options : public OMR::OptionsConnector
 
    Options(TR::Options &other) : OMR::OptionsConnector(other) {}
 
+   enum FSDInitStatus
+      {
+      FSDInit_Error,
+      FSDInit_NotInitialized,
+      FSDInit_Initialized
+      };
 
+   static FSDInitStatus _fsdInitStatus;
 
    static bool _doNotProcessEnvVars;
 
@@ -178,7 +276,6 @@ class OMR_EXTENSIBLE Options : public OMR::OptionsConnector
    static int32_t _activeThreadsThreshold; // -1 means 'determine dynamically', 0 means feature disabled
    static int32_t _samplingThreadExpirationTime;
    static int32_t _compilationExpirationTime;
-   static int32_t _catchSamplingSizeThreshold;
    static int32_t _compilationThreadPriorityCode; // a number between 0 and 4
    static int32_t _disableIProfilerClassUnloadThreshold;
    static int32_t _iprofilerReactivateThreshold;
@@ -196,8 +293,12 @@ class OMR_EXTENSIBLE Options : public OMR::OptionsConnector
    static int32_t _iprofilerFailRateThreshold; // will reactivate Iprofiler if failure rate exceeds this threshold
    static int32_t _iprofilerFailHistorySize;
    static int32_t _iProfilerMemoryConsumptionLimit;
+   static int32_t _iProfilerBcHashTableSize;
+   static int32_t _iProfilerMethodHashTableSize;
    static int32_t _IprofilerOffSubtractionFactor;
    static int32_t _IprofilerOffDivisionFactor;
+
+   static int32_t _IprofilerPreCheckpointDropRate;
 
    static int32_t _LoopyMethodSubtractionFactor;
    static int32_t _LoopyMethodDivisionFactor;
@@ -209,7 +310,7 @@ class OMR_EXTENSIBLE Options : public OMR::OptionsConnector
 
    static int32_t _numCodeCachesToCreateAtStartup;
    static int32_t getNumCodeCachesToCreateAtStartup() { return _numCodeCachesToCreateAtStartup; }
-
+   static bool _overrideCodecachetotal;
    static int32_t _dataCacheQuantumSize;
    static int32_t _dataCacheMinQuanta;
    static int32_t getDataCacheQuantumSize() { return _dataCacheQuantumSize; }
@@ -221,9 +322,13 @@ class OMR_EXTENSIBLE Options : public OMR::OptionsConnector
    static int32_t _scratchSpaceFactorWhenJSR292Workload;
    static int32_t getScratchSpaceFactorWhenJSR292Workload() { return _scratchSpaceFactorWhenJSR292Workload; }
 
+   static size_t _scratchSpaceLimitForHotCompilations; // Only used under -Xtune:throughput
+   static size_t getScratchSpaceLimitForHotCompilations() { return _scratchSpaceLimitForHotCompilations; }
+
 #if defined(J9VM_OPT_JITSERVER)
-   static int32_t getScratchSpaceFactorWhenJITServerWorkload() { return 2; }
-#endif
+   static int32_t _scratchSpaceFactorWhenJITServerWorkload;
+   static int32_t getScratchSpaceFactorWhenJITServerWorkload() { return _scratchSpaceFactorWhenJITServerWorkload; }
+#endif /* defined(J9VM_OPT_JITSERVER) */
 
    static int32_t _lowVirtualMemoryMBThreshold;
    static int32_t getLowVirtualMemoryMBThreshold() { return _lowVirtualMemoryMBThreshold; }
@@ -238,8 +343,6 @@ class OMR_EXTENSIBLE Options : public OMR::OptionsConnector
 
    static int32_t _numDLTBufferMatchesToEagerlyIssueCompReq;
    static int32_t _dltPostponeThreshold;
-
-
 
    static int32_t _minSamplingPeriod;
    int32_t getMinSamplingPeriod() {return _minSamplingPeriod;}
@@ -265,15 +368,33 @@ class OMR_EXTENSIBLE Options : public OMR::OptionsConnector
    static int32_t _TLHPrefetchBoundaryLineCount;
    static int32_t _TLHPrefetchTLHEndLineCount;
    static int32_t _numFirstTimeCompilationsToExitIdleMode; // use large number to disable the feature
+
 #if defined(J9VM_OPT_JITSERVER)
    static int64_t _oldAge;
    static int64_t _oldAgeUnderLowMemory;
    static int64_t _timeBetweenPurges;
    static bool _shareROMClasses;
    static int32_t _sharedROMClassCacheNumPartitions;
-   const static uint32_t DEFAULT_JITCLIENT_TIMEOUT = 10000; // ms
-   const static uint32_t DEFAULT_JITSERVER_TIMEOUT = 30000; // ms
+   static int32_t _reconnectWaitTimeMs;
+   static const uint32_t DEFAULT_JITCLIENT_TIMEOUT = 30000; // ms
+   static const uint32_t DEFAULT_JITSERVER_TIMEOUT = 30000; // ms
+   static int32_t _aotCachePersistenceMinDeltaMethods;
+   static int32_t _aotCachePersistenceMinPeriodMs;
+   static int32_t _jitserverMallocTrimInterval;
+   static int32_t _lowCompDensityModeEnterThreshold;
+   static int32_t _lowCompDensityModeExitThreshold;
+   static int32_t _lowCompDensityModeExitLPQSize;
+   static bool _aotCacheDisableGeneratedClassSupport;
+   static TR::CompilationFilters *_JITServerAOTCacheStoreFilters;
+   static TR::CompilationFilters *_JITServerAOTCacheLoadFilters;
+   static TR::CompilationFilters *_JITServerRemoteExcludeFilters;
 #endif /* defined(J9VM_OPT_JITSERVER) */
+
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+   static int32_t _sleepMsBeforeCheckpoint;
+#endif
+
+   static int32_t _minTimeBetweenMemoryDisclaims; // ms
 
    static int32_t _waitTimeToEnterIdleMode;
    static int32_t _waitTimeToEnterDeepIdleMode;
@@ -281,6 +402,7 @@ class OMR_EXTENSIBLE Options : public OMR::OptionsConnector
    static int32_t _waitTimeToGCR;
    static int32_t _waitTimeToStartIProfiler;
    static int32_t _compilationDelayTime;
+   static int32_t _delayBeforeStateChange;
 
    static int32_t _invocationThresholdToTriggerLowPriComp; // we trigger an LPQ comp req only if the method
                                                            // was invoked at least this many times
@@ -297,6 +419,7 @@ class OMR_EXTENSIBLE Options : public OMR::OptionsConnector
    static int32_t _hwprofilerNumOutstandingBuffers;
 
    static TR_YesNoMaybe _hwProfilerEnabled;
+   static TR_YesNoMaybe _perfToolEnabled;
    static uint32_t _hwprofilerHotOptLevelThreshold;
    static uint32_t _hwprofilerScorchingOptLevelThreshold;
    static uint32_t _hwprofilerWarmOptLevelThreshold;
@@ -329,6 +452,10 @@ class OMR_EXTENSIBLE Options : public OMR::OptionsConnector
 
    static bool _aggressiveLockReservation;
 
+   static bool _xrsSync;
+
+   static const char * _externalOptionStrings[ExternalOptions::TR_NumExternalOptions];
+
    static void  printPID();
 
 
@@ -336,27 +463,35 @@ class OMR_EXTENSIBLE Options : public OMR::OptionsConnector
 
 
 
-   static char *kcaOffsets(char *option, void *, TR::OptionTable *entry);
+   static const char *kcaOffsets(const char *option, void *, TR::OptionTable *entry);
 
-   static char *gcOnResolveOption(char *option, void *, TR::OptionTable *entry);
+   static const char *gcOnResolveOption(const char *option, void *, TR::OptionTable *entry);
 
-   static char *tprofOption(char *option, void *, TR::OptionTable *entry);
+   static const char *tprofOption(const char *option, void *, TR::OptionTable *entry);
 
-   static char *loadLimitOption(char *option, void *, TR::OptionTable *entry);
+   static const char *loadLimitOption(const char *option, void *, TR::OptionTable *entry);
 
-   static char *loadLimitfileOption(char *option, void *, TR::OptionTable *entry);
+   static const char *loadLimitfileOption(const char *option, void *, TR::OptionTable *entry);
 
-   static char *vmStateOption(char *option, void *, TR::OptionTable *entry);
+#if defined(J9VM_OPT_JITSERVER)
+   static const char *JITServerAOTCacheStoreLimitOption(const char *option, void *, TR::OptionTable *entry);
+   static const char *JITServerAOTCacheLoadLimitOption(const char *option, void *, TR::OptionTable *entry);
+   static const char *JITServerRemoteExclude(const char *option, void *base, TR::OptionTable *entry);
+   static bool JITServerParseCommonOptions(J9VMInitArgs *vmArgsArray, J9JavaVM *vm, TR::CompilationInfo *compInfo);
+   static void JITServerParseLocalSyncCompiles(J9VMInitArgs *vmArgsArray, J9JavaVM *vm, TR::CompilationInfo *compInfo, bool isFSDEnabled);
+#endif /* defined(J9VM_OPT_JITSERVER) */
 
-   static char *setJitConfigRuntimeFlag(char *option, void *base, TR::OptionTable *entry);
-   static char *resetJitConfigRuntimeFlag(char *option, void *base, TR::OptionTable *entry);
-   static char *setJitConfigNumericValue(char *option, void *base, TR::OptionTable *entry);
+   static const char *vmStateOption(const char *option, void *, TR::OptionTable *entry);
+
+   static const char *setJitConfigRuntimeFlag(const char *option, void *base, TR::OptionTable *entry);
+   static const char *resetJitConfigRuntimeFlag(const char *option, void *base, TR::OptionTable *entry);
+   static const char *setJitConfigNumericValue(const char *option, void *base, TR::OptionTable *entry);
 
    static bool useCompressedPointers();
-   static char *limitOption(char *option, void *, TR::OptionTable *entry);
-   static char *inlinefileOption(char *option, void *, TR::OptionTable *entry);
-   static char *limitfileOption(char *option, void *, TR::OptionTable *entry);
-   static char *versionOption(char *option, void *, TR::OptionTable *entry);
+   static const char *limitOption(const char *option, void *, TR::OptionTable *entry);
+   static const char *inlinefileOption(const char *option, void *, TR::OptionTable *entry);
+   static const char *limitfileOption(const char *option, void *, TR::OptionTable *entry);
+   static const char *versionOption(const char *option, void *, TR::OptionTable *entry);
 
    /** \brief
     *    Set memory manager functions related configuration.
@@ -497,6 +632,11 @@ class OMR_EXTENSIBLE Options : public OMR::OptionsConnector
    bool  showPID();
    void openLogFiles(J9JITConfig *jitConfig);
 
+   bool isFSDNeeded(J9JavaVM *javaVM, J9HookInterface **vmHooks);
+   FSDInitStatus initializeFSDIfNeeded(J9JavaVM *javaVM, J9HookInterface **vmHooks, bool &doAOT);
+
+   static bool disableMemoryDisclaimIfNeeded(J9JITConfig *jitConfig);
+
 #if defined(J9VM_OPT_JITSERVER)
    void setupJITServerOptions();
 
@@ -508,8 +648,48 @@ class OMR_EXTENSIBLE Options : public OMR::OptionsConnector
    void setLogFileForClientOptions(int suffixNumber = 0);
    void closeLogFileForClientOptions();
 #endif /* defined(J9VM_OPT_JITSERVER) */
+
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+   /**
+    * \brief Static method used to reset FSD post-restore
+    *
+    * \param vm the J9JavaVM
+    * \param vmThread the J9VMThread
+    * \param[out] doAOT a boolean to indicate whether AOT should be disabled
+    *                   after the call to this method
+    *
+    * \return The FSDInitStatus indicating the FSD Status
+    */
+   static FSDInitStatus resetFSD(J9JavaVM *vm, J9VMThread *vmThread, bool &doAOT);
+
+   /**
+    * \brief Method to enable or disable FSD options for the given TR::Options
+    *        object
+    *
+    * \param flag true results in FSD enabled; false results in FSD disabled.
+    */
+   void setFSDOptions(bool flag);
+
+   /**
+    * \brief Method to enable or disable FSD options for the given TR::Options
+    *        and all subsets
+    *
+    * \param flag true results in FSD enabled; false results in FSD disabled.
+    */
+   void setFSDOptionsForAll(bool flag);
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
+
+   private:
+
+#if defined(J9VM_OPT_JITSERVER)
+   static const char *JITServerAOTCacheLimitOption(const char *option, void *base, TR::OptionTable *entry, TR::CompilationFilters *&filters, const char *optName);
+#endif /* defined(J9VM_OPT_JITSERVER) */
    };
 
 }
+
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+uintptr_t initializeCompilerArgsPostRestore(J9JavaVM* vm, intptr_t argIndex, char** xCommandLineOptionsPtr, bool isXjit, bool mergeCompilerOptions);
+#endif
 
 #endif

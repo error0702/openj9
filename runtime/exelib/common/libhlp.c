@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include <stdlib.h>
@@ -461,15 +461,14 @@ int main_runJavaMain(JNIEnv * env, char *mainClassName, int nameIsUTF, int java_
 
 char * main_vmVersionString(void)
 {
-	U_32 minorVersion;
-	char *native = "";
+	U_32 minorVersion = EsVersionMinor;
 	char *versionStringPtr = GLOBAL_DATA(versionString);
-	minorVersion = EsVersionMinor;
 
-	if ((minorVersion % 10) == 0)
+	if (0 == (minorVersion % 10)) {
 		minorVersion /= 10;
-	sprintf (versionStringPtr, "%d.%d%s,%s %s", 
-		EsVersionMajor, minorVersion, EsExtraVersionString, native, EsBuildVersionString);
+	}
+	snprintf(versionStringPtr, sizeof(versionString), "%d.%d%s, %s",
+		EsVersionMajor, minorVersion, EsExtraVersionString, EsBuildVersionString);
 	return versionStringPtr;
 }
 

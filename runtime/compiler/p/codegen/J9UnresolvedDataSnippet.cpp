@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "codegen/UnresolvedDataSnippet.hpp"
@@ -145,11 +145,6 @@ uint8_t *J9::Power::UnresolvedDataSnippet::emitSnippetBody()
                           __FILE__,
                           __LINE__,
                           getNode());
-   if (getDataSymbol()->isClassObject() && cg()->wantToPatchClassPointer(NULL, getAddressOfDataReference()))
-      {
-      uintptr_t dis = cursor - getAddressOfDataReference();
-      cg()->jitAddUnresolvedAddressMaterializationToPatchOnClassRedefinition((void *) getAddressOfDataReference());
-      }
    cursor += 4;
 
    *(intptr_t *)cursor = (intptr_t)getAddressOfDataReference();   // Code Cache RA
@@ -183,13 +178,16 @@ uint8_t *J9::Power::UnresolvedDataSnippet::emitSnippetBody()
    cursor += 4;
 
    *(intptr_t *)cursor = (intptr_t)getDataSymbolReference()->getOwningMethod(comp)->constantPool();
-   cg()->addExternalRelocation(new (cg()->trHeapMemory()) TR::ExternalRelocation(cursor,*(uint8_t **)cursor,
-                                                                          getNode() ? (uint8_t *)getNode()->getInlinedSiteIndex() : (uint8_t *)-1,
-                                                                          TR_ConstantPool,
-                                                                          cg()),
-                          __FILE__,
-                          __LINE__,
-                          getNode());
+   cg()->addExternalRelocation(
+      TR::ExternalRelocation::create(
+         cursor,
+         *(uint8_t **)cursor,
+         getNode() ? (uint8_t *)(uintptr_t)getNode()->getInlinedSiteIndex() : (uint8_t *)-1,
+         TR_ConstantPool,
+         cg()),
+      __FILE__,
+      __LINE__,
+      getNode());
    cursor += TR::Compiler->om.sizeofReferenceAddress();
 
    if (getMemoryReference()->isTOCAccess())
@@ -202,7 +200,7 @@ uint8_t *J9::Power::UnresolvedDataSnippet::emitSnippetBody()
       if (getDataSymbol()->isConstObjectRef() || getDataSymbol()->isConstantDynamic())
          {
          cg()->addProjectSpecializedRelocation(cursor, *(uint8_t **)(cursor-4),
-               getNode() ? (uint8_t *)getNode()->getInlinedSiteIndex() : (uint8_t *)-1, TR_ConstantPool,
+               getNode() ? (uint8_t *)(uintptr_t)getNode()->getInlinedSiteIndex() : (uint8_t *)-1, TR_ConstantPool,
                                 __FILE__,
                                 __LINE__,
                                 getNode());
@@ -318,8 +316,8 @@ TR_Debug::print(TR::FILE *pOutFile, TR::UnresolvedDataSnippet * snippet)
          glueRef = _cg->getSymRef(TR_PPCinterpreterUnresolvedStaticDataGlue);
       }
 
-   char    *info = "";
-   int32_t  distance;
+   const char *info = "";
+   int32_t     distance;
    if (isBranchToTrampoline(glueRef, cursor, distance))
       info = " Through Trampoline";
 

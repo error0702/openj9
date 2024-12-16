@@ -1,5 +1,5 @@
-/*******************************************************************************
- * Copyright (c) 2004, 2020 IBM Corp. and others
+/*
+ * Copyright IBM Corp. and others 2004
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,10 +15,10 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
 package com.ibm.j9ddr.corereaders.elf;
 
 import java.io.ByteArrayOutputStream;
@@ -749,32 +749,6 @@ public abstract class ELFFileReader {
 	}
 
 	/**
-	 * Get the base address of an executable or library, given the ELF file.
-	 * This is the lowest virtual address of the Program Header Table entries of type PT_LOAD, which
-	 * is probably the first but we search them all just in case.
-	 * The following is summarised from the System V Application Binary Interface,
-	 * gabi41.pdf, section Base Address
-	 *
-	 *    "... to compute the base address, one determines the memory address associated with
-	 *    the lowest p_vaddr value for a PT_LOAD segment. This address is truncated ..."
-	 *
-	 * The truncation is to do with page sizes and in practice not found to be needed.
-	 *
-	 * @return base address for the executable or library
-	 */
-	public long getBaseAddress() {
-		long lowestVirtualAddressSoFar = Long.MAX_VALUE;
-		for (ProgramHeaderEntry entry : getProgramHeaderEntries()) {
-			if (entry.isLoadable()) {
-				if (entry.virtualAddress < lowestVirtualAddressSoFar) {
-					lowestVirtualAddressSoFar = entry.virtualAddress;
-				}
-			}
-		}
-		return lowestVirtualAddressSoFar;
-	}
-
-	/**
 	 * Search the program header table for the dynamic entry. There should be only one of these
 	 * Typically it is within the first few entries, often the third, so this is not expensive
 	 *
@@ -827,6 +801,9 @@ public abstract class ELFFileReader {
 	 */
 	public String readSONAME(ELFFileReader coreFileReader) {
 		ProgramHeaderEntry dynamicTableEntry = getDynamicTableEntry();
+		if (dynamicTableEntry == null) {
+			return null;
+		}
 		try {
 			long imageStart = dynamicTableEntry.virtualAddress;
 

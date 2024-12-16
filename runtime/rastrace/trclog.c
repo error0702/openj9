@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1998, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 1998
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "j9cfg.h"
@@ -2465,27 +2465,30 @@ static UtProcessorInfo * getProcessorInfo(void)
 	initHeader(&ret->procInfo.header, "PIN", sizeof(UtProcInfo));
 	osarch = j9sysinfo_get_CPU_architecture();
 	if (NULL != osarch) {
-		if ((strcmp(osarch, J9PORT_ARCH_PPC) == 0)
-		|| (strcmp(osarch, J9PORT_ARCH_PPC64) == 0)
-		|| (strcmp(osarch, J9PORT_ARCH_PPC64LE) == 0)
+		if ((0 == strcmp(osarch, OMRPORT_ARCH_PPC))
+		|| (0 == strcmp(osarch, OMRPORT_ARCH_PPC64))
+		|| (0 == strcmp(osarch, OMRPORT_ARCH_PPC64LE))
 		) {
 			ret->architecture = UT_POWER;
 			ret->procInfo.subtype = UT_POWERPC;
-		} else if (strcmp(osarch, J9PORT_ARCH_S390) == 0) {
+		} else if (0 == strcmp(osarch, OMRPORT_ARCH_S390)) {
 			ret->architecture = UT_S390;
 			ret->procInfo.subtype = UT_ESA;
-		} else if (strcmp(osarch, J9PORT_ARCH_S390X) == 0) {
+		} else if (0 == strcmp(osarch, OMRPORT_ARCH_S390X)) {
 			ret->architecture = UT_S390X;
 			ret->procInfo.subtype = UT_TREX;
-		} else if (strcmp(osarch, J9PORT_ARCH_HAMMER) == 0) {
+		} else if (0 == strcmp(osarch, OMRPORT_ARCH_HAMMER)) {
 			ret->architecture = UT_AMD64;
 			ret->procInfo.subtype = UT_OPTERON;
-		} else if (strcmp(osarch, J9PORT_ARCH_X86) == 0) {
+		} else if (0 == strcmp(osarch, OMRPORT_ARCH_X86)) {
 			ret->architecture = UT_X86;
 			ret->procInfo.subtype = UT_PIV;
-		} else if (0 == strcmp(osarch, J9PORT_ARCH_RISCV)) {
+		} else if (0 == strcmp(osarch, OMRPORT_ARCH_RISCV)) {
 			ret->architecture = UT_RISCV;
 			ret->procInfo.subtype = UT_RV64G;
+		} else if (0 == strcmp(osarch, OMRPORT_ARCH_AARCH64)) {
+			ret->architecture = UT_AARCH64;
+			ret->procInfo.subtype = UT_ARMV8A;
 		} else {
 			ret->architecture = UT_UNKNOWN;
 		}

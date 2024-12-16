@@ -1,6 +1,6 @@
-/*[INCLUDE-IF Sidecar18-SE & !OJDKTHREAD_SUPPORT]*/
-/*******************************************************************************
- * Copyright (c) 1998, 2022 IBM Corp. and others
+/*[INCLUDE-IF (8 <= JAVA_SPEC_VERSION) & (JAVA_SPEC_VERSION < 19)]*/
+/*
+ * Copyright IBM Corp. and others 1998
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,28 +16,30 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
 package java.lang;
 
-import java.util.Map;
+import java.lang.reflect.Method;
 import java.security.AccessControlContext;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
+import java.util.concurrent.TimeUnit;
+import java.util.HashMap;
+import java.util.Map;
 /*[IF Sidecar18-SE-OpenJ9]*/
 import jdk.internal.misc.TerminatingThreadLocal;
 /*[ENDIF] Sidecar18-SE-OpenJ9 */
-import sun.security.util.SecurityConstants;
 /*[IF JAVA_SPEC_VERSION >= 11]*/
-import java.io.FileDescriptor;
-import java.nio.charset.Charset;
 import java.util.Properties;
 import jdk.internal.reflect.CallerSensitive;
 /*[ELSE] JAVA_SPEC_VERSION >= 11 */
 import sun.reflect.CallerSensitive;
 /*[ENDIF] JAVA_SPEC_VERSION >= 11 */
+import sun.nio.ch.Interruptible;
+import sun.security.util.SecurityConstants;
 
 /**
  *	A Thread is a unit of concurrent execution in Java. It has its own call stack
@@ -70,7 +72,7 @@ public class Thread implements Runnable {
 	 */
 	public final static int NORM_PRIORITY = 5;		// Normal priority for a thread
 	/*[PR 97331] Initial thread name should be Thread-0 */
-	private static int createCount = -1;					// Used internally to compute Thread names that comply with the Java specification
+	private static int createCount;					// Used internally to compute Thread names that comply with the Java specification
 	/*[PR 122459] LIR646 - Remove use of generic object for synchronization */
 	private static final class TidLock {
 		TidLock() {}
@@ -82,7 +84,7 @@ public class Thread implements Runnable {
 	static final long NO_REF = 0;				// Symbolic constant, no threadRef assigned or already cleaned up
 
 	// Instance variables
-	private long threadRef;									// Used by the VM
+	private volatile long threadRef; // Used by the VM
 	long stackSize = 0;
 	/*[IF JAVA_SPEC_VERSION >= 14]*/
 	/* deadInterrupt tracks the thread interrupt state when threadRef has no reference (ie thread is not alive).
@@ -103,7 +105,7 @@ public class Thread implements Runnable {
 /*[PR 1FENTZW]*/
 	private ClassLoader contextClassLoader;	// Used to find classes and resources in this Thread
 	ThreadLocal.ThreadLocalMap threadLocals;
-	private java.security.AccessControlContext inheritedAccessControlContext;
+	private AccessControlContext inheritedAccessControlContext;
 
 	/*[PR 96127]*/
 	/*[PR 122459] LIR646 - Remove use of generic object for synchronization */
@@ -111,7 +113,7 @@ public class Thread implements Runnable {
 	private Object lock = new ThreadLock();
 
 	ThreadLocal.ThreadLocalMap inheritableThreadLocals;
-	private volatile sun.nio.ch.Interruptible blockOn;
+	private volatile Interruptible blockOn;
 
 	int threadLocalsIndex;
 	int inheritableThreadLocalsIndex;
@@ -132,6 +134,8 @@ public class Thread implements Runnable {
 	long threadLocalRandomSeed;
 	int threadLocalRandomProbe;
 	int threadLocalRandomSecondarySeed;
+
+	private static final StackTraceElement[] EMPTY_STACK_TRACE = new StackTraceElement[0];
 
 /**
  * Constructs a new Thread with no runnable object and a newly generated name.
@@ -205,50 +209,6 @@ private Thread(String vmName, Object vmThreadGroup, int vmPriority, boolean vmIs
 	}
 }
 
-/*
- * Called after everything else is initialized.
- */
-void completeInitialization() {
-	// Get the java.system.class.loader
-	/*[PR CMVC 99755] Implement -Djava.system.class.loader option */
-	contextClassLoader = ClassLoader.getSystemClassLoader();
-	/*[IF Sidecar19-SE]*/
-	jdk.internal.misc.VM.initLevel(4);
-	/*[ELSE]*/ // Sidecar19-SE
-	sun.misc.VM.booted();
-	/*[ENDIF]*/ // Sidecar19-SE
-	/*[IF Sidecar19-SE|Sidecar18-SE-OpenJ9]*/
-	System.startSNMPAgent();
-	/*[ENDIF]*/ // Sidecar19-SE|Sidecar18-SE-OpenJ9
-
-	/*[IF JAVA_SPEC_VERSION >= 11] */
-	/* Although file.encoding is used to set the default Charset, some Charset's are not available
-	 * in the java.base module and so are not used at startup. There are additional Charset's in the
-	 * jdk.charsets module, which is only loaded later. This means the default Charset may not be the
-	 * same as file.encoding. Now that all modules and Charset's are available, check if the desired
-	 * encodings can be used for System.err and System.out.
-	 */
-	Properties props = System.internalGetProperties();
-	// If the sun.stderr.encoding was already set in System, don't change the encoding
-	if (!System.hasSetErrEncoding()) {
-		Charset stderrCharset = System.getCharset(props.getProperty("sun.stderr.encoding"), true); //$NON-NLS-1$
-		if (stderrCharset != null) {
-			System.err.flush();
-			System.setErr(System.createConsole(FileDescriptor.err, stderrCharset));
-		}
-	}
-
-	// If the sun.stdout.encoding was already set in System, don't change the encoding
-	if (!System.hasSetOutEncoding()) {
-		Charset stdoutCharset = System.getCharset(props.getProperty("sun.stdout.encoding"), true); //$NON-NLS-1$
-		if (stdoutCharset != null) {
-			System.out.flush();
-			System.setOut(System.createConsole(FileDescriptor.out, stdoutCharset));
-		}
-	}
-	/*[ENDIF] JAVA_SPEC_VERSION >= 11 */
-}
-
 /**
  * Constructs a new Thread with a runnable object and a newly generated name.
  * The new Thread will belong to the same ThreadGroup as the Thread calling
@@ -280,7 +240,7 @@ public Thread(Runnable runnable) {
  * @see			java.lang.Runnable
  */
 Thread(Runnable runnable, AccessControlContext acc) {
-	this(null, runnable, newName(), acc, true);
+	this(null, runnable, newName(), acc, false);
 }
 
 /**
@@ -297,7 +257,6 @@ Thread(Runnable runnable, AccessControlContext acc) {
 public Thread(Runnable runnable, String threadName) {
 	this(null, runnable, threadName, null, true);
 }
-
 
 /**
  * Constructs a new Thread with no runnable object and the name provided.
@@ -360,7 +319,7 @@ public Thread(ThreadGroup group, Runnable runnable, String threadName, long stac
 	this.stackSize = stack;
 }
 
-/*[IF Sidecar19-SE]*/
+/*[IF JAVA_SPEC_VERSION >= 9]*/
 /**
  * Constructs a new Thread with a runnable object, the given name, the thread stack size,
  * the flag to inherit initial values for inheritable thread-local variables and
@@ -382,7 +341,7 @@ public Thread(ThreadGroup group, Runnable runnable, String threadName, long stac
 	this(group, runnable, threadName, null, inheritThreadLocals);
 	this.stackSize = stack;
 }
-/*[ENDIF]*/
+/*[ENDIF] JAVA_SPEC_VERSION >= 9 */
 
 /**
  * Constructs a new Thread with a runnable object, the given name and
@@ -437,7 +396,6 @@ private Thread(ThreadGroup group, Runnable runnable, String threadName, AccessCo
 		// Same group as Thread that created us
 		group = currentThread.getThreadGroup();
 
-
 	/*[PR 1FEVFSU] The rest of the configuration/initialization is shared between this constructor and the private one */
 	initialize(false, group, currentThread, acc, inheritThreadLocals);
 
@@ -463,11 +421,9 @@ private void initialize(boolean booting, ThreadGroup threadGroup, Thread parentT
 	/*[PR 96408]*/
 	this.group = threadGroup;
 
-
 	if (booting) {
 		System.afterClinitInitialization();
 	}
-
 
 	// initialize the thread local storage before making other calls
 	if (parentThread != null) { // Non-main thread
@@ -478,20 +434,21 @@ private void initialize(boolean booting, ThreadGroup threadGroup, Thread parentT
 		/*[PR CMVC 90230] enableContextClassLoaderOverride check added in 1.5 */
 		@SuppressWarnings("removal")
 		final SecurityManager sm = System.getSecurityManager();
-		final Class implClass = getClass();
-		final Class thisClass = Thread.class;
-		if (sm != null && implClass != thisClass) {
-			boolean override = ((Boolean)AccessController.doPrivileged(new PrivilegedAction() {
-				public Object run() {
+		final Class<?> implClass = getClass();
+		final Class<?> thisClass = Thread.class;
+		if ((sm != null) && (implClass != thisClass)) {
+			boolean override = AccessController.doPrivileged(new PrivilegedAction<Boolean>() {
+				@Override
+				public Boolean run() {
 					try {
-						java.lang.reflect.Method method = implClass.getMethod("getContextClassLoader", new Class[0]); //$NON-NLS-1$
+						Method method = implClass.getMethod("getContextClassLoader"); //$NON-NLS-1$
 						if (method.getDeclaringClass() != thisClass) {
 							return Boolean.TRUE;
 						}
 					} catch (NoSuchMethodException e) {
 					}
 					try {
-						java.lang.reflect.Method method = implClass.getDeclaredMethod("setContextClassLoader", new Class[]{ClassLoader.class}); //$NON-NLS-1$
+						Method method = implClass.getDeclaredMethod("setContextClassLoader", ClassLoader.class); //$NON-NLS-1$
 						if (method.getDeclaringClass() != thisClass) {
 							return Boolean.TRUE;
 						}
@@ -499,7 +456,7 @@ private void initialize(boolean booting, ThreadGroup threadGroup, Thread parentT
 					}
 					return Boolean.FALSE;
 				}
-			})).booleanValue();
+			}).booleanValue();
 			if (override) {
 				sm.checkPermission(com.ibm.oti.util.RuntimePermissions.permissionEnableContextClassLoaderOverride);
 			}
@@ -564,7 +521,6 @@ public static int activeCount(){
 	return currentThread().getThreadGroup().activeCount();
 }
 
-
 /**
  * This method is used for operations that require approval from
  * a SecurityManager. If there's none installed, this method is a no-op.
@@ -621,11 +577,11 @@ public static native Thread currentThread();
  *
  * @deprecated May cause deadlocks.
  */
-/*[IF Sidecar19-SE]*/
+/*[IF JAVA_SPEC_VERSION >= 9]*/
 @Deprecated(forRemoval=true, since="1.5")
-/*[ELSE]*/
+/*[ELSE] JAVA_SPEC_VERSION >= 9 */
 @Deprecated
-/*[ENDIF]*/
+/*[ENDIF] JAVA_SPEC_VERSION >= 9 */
 public void destroy() {
 	/*[PR 121318] Should throw NoSuchMethodError */
 	throw new NoSuchMethodError();
@@ -659,7 +615,6 @@ public static int enumerate(Thread[] threads) {
 	return currentThread().getThreadGroup().enumerate(threads, true);
 }
 
-
 /**
  * Returns the context ClassLoader for the receiver.
  *
@@ -672,6 +627,9 @@ public static int enumerate(Thread[] threads) {
 public ClassLoader getContextClassLoader() {
 /*[PR 1FCA807]*/
 /*[PR 1FDTAMT] use callerClassLoader()*/
+	if (contextClassLoader == null) {
+		return null;
+	}
 	@SuppressWarnings("removal")
 	SecurityManager currentManager = System.getSecurityManager();
 	 // if there is a security manager...
@@ -690,8 +648,7 @@ public ClassLoader getContextClassLoader() {
  * @return		the receiver's name (a java.lang.String)
  */
 public final String getName() {
-	/*[PR 1FIGT59] Return name as a String. If null, return "null" */
-	return String.valueOf(name);
+	return name;
 }
 
 /**
@@ -713,7 +670,6 @@ public final int getPriority() {
 public final ThreadGroup getThreadGroup() {
 	return group;
 }
-
 
 /**
  * Posts an interrupt request to the receiver
@@ -740,15 +696,14 @@ public void interrupt() {
 		}
 	}
 
-	synchronized(lock) {
+	synchronized (lock) {
 		interruptImpl();
-		sun.nio.ch.Interruptible localBlockOn = blockOn;
+		Interruptible localBlockOn = blockOn;
 		if (localBlockOn != null) {
 			localBlockOn.interrupt(this);
 		}
 	}
 }
-
 
 /**
  * Answers a <code>boolean</code> indicating whether the current Thread
@@ -762,7 +717,11 @@ public void interrupt() {
  * @see			Thread#interrupt
  * @see			Thread#isInterrupted
  */
-public static native boolean interrupted();
+public static boolean interrupted() {
+	return interruptedImpl();
+}
+
+private static native boolean interruptedImpl();
 
 /**
  * Posts an interrupt request to the receiver
@@ -787,13 +746,10 @@ private native void interruptImpl();
  * @see			Thread#start
  */
 public final boolean isAlive() {
-	synchronized(lock) {
-		/*[PR CMVC 88976] the Thread is alive until cleanup() is called */
-		return threadRef != NO_REF;
-	}
+	/*[PR CMVC 88976] the Thread is alive until cleanup() is called */
+	return threadRef != NO_REF;
 }
 
-/*[PR 1FJMO7Q] A Thread can be !isAlive() and still be in its ThreadGroup */
 /**
  * Answers <code>true</code> if the receiver has
  * already died and been removed from the ThreadGroup
@@ -805,10 +761,8 @@ public final boolean isAlive() {
  * @see			Thread#isAlive
  */
 private boolean isDead() {
-	// Has already started, is not alive anymore, and has been removed from the ThreadGroup
-	synchronized(lock) {
-		return started && threadRef == NO_REF;
-	}
+	/* Has already started and is not alive anymore. */
+	return (started && (threadRef == NO_REF));
 }
 
 /**
@@ -843,7 +797,6 @@ public boolean isInterrupted() {
 
 private native boolean isInterruptedImpl();
 
-
 /**
  * Blocks the current Thread (<code>Thread.currentThread()</code>) until the
  * receiver finishes its execution and dies.
@@ -856,9 +809,7 @@ private native boolean isInterruptedImpl();
  * @see			java.lang.ThreadDeath
  */
 public final synchronized void join() throws InterruptedException {
-	if (started)
-		while (!isDead())
-			wait(0);
+	join(0, 0);
 }
 
 /**
@@ -895,37 +846,39 @@ public final void join(long timeoutInMilliseconds) throws InterruptedException {
  * @see			java.lang.ThreadDeath
  */
 public final synchronized void join(long timeoutInMilliseconds, int nanos) throws InterruptedException {
-	if (timeoutInMilliseconds < 0 || nanos < 0 || nanos > NANOS_MAX)
+	if ((timeoutInMilliseconds < 0) || (nanos < 0) || (nanos > NANOS_MAX)) {
 		throw new IllegalArgumentException();
+	}
+	if (!started || isDead()) {
+		return;
+	}
+	if ((timeoutInMilliseconds == 0) && (nanos == 0)) {
+		while (!isDead()) {
+			wait(0);
+		}
+		return;
+	}
 
-	if (!started || isDead()) return;
-
-	// No nanosecond precision for now, we would need something like 'currentTimenanos'
-
-	long totalWaited = 0;
-	long toWait = timeoutInMilliseconds;
-	boolean timedOut = false;
-
-	/*[PR 1PQM757] Even though we do not have nano precision, we cannot wait(0) when any one of the parameters is not zero */
-	if (timeoutInMilliseconds == 0 & nanos > 0) {
-		// We either round up (1 millisecond) or down (no need to wait, just return)
-		if (nanos < 500000)
-			timedOut = true;
-		else
-			toWait = 1;
+	long toWaitNano = TimeUnit.MILLISECONDS.toNanos(timeoutInMilliseconds);
+	if ((Long.MAX_VALUE - toWaitNano) >= nanos) {
+		toWaitNano += nanos;
+	} else {
+		// Unlikely just for technical correctness.
+		toWaitNano = Long.MAX_VALUE;
 	}
 	/*[PR 1FJMO7Q] A Thread can be !isAlive() and still be in its ThreadGroup. Use isDead() */
-	while (!timedOut && !isDead()) {
-		long start = System.currentTimeMillis();
-		wait(toWait);
-		long waited = System.currentTimeMillis() - start;
-		totalWaited+= waited;
-		toWait -= waited;
+	while (!isDead()) {
+		final long start = System.nanoTime();
+		TimeUnit.NANOSECONDS.timedWait(this, toWaitNano);
+		final long waited = System.nanoTime() - start;
 		// Anyone could do a synchronized/notify on this thread, so if we wait
 		// less than the timeout, we must check if the thread really died
-		timedOut = (totalWaited >= timeoutInMilliseconds);
+		if (waited >= toWaitNano) {
+			break;
+		} else {
+			toWaitNano -= waited;
+		}
 	}
-
 }
 
 /**
@@ -939,12 +892,7 @@ public final synchronized void join(long timeoutInMilliseconds, int nanos) throw
  */
 private synchronized static String newName() {
 	/*[PR 97331] Initial thread name should be Thread-0 */
-	if (createCount == -1) {
-		createCount++;
-		return "main"; //$NON-NLS-1$
-	} else {
-		return "Thread-" + createCount++; //$NON-NLS-1$
-	}
+	return "Thread-" + createCount++; //$NON-NLS-1$
 }
 
 /**
@@ -1010,6 +958,10 @@ public void setContextClassLoader(ClassLoader cl) {
 		// then check permission
 		currentManager.checkPermission(com.ibm.oti.util.RuntimePermissions.permissionSetContextClassLoader);
 	}
+	contextClassLoader = cl;
+}
+
+void internalSetContextClassLoader(ClassLoader cl) {
 	contextClassLoader = cl;
 }
 
@@ -1140,16 +1092,20 @@ public static void sleep(long time) throws InterruptedException {
  *
  * @see			Thread#interrupt()
  */
-public static native void sleep(long time, int nanos) throws InterruptedException;
+public static void sleep(long time, int nanos) throws InterruptedException {
+	sleepImpl(time, nanos);
+}
 
-/*[IF Sidecar19-SE]*/
+private static native void sleepImpl(long time, int nanos) throws InterruptedException;
+
+/*[IF JAVA_SPEC_VERSION >= 9]*/
 /**
  * Hints to the run-time that a spin loop is being performed
  * which helps the thread in the spin loop not to use as much power.
  *
  */
 public static native void onSpinWait();
-/*[ENDIF]*/
+/*[ENDIF] JAVA_SPEC_VERSION >= 9 */
 
 /**
  * Starts the new Thread of execution. The <code>run()</code> method of the receiver
@@ -1172,23 +1128,20 @@ public synchronized void start() {
 	 *
 	 * Release the lock before calling threadgroup's remove method for this thread.
 	/*[ENDIF]*/
+	if (started) {
+		/*[MSG "K0341", "Thread is already started"]*/
+		throw new IllegalThreadStateException(com.ibm.oti.util.Msg.getString("K0341")); //$NON-NLS-1$
+	}
+	/*[PR 115667, CMVC 94448] In 1.5, thread is added to ThreadGroup when started */
+	group.add(this);
 
 	try {
-		synchronized(lock) {
-			if (started) {
-				/*[MSG "K0341", "Thread is already started"]*/
-				throw new IllegalThreadStateException(com.ibm.oti.util.Msg.getString("K0341")); //$NON-NLS-1$
-			}
-
-			/*[PR 115667, CMVC 94448] In 1.5, thread is added to ThreadGroup when started */
-			group.add(this);
-
+		synchronized (lock) {
 			startImpl();
-
 			success = true;
 		}
 	} finally {
-		if (!success && !started) {
+		if (!success) {
 			group.remove(this);
 		}
 	}
@@ -1229,11 +1182,11 @@ public final void stop() {
  *
  * @deprecated
  */
-/*[IF Sidecar19-SE]*/
+/*[IF JAVA_SPEC_VERSION >= 9]*/
 @Deprecated(forRemoval=true, since="1.2")
-/*[ELSE]*/
+/*[ELSE] JAVA_SPEC_VERSION >= 9 */
 @Deprecated
-/*[ENDIF]*/
+/*[ENDIF] JAVA_SPEC_VERSION >= 9 */
 public final void stop(Throwable throwable) {
 	throw new UnsupportedOperationException();
 }
@@ -1242,16 +1195,17 @@ public final void stop(Throwable throwable) {
 private final synchronized void stopWithThrowable(Throwable throwable) {
 	checkAccess();
 	/*[PR 95390]*/
-	if (currentThread() != this || !(throwable instanceof ThreadDeath)) {
+	if ((currentThread() != this) || !(throwable instanceof ThreadDeath)) {
+		@SuppressWarnings("removal")
 		SecurityManager currentManager = System.getSecurityManager();
-		if (currentManager != null)	{
+		if (currentManager != null) {
 			currentManager.checkPermission(SecurityConstants.STOP_THREAD_PERMISSION);
 		}
 	}
 
-	synchronized(lock) {
-		if (throwable != null){
-			if (!started){
+	synchronized (lock) {
+		if (throwable != null) {
+			if (!started) {
 				/* [PR CMVC 179978] Java7:JCK:java_lang.Thread fails in all plat*/
 				/*
 				 * if the thread has not yet been simply store the fact that stop has been called
@@ -1262,8 +1216,9 @@ private final synchronized void stopWithThrowable(Throwable throwable) {
 				/* thread was started so do the full stop */
 				stopImpl(throwable);
 			}
+		} else {
+			throw new NullPointerException();
 		}
-		else throw new NullPointerException();
 	}
 }
 
@@ -1299,9 +1254,10 @@ private native void stopImpl(Throwable throwable);
 public final void suspend() {
 	checkAccess();
 	/*[PR 106321]*/
-	if (currentThread() == this) suspendImpl();
-	else {
-		synchronized( lock ) {
+	if (currentThread() == this) {
+		suspendImpl();
+	} else {
+		synchronized (lock) {
 			suspendImpl();
 		}
 	}
@@ -1352,18 +1308,17 @@ public static native boolean holdsLock(Object object);
 /*[IF JAVA_SPEC_VERSION >= 11]*/
 static
 /*[ENDIF] JAVA_SPEC_VERSION >= 11 */
-void blockedOn(sun.nio.ch.Interruptible interruptible) {
+void blockedOn(Interruptible interruptible) {
 	Thread currentThread;
 	/*[IF JAVA_SPEC_VERSION >= 11]*/
 	currentThread = currentThread();
 	/*[ELSE] JAVA_SPEC_VERSION >= 11
 	currentThread = this;
 	/*[ENDIF] JAVA_SPEC_VERSION >= 11 */
-	synchronized(currentThread.lock) {
+	synchronized (currentThread.lock) {
 		currentThread.blockOn = interruptible;
 	}
 }
-
 
 private native Throwable getStackTraceImpl();
 
@@ -1381,14 +1336,15 @@ public StackTraceElement[] getStackTrace() {
 	if (Thread.currentThread() != this) {
 		@SuppressWarnings("removal")
 		SecurityManager security = System.getSecurityManager();
-		if (security != null)
+		if (security != null) {
 			security.checkPermission(SecurityConstants.GET_STACK_TRACE_PERMISSION); //$NON-NLS-1$
+		}
 	}
 	Throwable t;
 
-	synchronized(lock) {
+	synchronized (lock) {
 		if (!isAlive()) {
-			return new StackTraceElement[0];
+			return EMPTY_STACK_TRACE;
 		}
 		t = getStackTraceImpl();
 	}
@@ -1417,7 +1373,13 @@ public static Map<Thread, StackTraceElement[]> getAllStackTraces() {
 	int count = systemThreadGroup.activeCount() + 20;
 	Thread[] threads = new Thread[count];
 	count = systemThreadGroup.enumerate(threads);
-	Map<Thread, StackTraceElement[]> result = new java.util.HashMap<>(count);
+	/*[IF JAVA_SPEC_VERSION >= 19]
+	Map<Thread, StackTraceElement[]> result = HashMap.newHashMap(count);
+	/*[ELSE] JAVA_SPEC_VERSION >= 19 */
+	// HashMap.DEFAULT_LOAD_FACTOR is 0.75
+	Map<Thread, StackTraceElement[]> result = new HashMap<>(count * 4 / 3);
+	/*[ENDIF] JAVA_SPEC_VERSION >= 19 */
+
 	for (int i = 0; i < count; i++) {
 		result.put(threads[i], threads[i].getStackTrace());
 	}
@@ -1572,30 +1534,33 @@ void uncaughtException(Throwable e) {
  *
  * @see J9VMInternals#threadCleanup()
  */
-void cleanup() {
+void exit() {
+	try {
 /*[IF JAVA_SPEC_VERSION >= 14]*/
-	/* Refresh deadInterrupt value so it is accurate when thread reference is removed. */
-	deadInterrupt = interrupted();
+		/* Refresh deadInterrupt value so it is accurate when thread reference is removed. */
+		deadInterrupt = interrupted();
 /*[ENDIF] JAVA_SPEC_VERSION >= 14 */
 
 /*[IF Sidecar18-SE-OpenJ9]*/
-	if ((threadLocals != null) && TerminatingThreadLocal.REGISTRY.isPresent()) {
-		TerminatingThreadLocal.threadTerminated();
-	}
+		if ((threadLocals != null) && TerminatingThreadLocal.REGISTRY.isPresent()) {
+			TerminatingThreadLocal.threadTerminated();
+		}
 /*[ENDIF] Sidecar18-SE-OpenJ9 */
 
-	/*[PR 97317]*/
-	group = null;
+		/*[PR 97317]*/
+		group = null;
 
-	/*[PR CVMC 118827] references are not removed in dead threads */
-	runnable = null;
-	inheritedAccessControlContext = null;
+		/*[PR CVMC 118827] references are not removed in dead threads. */
+		runnable = null;
+		inheritedAccessControlContext = null;
 
-	threadLocals = null;
-	inheritableThreadLocals = null;
-
-	synchronized(lock) {
-		threadRef = Thread.NO_REF;				// So that isAlive() can work
+		threadLocals = null;
+		inheritableThreadLocals = null;
+	} finally {
+		synchronized(lock) {
+			// So that isAlive() can work.
+			threadRef = Thread.NO_REF;
+		}
 	}
 }
 

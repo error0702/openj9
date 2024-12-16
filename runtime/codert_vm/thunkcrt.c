@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,12 +15,13 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "j9.h"
+#include "j9nonbuilder.h"
 #include "j9protos.h"
 #include "jitprotos.h"
 #include "ut_j9codertvm.h"
@@ -41,7 +42,7 @@
 
 /* This value should be a multiple of 8 bytes (to maintain pointer alignment).
  *
- * Also note that the value must be smaller than 64 (128 types) so that argCount * 2 + 
+ * Also note that the value must be smaller than 64 (128 types) so that argCount * 2 +
  * may be stored in the inline argCount byte.
  */
 
@@ -102,10 +103,12 @@ extern void * icallVMprJavaSendInvokeExactL;
 #endif
 
 static U_8 j9ThunkGetEncodedSignature(J9ThunkTableEntry * entry, U_8 ** encodedSignaturePtr);
+static UDATA j9ThunkEncodeSignatureASCII(char *signatureData, U_8 * encodedSignature);
 static UDATA j9ThunkEncodeSignature(char *signatureData, U_8 * encodedSignature);
 static UDATA j9ThunkTableHash(void *key, void *userData);
 static UDATA j9ThunkTableEquals(void *leftKey, void *rightKey, void *userData);
 
+typedef UDATA (*encodeByteFn)(UDATA encodedTypeByteStored, U_8 *encodedTypeBytePtr, U_8 encodedType);
 
 void *
 j9ThunkLookupNameAndSig(void * jitConfig, void *parm)
@@ -180,7 +183,7 @@ j9ThunkTableFree(J9JavaVM * vm)
 }
 
 static UDATA
-j9ThunkTableHash(void *key, void *userData) 
+j9ThunkTableHash(void *key, void *userData)
 {
 	U_8 * encodedSignature;
 	U_8 argCount;
@@ -188,8 +191,8 @@ j9ThunkTableHash(void *key, void *userData)
 	argCount = j9ThunkGetEncodedSignature(key, &encodedSignature);
 	return j9crc32(0, encodedSignature + 1, J9_THUNK_ENCODED_SIGNATURE_LENGTH(argCount));
 }
-static UDATA 
-j9ThunkTableEquals(void *leftKey, void *rightKey, void *userData) 
+static UDATA
+j9ThunkTableEquals(void *leftKey, void *rightKey, void *userData)
 {
 	U_8 * leftSig;
 	U_8 * rightSig;
@@ -268,7 +271,7 @@ j9ThunkNewSignature(void * jitConfig, int signatureLength, char *signatureChars,
 		}
 
 		memcpy(allocatedSignature, encodedSignature, length);
-		exemplar.encodedSignature.outOfLineBytes = allocatedSignature;		
+		exemplar.encodedSignature.outOfLineBytes = allocatedSignature;
 	} else {
 		/* Inline encoding bytes must all be odd - multiply argCount by 2 and add 1 to make it odd */
 		encodedSignature[0] = encodedSignature[0] * 2 + 1;
@@ -297,21 +300,29 @@ j9ThunkNewSignature(void * jitConfig, int signatureLength, char *signatureChars,
 	return 0;
 }
 
-/* Returns the total number of bytes used in the encodedSignature buffer */
+static UDATA
+j9ThunkEncodeByte(UDATA encodedTypeByteStored, U_8 *encodedTypeBytePtr, U_8 encodedType)
+{
+	*encodedTypeBytePtr = ((*encodedTypeBytePtr) << 4) | encodedType;
+	return !encodedTypeByteStored;
+}
 
 static UDATA
-j9ThunkEncodeSignature(char *signatureData, U_8 * encodedSignature)
+j9ThunkEncodeByteASCII(UDATA encodedTypeByteStored, U_8 *encodedTypeBytePtr, U_8 encodedType)
 {
-	U_8 * encodedTypes = encodedSignature + 1;
-	U_8 argCount = 0;
+	*encodedTypeBytePtr = (encodedType > 9 ? (encodedType - 10 + 'a') : (encodedType + '0'));
+	return TRUE;
+}
+
+static void
+j9ThunkIterateAndEncode(char ** signatureDataPtr, U_8 ** encodedTypesPtr, U_8 * argCountPtr, encodeByteFn encodeByte)
+{
+	UDATA done = FALSE;
 	U_8 encodedTypeByte = 0;
 	UDATA encodedTypeByteStored = TRUE;
-	UDATA done = FALSE;
-	UDATA totalSize;
-#ifdef DEBUG
-	char * origSig = signatureData;
-	UDATA i;
-#endif
+	U_8 * encodedTypes = *encodedTypesPtr;
+	char * signatureData = *signatureDataPtr;
+	U_8 argCount = *argCountPtr;
 
 	/* Skip opening bracket */
 	++signatureData;
@@ -363,10 +374,9 @@ j9ThunkEncodeSignature(char *signatureData, U_8 * encodedSignature)
 				break;
 		}
 
-		/* Store encoded value into nybble */
+		/* Store encoded value */
 
-		encodedTypeByte = (encodedTypeByte << 4) | encodedType;
-		encodedTypeByteStored = !encodedTypeByteStored;
+		encodedTypeByteStored = encodeByte(encodedTypeByteStored, &encodedTypeByte, encodedType);
 		if (encodedTypeByteStored) {
 			*encodedTypes++ = encodedTypeByte;
 		}
@@ -375,8 +385,64 @@ j9ThunkEncodeSignature(char *signatureData, U_8 * encodedSignature)
 	/* Store the final byte if necessary */
 
 	if (!encodedTypeByteStored) {
-		*encodedTypes++ = (encodedTypeByte << 4) | J9_THUNK_TYPE_FILL;
+		encodedTypeByteStored = encodeByte(encodedTypeByteStored, &encodedTypeByte, J9_THUNK_TYPE_FILL);
+		*encodedTypes++ = encodedTypeByte;
 	}
+
+	*argCountPtr = argCount;
+	*encodedTypesPtr = encodedTypes;
+	*signatureDataPtr = signatureData;
+}
+
+/* Returns the total number of bytes used in the encodedSignature buffer */
+
+static UDATA
+j9ThunkEncodeSignatureASCII(char *signatureData, U_8 * encodedSignature)
+{
+	U_8 * encodedTypes = encodedSignature;
+	U_8 argCount = 0;
+	UDATA totalSize;
+#ifdef DEBUG
+	char * origSig = signatureData;
+	UDATA i;
+#endif
+
+	/* Iterate and encode the signature in signatureData into encodedTypes */
+
+	j9ThunkIterateAndEncode(&signatureData, &encodedTypes, &argCount, j9ThunkEncodeByteASCII);
+
+	/* Compute total size */
+
+	totalSize = encodedTypes - encodedSignature;
+
+#ifdef DEBUG
+	printf("encode: %.*s -> ", signatureData - origSig, origSig);
+	for (i = 0; i < totalSize; ++i) {
+		printf("%c", encodedSignature[i]);
+	}
+	printf(" (length %d)\n", totalSize);
+#endif
+
+	return totalSize;
+}
+
+/* Returns the total number of bytes used in the encodedSignature buffer */
+
+static UDATA
+j9ThunkEncodeSignature(char *signatureData, U_8 * encodedSignature)
+{
+	/* Leave room for storing argCount */
+	U_8 * encodedTypes = encodedSignature + 1;
+	U_8 argCount = 0;
+	UDATA totalSize;
+#ifdef DEBUG
+	char * origSig = signatureData;
+	UDATA i;
+#endif
+
+	/* Iterate and encode the signature from signatureData into encodedTypes */
+
+	j9ThunkIterateAndEncode(&signatureData, &encodedTypes, &argCount, j9ThunkEncodeByte);
 
 	/* Store arg count and compute total size */
 
@@ -395,7 +461,7 @@ j9ThunkEncodeSignature(char *signatureData, U_8 * encodedSignature)
 }
 
 static U_8
-j9ThunkGetEncodedSignature(J9ThunkTableEntry * entry, U_8 ** encodedSignaturePtr) 
+j9ThunkGetEncodedSignature(J9ThunkTableEntry * entry, U_8 ** encodedSignaturePtr)
 {
 	U_8 * encodedSignature;
 	U_8 argCount;
@@ -486,4 +552,57 @@ j9ThunkVMHelperFromNameAndSig(void * jitConfig, void *parm)
 	J9ROMNameAndSignature *nameAndSignature = (J9ROMNameAndSignature *) parm;
 
 	return j9ThunkVMHelperFromSignature(jitConfig, J9UTF8_LENGTH(J9ROMNAMEANDSIGNATURE_SIGNATURE(nameAndSignature)), (char *) J9UTF8_DATA((J9ROMNAMEANDSIGNATURE_SIGNATURE(nameAndSignature))));
+}
+
+const void *
+j9ThunkPersist(J9JITConfig *jitConfig, char *signatureChars, U_32 signatureLength, U_8 *thunkStart, U_32 totalSize)
+{
+	const void *store = NULL;
+
+#if defined(J9VM_OPT_SHARED_CLASSES)
+	J9JavaVM *vm = jitConfig->javaVM;
+	J9VMThread *vmThread = vm->internalVMFunctions->currentVMThread(vm);
+
+	U_8 encodedSignatureArray[2 * (J9_THUNK_MAX_ENCODED_BYTES - 1)];
+	U_8 *encodedSignature = encodedSignatureArray;
+	UDATA encodedLength;
+
+	J9SharedDataDescriptor dataDescriptor;
+	dataDescriptor.address = (U_8 *)thunkStart;
+	dataDescriptor.length = totalSize;
+	dataDescriptor.type = J9SHR_DATA_TYPE_AOTTHUNK;
+	dataDescriptor.flags = 0;
+
+	encodedLength = j9ThunkEncodeSignatureASCII(signatureChars, encodedSignature);
+
+	store = vm->sharedClassConfig->storeSharedData(vmThread, (const char *)encodedSignature, encodedLength, &dataDescriptor);
+#endif
+
+	return store;
+}
+
+void *
+j9ThunkFindPersistentThunk(J9JITConfig *jitConfig, char *signatureChars, U_32 signatureLength, UDATA *thunkSize)
+{
+	void * thunk = NULL;
+
+#if defined(J9VM_OPT_SHARED_CLASSES)
+	J9JavaVM *vm = jitConfig->javaVM;
+	J9VMThread *vmThread = vm->internalVMFunctions->currentVMThread(vm);
+
+	U_8 encodedSignatureArray[2 * (J9_THUNK_MAX_ENCODED_BYTES - 1)];
+	U_8 *encodedSignature = encodedSignatureArray;
+	UDATA encodedLength;
+
+	J9SharedDataDescriptor dataDescriptor;
+	dataDescriptor.address = NULL;
+
+	encodedLength = j9ThunkEncodeSignatureASCII(signatureChars, encodedSignature);
+
+	vm->sharedClassConfig->findSharedData(vmThread, (const char *)encodedSignature, encodedLength, J9SHR_DATA_TYPE_AOTTHUNK, FALSE, &dataDescriptor, NULL);
+	thunk = dataDescriptor.address;
+	*thunkSize = dataDescriptor.length;
+#endif
+
+	return thunk;
 }

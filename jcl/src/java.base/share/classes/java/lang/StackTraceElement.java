@@ -1,10 +1,6 @@
-/*[INCLUDE-IF Sidecar16]*/
-package java.lang;
-
-import com.ibm.oti.util.Util;
-
-/*******************************************************************************
- * Copyright (c) 2002, 2021 IBM Corp. and others
+/*[INCLUDE-IF JAVA_SPEC_VERSION >= 8]*/
+/*
+ * Copyright IBM Corp. and others 2002
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -20,14 +16,17 @@ import com.ibm.oti.util.Util;
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
+package java.lang;
+
+import com.ibm.oti.util.Util;
 
 /**
  * StackTraceElement represents a stack frame.
- * 
+ *
  * @see Throwable#getStackTrace()
  */
 public final class StackTraceElement implements java.io.Serializable {
@@ -47,7 +46,7 @@ public final class StackTraceElement implements java.io.Serializable {
 
 /**
  * Create a StackTraceElement from the parameters.
- * 
+ *
  * @param cls The class name
  * @param method The method name
  * @param file The file name
@@ -76,7 +75,7 @@ public StackTraceElement(String cls, String method, String file, int line) {
 /*[IF JAVA_SPEC_VERSION >= 11]*/
 /**
  * Create a StackTraceElement from the parameters.
- * 
+ *
  * @param classLoaderName The name for the ClassLoader
  * @param module The module name
  * @param version The module version
@@ -137,18 +136,18 @@ private StackTraceElement() {
 /**
  * Returns true if the specified object is another StackTraceElement instance
  * representing the same execution point as this instance.
- * 
+ *
  * @param obj the object to compare to
- * 
+ *
  */
 @Override
 public boolean equals(Object obj) {
 	if (!(obj instanceof StackTraceElement)) return false;
 	StackTraceElement castObj = (StackTraceElement) obj;
-	
+
 	// Unknown methods are never equal to anything (not strictly to spec, but spec does not allow null method/class names)
 	if ((methodName == null) || (castObj.methodName == null)) return false;
-	
+
 	if (!getMethodName().equals(castObj.getMethodName())) return false;
 	if (!getClassName().equals(castObj.getClassName())) return false;
 	String localFileName = getFileName();
@@ -158,14 +157,14 @@ public boolean equals(Object obj) {
 		if (!localFileName.equals(castObj.getFileName())) return false;
 	}
 	if (getLineNumber() != castObj.getLineNumber()) return false;
-	
+
 	return true;
 }
 
 /*[IF JAVA_SPEC_VERSION >= 11]*/
 /**
  * Answers the name of the module to which the execution point represented by this stack trace element belongs.
- * 
+ *
  * @return the name of the Module or null if it is not available
  */
 public String getModuleName() {
@@ -174,7 +173,7 @@ public String getModuleName() {
 
 /**
  * Answers the version of the module to which the execution point represented by this stack trace element belongs.
- * 
+ *
  * @return the version of the Module or null if it is not available.
  */
 public String getModuleVersion() {
@@ -234,7 +233,7 @@ void disableIncludeInfoFlags() {
 /**
  * Returns the full name (i.e. including package) of the class where this
  * stack trace element is executing.
- * 
+ *
  * @return the name of the class where this stack trace element is
  *         executing.
  */
@@ -246,7 +245,7 @@ public String getClassName() {
  * If available, returns the name of the file containing the Java code
  * source which was compiled into the class where this stack trace element
  * is executing.
- * 
+ *
  * @return the name of the Java code source file which was compiled into the
  *         class where this stack trace element is executing. If not
  *         available, a <code>null</code> value is returned.
@@ -258,7 +257,7 @@ public String getFileName() {
 /**
  * Returns the source file line number for the class where this stack trace
  * element is executing.
- * 
+ *
  * @return the line number in the source file corresponding to where this
  *         stack trace element is executing.
  */
@@ -266,12 +265,11 @@ public int getLineNumber() {
 	/*[PR CMVC 82268] does not return the same value passed into the constructor */
 	return lineNumber;
 }
- 
 
 /**
  * Returns the name of the method where this stack trace element is
  * executing.
- * 
+ *
  * @return the method in which this stack trace element is executing.
  *         Returns &lt;<code>unknown method</code>&gt; if the name of the
  *         method cannot be determined.
@@ -298,17 +296,17 @@ public int hashCode() {
 	/*[ENDIF] JAVA_SPEC_VERSION >= 11*/
 	return hashCode;
 }
- 
+
 /**
  * Returns <code>true</code> if the method name returned by
  * {@link #getMethodName()} is implemented as a native method.
- * 
+ *
  * @return true if the method is a native method
  */
 public boolean isNativeMethod() {
 	return lineNumber == -2;
 }
- 
+
 /**
  * Returns a string representation of this stack trace element.
  */
@@ -333,4 +331,15 @@ public String toString() {
 	return buf.toString();
 }
 
+/*[IF JAVA_SPEC_VERSION >= 19]*/
+static StackTraceElement[] of(StackTraceElement[] stackTrace) {
+	// TODO: determine need action before return
+	return stackTrace;
+}
+
+static StackTraceElement of(StackFrameInfo s) {
+	// TODO: initialize StackTraceElement with StackFrameInfo data
+	return new StackTraceElement();
+}
+/*[ENDIF] JAVA_SPEC_VERSION >= 19 */
 }

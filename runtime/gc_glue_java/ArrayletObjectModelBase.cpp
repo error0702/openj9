@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,16 +15,16 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "ArrayletObjectModelBase.hpp"
 #include "GCExtensionsBase.hpp"
 
 bool
-GC_ArrayletObjectModelBase::initialize(MM_GCExtensionsBase * extensions)
+GC_ArrayletObjectModelBase::initialize(MM_GCExtensionsBase *extensions)
 {
 #if defined(OMR_GC_COMPRESSED_POINTERS) && defined(OMR_GC_FULL_POINTERS)
 	_compressObjectReferences = extensions->compressObjectReferences();
@@ -37,12 +37,20 @@ GC_ArrayletObjectModelBase::initialize(MM_GCExtensionsBase * extensions)
 	_enableDoubleMapping = false;
 #endif /* J9VM_GC_ENABLE_DOUBLE_MAP */
 	_largestDesirableArraySpineSize = UDATA_MAX;
+#if defined(J9VM_GC_SPARSE_HEAP_ALLOCATION)
+	_enableVirtualLargeObjectHeap = false;
+#endif /* defined(J9VM_GC_SPARSE_HEAP_ALLOCATION) */
+#if defined(J9VM_ENV_DATA64)
+	_isIndexableDataAddrPresent = false;
+#endif /* defined(J9VM_ENV_DATA64) */
+	_contiguousIndexableHeaderSize = 0;
+	_discontiguousIndexableHeaderSize = 0;
 
 	return true;
 }
 
 void
-GC_ArrayletObjectModelBase::tearDown(MM_GCExtensionsBase * extensions)
+GC_ArrayletObjectModelBase::tearDown(MM_GCExtensionsBase *extensions)
 {
 
 	/* ensure that we catch any invalid uses during shutdown */
@@ -55,7 +63,7 @@ GC_ArrayletObjectModelBase::tearDown(MM_GCExtensionsBase * extensions)
 
 
 void
-GC_ArrayletObjectModelBase::expandArrayletSubSpaceRange(MM_MemorySubSpace * subSpace, void * rangeBase, void * rangeTop, UDATA largestDesirableArraySpineSize)
+GC_ArrayletObjectModelBase::expandArrayletSubSpaceRange(MM_MemorySubSpace *subSpace, void *rangeBase, void *rangeTop, uintptr_t largestDesirableArraySpineSize)
 {
 	/* Is this the first expand? */
 	if(NULL == _arrayletSubSpace) {
@@ -74,8 +82,8 @@ GC_ArrayletObjectModelBase::expandArrayletSubSpaceRange(MM_MemorySubSpace * subS
 	}
 }
 
-UDATA
-GC_ArrayletObjectModelBase::getSpineSizeWithoutHeader(ArrayLayout layout, UDATA numberArraylets, UDATA dataSize, bool alignData)
+uintptr_t
+GC_ArrayletObjectModelBase::getSpineSizeWithoutHeader(ArrayLayout layout, uintptr_t numberArraylets, uintptr_t dataSize, bool alignData)
 {
 	/* The spine consists of three (possibly empty) sections, not including the header:
 	 * 1. the alignment word - padding between arrayoid and inline-data
@@ -83,10 +91,10 @@ GC_ArrayletObjectModelBase::getSpineSizeWithoutHeader(ArrayLayout layout, UDATA 
 	 * 3. in-line data
 	 * In hybrid specs, the spine may also include padding for a secondary size field in empty arrays
 	 */
-	UDATA const slotSize = J9GC_REFERENCE_SIZE(this);
-	MM_GCExtensionsBase* extensions = MM_GCExtensionsBase::getExtensions(_omrVM);
-	UDATA spineArrayoidSize = 0;
-	UDATA spinePaddingSize = 0;
+	uintptr_t const slotSize = J9GC_REFERENCE_SIZE(this);
+	MM_GCExtensionsBase *extensions = MM_GCExtensionsBase::getExtensions(_omrVM);
+	uintptr_t spineArrayoidSize = 0;
+	uintptr_t spinePaddingSize = 0;
 	if (InlineContiguous != layout) {
 		if (0 != dataSize) {
 			/* not in-line, so there in an arrayoid */
@@ -94,19 +102,19 @@ GC_ArrayletObjectModelBase::getSpineSizeWithoutHeader(ArrayLayout layout, UDATA 
 			spineArrayoidSize = numberArraylets * slotSize;
 		}
 	}
-	UDATA spineDataSize = 0;
+	bool isVirtualLargeObjectHeapEnabled = extensions->indexableObjectModel.isVirtualLargeObjectHeapEnabled();
+
+	uintptr_t spineDataSize = 0;
 	if (InlineContiguous == layout) {
-		spineDataSize = dataSize; // All data in spine
-	} else if (Hybrid == layout) {
-#if defined(J9VM_GC_ENABLE_DOUBLE_MAP)
-		if (extensions->indexableObjectModel.isDoubleMappingEnabled()) {
-			spineDataSize = 0;
-		} else
-#endif /* J9VM_GC_ENABLE_DOUBLE_MAP */
-		{
-			/* Last arraylet in spine */
-			spineDataSize = (dataSize & (_omrVM->_arrayletLeafSize - 1));
+		if (!isVirtualLargeObjectHeapEnabled || extensions->indexableObjectModel.isDataAdjacentToHeader(dataSize)) {
+			spineDataSize = dataSize; // All data in spine
 		}
+	} else if (Hybrid == layout) {
+		if (isVirtualLargeObjectHeapEnabled) {
+			extensions->indexableObjectModel.AssertContiguousArrayDataUnreachable();
+		}
+		/* Last arraylet in spine */
+		spineDataSize = (dataSize & (_omrVM->_arrayletLeafSize - 1));
 	}
 
 	return spinePaddingSize + spineArrayoidSize + spineDataSize;

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-Copyright (c) 2019, 2021 IBM Corp. and others
+Copyright IBM Corp. and others 2019
 
 This program and the accompanying materials are made available under
 the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,9 +16,9 @@ Exception [1] and GNU General Public License, version 2 with the
 OpenJDK Assembly Exception [2].
 
 [1] https://www.gnu.org/software/classpath/license.html
-[2] http://openjdk.java.net/legal/assembly-exception.html
+[2] https://openjdk.org/legal/assembly-exception.html
 
-SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
 -->
 <spec xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://www.ibm.com/j9/builder/spec" xsi:schemaLocation="http://www.ibm.com/j9/builder/spec spec-v1.xsd" id="linux_riscv64_cmprssptrs_cross">
 	<name>Linux RISC-V 64bit Compressed Pointers</name>
@@ -126,8 +126,6 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 		<flag id="build_j2se" value="true"/>
 		<flag id="build_java8" value="false"/>
 		<flag id="build_java9" value="false"/>
-		<flag id="build_openj9" value="true"/>
-		<flag id="build_openj9JDK8" value="true"/>
 		<flag id="build_product" value="false"/>
 		<flag id="build_vmContinuous" value="true"/>
 		<flag id="env_crossbuild" value="true"/>
@@ -137,6 +135,7 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 		<flag id="gc_debugAsserts" value="true"/>
 		<flag id="gc_inlinedAllocFields" value="true"/>
 		<flag id="gc_minimumObjectSize" value="true"/>
+		<flag id="gc_sparseHeapAllocation" value="true"/>
 		<flag id="gc_tlhPrefetchFTA" value="true"/>
 		<flag id="graph_cmdLineTester" value="true"/>
 		<flag id="graph_compile" value="true"/>
@@ -160,6 +159,7 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 		<flag id="interp_nativeSupport" value="true"/>
 		<flag id="interp_profilingBytecodes" value="true"/>
 		<flag id="interp_sigQuitThread" value="true"/>
+		<flag id="interp_sigUsr2" value="true"/>
 		<flag id="interp_useUnsafeHelper" value="true"/>
 		<flag id="ive_jxeFileRelocator" value="true"/>
 		<flag id="ive_jxeInPlaceRelocator" value="true"/>
@@ -225,7 +225,6 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 		<flag id="opt_jxeLoadSupport" value="true"/>
 		<flag id="opt_memoryCheckSupport" value="true"/>
 		<flag id="opt_multiVm" value="true"/>
-		<flag id="opt_panama" value="false"/>
 		<flag id="opt_reflect" value="true"/>
 		<flag id="opt_sharedClasses" value="true"/>
 		<flag id="opt_sidecar" value="true"/>
@@ -234,6 +233,7 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 		<flag id="opt_useFfi" value="true"/>
 		<flag id="opt_useFfiOnly" value="true"/>
 		<flag id="opt_valhallaValueTypes" value="false"/>
+		<flag id="opt_valhallaFlattenableValueTypes" value="false"/>
 		<flag id="opt_zipSupport" value="true"/>
 		<flag id="opt_zlibCompression" value="true"/>
 		<flag id="opt_zlibSupport" value="true"/>

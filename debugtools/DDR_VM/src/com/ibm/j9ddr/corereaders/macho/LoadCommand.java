@@ -1,5 +1,5 @@
-/*******************************************************************************
- * Copyright (c) 2019, 2019 IBM Corp. and others
+/*
+ * Copyright IBM Corp. and others 2019
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,21 +15,21 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
-/*******************************************************************************
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
+/*
  * Portions Copyright (c) 1999-2003 Apple Computer, Inc. All Rights
  * Reserved.
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -37,7 +37,7 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- *******************************************************************************/
+ */
 package com.ibm.j9ddr.corereaders.macho;
 
 import java.io.IOException;
@@ -116,7 +116,7 @@ public class LoadCommand
 			long currentOffset = stream.getStreamPosition();
 			stream.seek(absoluteOffset + offset);
 			int stringSize = (int) (cmdSize - offset);
-			byte stringBytes[] = new byte[stringSize];
+			byte[] stringBytes = new byte[stringSize];
 			stream.readFully(stringBytes);
 			value = getStringFromAsciiChars(stringBytes);
 			stream.seek(currentOffset);
@@ -166,7 +166,7 @@ public class LoadCommand
 		return this;
 	}
 
-	public static LoadCommand readFullCommand(ImageInputStream stream, long streamOffset, long segmentOffset) throws IOException
+	public static LoadCommand readFullCommand(ImageInputStream stream, long streamOffset, long segmentOffset, int cpuType) throws IOException
 	{
 		LoadCommand command;
 		stream.seek(streamOffset);
@@ -197,7 +197,7 @@ public class LoadCommand
 				break;
 			case LC_THREAD:
 			case LC_UNIXTHREAD:
-				command = new ThreadCommand();
+				command = new ThreadCommand(cpuType);
 				break;
 			case LC_ROUTINES_64:
 				command = new RoutinesCommand64();

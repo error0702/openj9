@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #ifndef bcverify_api_h
@@ -160,10 +160,11 @@ bcvIsInitOrClinit (J9CfrConstantPoolInfo * info);
 * @param loader2
 * @param sig1
 * @param sig2
+* @param copySig1
 * @return UDATA
 */
 UDATA
-j9bcv_checkClassLoadingConstraintsForSignature (J9VMThread* vmThread, J9ClassLoader* loader1, J9ClassLoader* loader2, J9UTF8* sig1, J9UTF8* sig2);
+j9bcv_checkClassLoadingConstraintsForSignature (J9VMThread *vmThread, J9ClassLoader *loader1, J9ClassLoader *loader2, J9UTF8 *sig1, J9UTF8 *sig2, BOOLEAN copySig1);
 
 /**
 * @brief
@@ -173,10 +174,12 @@ j9bcv_checkClassLoadingConstraintsForSignature (J9VMThread* vmThread, J9ClassLoa
 * @param name1
 * @param name2
 * @param length
+* @param copyName1
+* @param copyName2
 * @return UDATA
  */
 UDATA
-j9bcv_checkClassLoadingConstraintForName (J9VMThread* vmThread, J9ClassLoader* loader1, J9ClassLoader* loader2, U_8* name1, U_8* name2, UDATA length, UDATA copyUTFs);
+j9bcv_checkClassLoadingConstraintForName (J9VMThread *vmThread, J9ClassLoader *loader1, J9ClassLoader *loader2, U_8 *name1, U_8 *name2, UDATA length, BOOLEAN copyName1, BOOLEAN copyName2);
 
 /**
 * @brief

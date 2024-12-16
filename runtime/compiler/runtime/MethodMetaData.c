@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "runtime/MethodMetaData.h"
@@ -224,16 +224,15 @@ static VMINLINE TR_StackMapTable * initializeMapTable(J9JavaVM * javaVM, J9TR_Me
    return mapTable;
    }
 
-static VMINLINE TR_StackMapTable * findOrCreateMapTable(J9VMThread * currentThread, J9TR_MethodMetaData * metaData, UDATA fourByteOffsets)
+static VMINLINE TR_StackMapTable * findOrCreateMapTable(J9VMThread * currentThread, J9JavaVM * javaVM, J9TR_MethodMetaData * metaData, UDATA fourByteOffsets)
    {
    TR_StackMapTable * mapTablePtr = 0;
    assert(metaData);
 
    // In a signal handler, do not use or create the map tables. The tables may be in an inconsistent
    // state when interrupted by the signal, and malloc must not be called from a signal handler.
-   if (J9_ARE_NO_BITS_SET(currentThread->privateFlags2, J9_PRIVATE_FLAGS2_ASYNC_GET_CALL_TRACE))
+   if ((NULL != currentThread) && J9_ARE_NO_BITS_SET(currentThread->privateFlags2, J9_PRIVATE_FLAGS2_ASYNC_GET_CALL_TRACE))
       {
-      J9JavaVM * javaVM = currentThread->javaVM;
       if (metaData->bodyInfo &&
           (javaVM->phase == J9VM_PHASE_NOT_STARTUP || 0 == (javaVM->jitConfig->runtimeFlags & J9JIT_QUICKSTART))) // save footprint during startup in Xquickstart mode
          {
@@ -404,7 +403,7 @@ static void fastwalkDebug(J9TR_MethodMetaData * methodMetaData, UDATA offsetPC, 
    }
 #endif /* defined(DEBUG) */
 
-void jitGetMapsFromPC(J9VMThread * currentThread, J9TR_MethodMetaData * methodMetaData, UDATA jitPC, void * * stackMap, void * * inlineMap)
+void jitGetMapsFromPC(J9VMThread * currentThread, J9JavaVM * vm, J9TR_MethodMetaData * methodMetaData, UDATA jitPC, void * * stackMap, void * * inlineMap)
    {
    TR_MapIterator i;
    TR_StackMapTable * stackMapTable = 0;
@@ -435,7 +434,7 @@ void jitGetMapsFromPC(J9VMThread * currentThread, J9TR_MethodMetaData * methodMe
 
 #ifdef FASTWALK
 
-   stackMapTable = findOrCreateMapTable(currentThread, methodMetaData, fourByteOffsets);
+   stackMapTable = findOrCreateMapTable(currentThread, vm, methodMetaData, fourByteOffsets);
 
    if (stackMapTable)
       {
@@ -525,17 +524,17 @@ void jitGetMapsFromPC(J9VMThread * currentThread, J9TR_MethodMetaData * methodMe
       }
    }
 
-void * jitGetInlinerMapFromPC(J9VMThread * currentThread, J9TR_MethodMetaData * methodMetaData, UDATA jitPC)
+void * jitGetInlinerMapFromPC(J9VMThread * currentThread, J9JavaVM * vm, J9TR_MethodMetaData * methodMetaData, UDATA jitPC)
    {
    void * stackMap, * inlineMap;
-   jitGetMapsFromPC(currentThread, methodMetaData, jitPC, &stackMap, &inlineMap);
+   jitGetMapsFromPC(currentThread, vm, methodMetaData, jitPC, &stackMap, &inlineMap);
    return inlineMap;
    }
 
-void * getStackMapFromJitPC(J9VMThread * currentThread, J9TR_MethodMetaData * methodMetaData, UDATA jitPC)
+void * getStackMapFromJitPC(J9VMThread * currentThread, J9JavaVM * vm, J9TR_MethodMetaData * methodMetaData, UDATA jitPC)
    {
    void * stackMap, * inlineMap;
-   jitGetMapsFromPC(currentThread, methodMetaData, jitPC, &stackMap, &inlineMap);
+   jitGetMapsFromPC(currentThread, vm, methodMetaData, jitPC, &stackMap, &inlineMap);
    return stackMap;
    }
 
@@ -551,7 +550,7 @@ void * getStackAllocMapFromJitPC(J9VMThread * currentThread, J9TR_MethodMetaData
    if (curStackMap)
       stackMap = curStackMap;
    else
-      stackMap = getStackMapFromJitPC(currentThread, methodMetaData, jitPC);
+      stackMap = getStackMapFromJitPC(currentThread, currentThread->javaVM, methodMetaData, jitPC);
 
    stackAllocMap = (void **)((J9JITStackAtlas *) methodMetaData->gcStackAtlas)->stackAllocMap;
    if (stackAllocMap)
@@ -1396,6 +1395,7 @@ void walkJITFrameSlotsForInternalPointers(J9StackWalkState * walkState,  U_8 ** 
       internalPointersInRegisters = 1;
 
 
+   BOOLEAN offHeapAllocationEnabled = walkState->walkThread->javaVM->memoryManagerFunctions->j9gc_off_heap_allocation_enabled(walkState->walkThread->javaVM);
    while (i < numDistinctPinningArrays)
       {
       U_8 currPinningArrayIndex = *(tempJitDescriptionCursor++);
@@ -1403,7 +1403,6 @@ void walkJITFrameSlotsForInternalPointers(J9StackWalkState * walkState,  U_8 ** 
       J9Object ** currPinningArrayCursor = (J9Object **) (((U_8 *) walkState->bp) + (offsetOfFirstInternalPtr + (((U_16) currPinningArrayIndex * sizeof(UDATA)))));
       J9Object *oldPinningArrayAddress = *((J9Object **) currPinningArrayCursor);
       J9Object * newPinningArrayAddress;
-      IDATA displacement = 0;
 
 
 #ifdef J9VM_INTERP_STACKWALK_TRACING
@@ -1411,7 +1410,12 @@ void walkJITFrameSlotsForInternalPointers(J9StackWalkState * walkState,  U_8 ** 
 #endif
       walkState->objectSlotWalkFunction(walkState->walkThread, walkState, currPinningArrayCursor, currPinningArrayCursor);
       newPinningArrayAddress = *((J9Object **) currPinningArrayCursor);
-      displacement = (IDATA) (((UDATA)newPinningArrayAddress) - ((UDATA)oldPinningArrayAddress));
+
+      IDATA displacement = 0;
+
+      if (newPinningArrayAddress)
+         displacement = walkState->walkThread->javaVM->memoryManagerFunctions->j9gc_objaccess_indexableDataDisplacement(walkState->walkThread, (J9IndexableObject*)oldPinningArrayAddress, (J9IndexableObject*)newPinningArrayAddress);
+
       ++(walkState->slotIndex);
 
 #ifdef J9VM_INTERP_STACKWALK_TRACING
@@ -2017,7 +2021,7 @@ void * getInlinedMethod(void * inlinedCallSite)
 static void *getNotUnloadedInlinedCallSiteArrayElement(J9TR_MethodMetaData * methodMetaData, int cix)
    {
    void *inlinedCallSite = getInlinedCallSiteArrayElement(methodMetaData, cix);
-   while (isUnloadedInlinedMethod(getInlinedMethod(inlinedCallSite)))
+   while (inlinedCallSite && isUnloadedInlinedMethod(getInlinedMethod(inlinedCallSite)))
       {
       inlinedCallSite = getNextInlinedCallSite(methodMetaData, inlinedCallSite);
       if (!inlinedCallSite)
@@ -2102,12 +2106,18 @@ UDATA getByteCodeIndexFromStackMap(J9TR_MethodMetaData * methodMetaData, void * 
 
 UDATA getCurrentByteCodeIndexAndIsSameReceiver(J9TR_MethodMetaData * methodMetaData, void * stackMap, void * currentInlinedCallSite, UDATA * isSameReceiver)
    {
-   TR_ByteCodeInfo * byteCodeInfo = (TR_ByteCodeInfo *)getByteCodeInfoFromStackMap(methodMetaData, stackMap);
+   TR_ByteCodeInfo * byteCodeInfo = NULL;
 
-   if (currentInlinedCallSite)
+   if (methodMetaData && stackMap)
+      byteCodeInfo = (TR_ByteCodeInfo *)getByteCodeInfoFromStackMap(methodMetaData, stackMap);
+
+   if (isSameReceiver != 0)
+      *isSameReceiver = FALSE;
+
+   if (byteCodeInfo && currentInlinedCallSite)
       {
       void * inlinedCallSite = getFirstInlinedCallSiteWithByteCodeInfo(methodMetaData, stackMap, byteCodeInfo);
-      if (inlinedCallSite != currentInlinedCallSite)
+      if (inlinedCallSite && inlinedCallSite != currentInlinedCallSite)
          {
          void * previousInlinedCallSite;
          do
@@ -2115,11 +2125,11 @@ UDATA getCurrentByteCodeIndexAndIsSameReceiver(J9TR_MethodMetaData * methodMetaD
             previousInlinedCallSite = inlinedCallSite;
             inlinedCallSite = getNextInlinedCallSite(methodMetaData, inlinedCallSite);
             }
-         while (inlinedCallSite != currentInlinedCallSite);
+         while (inlinedCallSite && inlinedCallSite != currentInlinedCallSite);
          byteCodeInfo = (TR_ByteCodeInfo *)getByteCodeInfo(previousInlinedCallSite);
          }
       }
-   else if (byteCodeInfo->_callerIndex != -1)
+   else if (byteCodeInfo && byteCodeInfo->_callerIndex != -1)
       {
       void * inlinedCallSite = getFirstInlinedCallSiteWithByteCodeInfo(methodMetaData, stackMap, byteCodeInfo);
       void * prevInlinedCallSite = inlinedCallSite;
@@ -2128,15 +2138,21 @@ UDATA getCurrentByteCodeIndexAndIsSameReceiver(J9TR_MethodMetaData * methodMetaD
          prevInlinedCallSite = inlinedCallSite;
          inlinedCallSite = getNextInlinedCallSite(methodMetaData, inlinedCallSite);
          }
-      byteCodeInfo = (TR_ByteCodeInfo *)getByteCodeInfo(prevInlinedCallSite);
+      if (prevInlinedCallSite)
+         byteCodeInfo = (TR_ByteCodeInfo *)getByteCodeInfo(prevInlinedCallSite);
       if (inlinedCallSite)
          byteCodeInfo = (TR_ByteCodeInfo *)getByteCodeInfo(inlinedCallSite);
 
       }
 
-   if (isSameReceiver != 0)
-      *isSameReceiver = byteCodeInfo->_isSameReceiver;
-   return byteCodeInfo->_byteCodeIndex;
+   if (byteCodeInfo)
+      {
+      if (isSameReceiver != 0)
+         *isSameReceiver = byteCodeInfo->_isSameReceiver;
+      return byteCodeInfo->_byteCodeIndex;
+      }
+
+   return UDATA_MAX;
    }
 
 UDATA getJitPCOffsetFromExceptionHandler(J9TR_MethodMetaData * methodMetaData, void *jitPC)
@@ -2447,7 +2463,7 @@ void* preOSR(J9VMThread* currentThread, J9JITExceptionTable *metaData, void *pc)
    assert(metaData);
    assert(metaData->osrInfo);
 
-   jitGetMapsFromPC(currentThread, metaData, (UDATA) pc, &stackMap, &inlineMap);
+   jitGetMapsFromPC(currentThread, currentThread->javaVM, metaData, (UDATA) pc, &stackMap, &inlineMap);
    bcInfo = (TR_ByteCodeInfo*) getByteCodeInfoFromStackMap(metaData, inlineMap);
 /*
    printf("offset=%08X bytecode.caller=%d bytecode.index=%x\n",

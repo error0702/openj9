@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2001
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 /*
@@ -130,7 +130,7 @@ private:
 	InterfaceInjectionInfo _interfaceInjectionInfo;
 #endif /* J9VM_OPT_VALHALLA_VALUE_TYPES */
 
-	BuildResult handleAnonClassName(J9CfrClassFile *classfile, bool *isLambda, ROMClassCreationContext *context);
+	BuildResult handleAnonClassName(J9CfrClassFile *classfile, ROMClassCreationContext *context);
 #if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
 	BuildResult injectInterfaces(ClassFileOracle *classFileOracle);
 #endif /* J9VM_OPT_VALHALLA_VALUE_TYPES */
@@ -159,11 +159,26 @@ private:
 			ROMClassWriter *romClassWriter, SRPOffsetTable *srpOffsetTable, U_32 romSize, U_32 modifiers, U_32 extraModifiers, U_32 optionalFlags,
 			ROMClassStringInternManager *internManager, ROMClassCreationContext *context, SizeInformation *sizeInformation);
 
-	bool compareROMClassForEquality(U_8 *romClass, bool romClassIsShared,
-			ROMClassWriter *romClassWriter, SRPOffsetTable *srpOffsetTable, SRPKeyProducer *srpKeyProducer, ClassFileOracle *classFileOracle,
-			U_32 modifiers, U_32 extraModifiers, U_32 optionalFlags, ROMClassCreationContext * context, U_32 sizeToCompareForLambda, bool isLambda);
+	bool compareROMClassForEquality(
+			U_8 *romClass,
+			bool romClassIsShared,
+			ROMClassWriter *romClassWriter,
+			SRPOffsetTable *srpOffsetTable,
+			SRPKeyProducer *srpKeyProducer,
+			ClassFileOracle *classFileOracle,
+			U_32 modifiers,
+			U_32 extraModifiers,
+			U_32 optionalFlags,
+#if JAVA_SPEC_VERSION < 21
+			U_32 sizeToCompareForLambda,
+#endif /* JAVA_SPEC_VERSION < 21 */
+			ROMClassCreationContext *context);
+
 	SharedCacheRangeInfo getSharedCacheSRPRangeInfo(void *address);
 	void getSizeInfo(ROMClassCreationContext *context, ROMClassWriter *romClassWriter, SRPOffsetTable *srpOffsetTable, bool *countDebugDataOutOfLine, SizeInformation *sizeInformation);
+#if defined(J9VM_OPT_OPENJDK_METHODHANDLE)
+	bool isInjectedInvoker(void) const;
+#endif /* defined(J9VM_OPT_OPENJDK_METHODHANDLE) */
 };
 
 #endif /* ROMCLASSBUILDER_HPP_ */

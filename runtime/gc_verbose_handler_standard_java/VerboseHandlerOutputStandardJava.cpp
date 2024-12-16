@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "j9modron.h"
@@ -38,9 +38,9 @@
 #include "VerboseHandlerJava.hpp"
 
 #if defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING)
-static void verboseHandlerClassUnloadingEnd(J9HookInterface** hook, UDATA eventNum, void* eventData, void* userData);
+static void verboseHandlerClassUnloadingEnd(J9HookInterface** hook, uintptr_t eventNum, void* eventData, void* userData);
 #endif /* defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING) */
-static void verboseHandlerSlowExclusive(J9HookInterface **hook, UDATA eventNum, void *eventData, void *userData);
+static void verboseHandlerSlowExclusive(J9HookInterface **hook, uintptr_t eventNum, void *eventData, void *userData);
 
 MM_VerboseHandlerOutput *
 MM_VerboseHandlerOutputStandardJava::newInstance(MM_EnvironmentBase *env, MM_VerboseManager *manager)
@@ -50,7 +50,7 @@ MM_VerboseHandlerOutputStandardJava::newInstance(MM_EnvironmentBase *env, MM_Ver
 	MM_VerboseHandlerOutputStandardJava *verboseHandlerOutput = (MM_VerboseHandlerOutputStandardJava *)extensions->getForge()->allocate(sizeof(MM_VerboseHandlerOutputStandardJava), MM_AllocationCategory::FIXED, J9_GET_CALLSITE());
 	if (NULL != verboseHandlerOutput) {
 		new(verboseHandlerOutput) MM_VerboseHandlerOutputStandardJava(extensions);
-		if(!verboseHandlerOutput->initialize(env, manager)) {
+		if (!verboseHandlerOutput->initialize(env, manager)) {
 			verboseHandlerOutput->kill(env);
 			verboseHandlerOutput = NULL;
 		}
@@ -76,9 +76,10 @@ MM_VerboseHandlerOutputStandardJava::tearDown(MM_EnvironmentBase *env)
 }
 
 void
-MM_VerboseHandlerOutputStandardJava::outputMemoryInfoInnerStanzaInternal(MM_EnvironmentBase *env, UDATA indent, MM_CollectionStatistics *statsBase)
+MM_VerboseHandlerOutputStandardJava::outputMemoryInfoInnerStanzaInternal(MM_EnvironmentBase *env, uintptr_t indent, MM_CollectionStatistics *statsBase)
 {
 	MM_VerboseHandlerJava::outputFinalizableInfo(_manager, env, indent);
+	outputContinuationObjectInfo(env, indent);
 }
 
 void
@@ -106,7 +107,7 @@ MM_VerboseHandlerOutputStandardJava::disableVerbose()
 }
 
 bool
-MM_VerboseHandlerOutputStandardJava::getThreadName(char *buf, UDATA bufLen, OMR_VMThread *vmThread)
+MM_VerboseHandlerOutputStandardJava::getThreadName(char *buf, uintptr_t bufLen, OMR_VMThread *vmThread)
 {
 	return MM_VerboseHandlerJava::getThreadName(buf,bufLen,vmThread);
 }
@@ -118,15 +119,15 @@ MM_VerboseHandlerOutputStandardJava::writeVmArgs(MM_EnvironmentBase* env, MM_Ver
 }
 
 void
-MM_VerboseHandlerOutputStandardJava::outputUnfinalizedInfo(MM_EnvironmentBase *env, UDATA indent, UDATA unfinalizedCandidates, UDATA unfinalizedEnqueuedCount)
+MM_VerboseHandlerOutputStandardJava::outputUnfinalizedInfo(MM_EnvironmentBase *env, uintptr_t indent, uintptr_t unfinalizedCandidates, uintptr_t unfinalizedEnqueuedCount)
 {
-	if(0 != unfinalizedCandidates) {
+	if (0 != unfinalizedCandidates) {
 		_manager->getWriterChain()->formatAndOutput(env, indent, "<finalization candidates=\"%zu\" enqueued=\"%zu\" />", unfinalizedCandidates, unfinalizedEnqueuedCount);
 	}
 }
 
 void
-MM_VerboseHandlerOutputStandardJava::outputOwnableSynchronizerInfo(MM_EnvironmentBase *env, UDATA indent, UDATA ownableSynchronizerCandidates, UDATA ownableSynchronizerCleared)
+MM_VerboseHandlerOutputStandardJava::outputOwnableSynchronizerInfo(MM_EnvironmentBase *env, uintptr_t indent, uintptr_t ownableSynchronizerCandidates, uintptr_t ownableSynchronizerCleared)
 {
 	if (0 != ownableSynchronizerCandidates) {
 		_manager->getWriterChain()->formatAndOutput(env, indent, "<ownableSynchronizers candidates=\"%zu\" cleared=\"%zu\" />", ownableSynchronizerCandidates, ownableSynchronizerCleared);
@@ -134,9 +135,26 @@ MM_VerboseHandlerOutputStandardJava::outputOwnableSynchronizerInfo(MM_Environmen
 }
 
 void
-MM_VerboseHandlerOutputStandardJava::outputReferenceInfo(MM_EnvironmentBase *env, UDATA indent, const char *referenceType, MM_ReferenceStats *referenceStats, UDATA dynamicThreshold, UDATA maxThreshold)
+MM_VerboseHandlerOutputStandardJava::outputContinuationInfo(MM_EnvironmentBase *env, uintptr_t indent, uintptr_t continuationCandidates, uintptr_t continuationCleared)
 {
-	if(0 != referenceStats->_candidates) {
+	if (0 != continuationCandidates) {
+		_manager->getWriterChain()->formatAndOutput(env, indent, "<continuations candidates=\"%zu\" cleared=\"%zu\" />", continuationCandidates, continuationCleared);
+	}
+}
+
+void
+MM_VerboseHandlerOutputStandardJava::outputContinuationObjectInfo(MM_EnvironmentBase *env, uintptr_t indent)
+{
+	MM_ContinuationStats *continuationStats = &MM_GCExtensions::getExtensions(env->getOmrVM())->continuationStats;
+	if (0 != continuationStats->_total) {
+		_manager->getWriterChain()->formatAndOutput(env, indent, "<continuation-objects total=\"%zu\" started=\"%zu\"/>", continuationStats->_total, continuationStats->_started);
+	}
+}
+
+void
+MM_VerboseHandlerOutputStandardJava::outputReferenceInfo(MM_EnvironmentBase *env, uintptr_t indent, const char *referenceType, MM_ReferenceStats *referenceStats, uintptr_t dynamicThreshold, uintptr_t maxThreshold)
+{
+	if (0 != referenceStats->_candidates) {
 		if (0 != maxThreshold) {
 			_manager->getWriterChain()->formatAndOutput(env, indent, "<references type=\"%s\" candidates=\"%zu\" cleared=\"%zu\" enqueued=\"%zu\" dynamicThreshold=\"%zu\" maxThreshold=\"%zu\" />",
 					referenceType, referenceStats->_candidates, referenceStats->_cleared, referenceStats->_enqueued, dynamicThreshold, maxThreshold);
@@ -158,6 +176,8 @@ MM_VerboseHandlerOutputStandardJava::handleMarkEndInternal(MM_EnvironmentBase* e
 
 	outputOwnableSynchronizerInfo(env, 1, markJavaStats->_ownableSynchronizerCandidates, markJavaStats->_ownableSynchronizerCleared);
 
+	outputContinuationInfo(env, 1, markJavaStats->_continuationCandidates, markJavaStats->_continuationCleared);
+
 	outputReferenceInfo(env, 1, "soft", &markJavaStats->_softReferenceStats, extensions->getDynamicMaxSoftReferenceAge(), extensions->getMaxSoftReferenceAge());
 	outputReferenceInfo(env, 1, "weak", &markJavaStats->_weakReferenceStats, 0, 0);
 	outputReferenceInfo(env, 1, "phantom", &markJavaStats->_phantomReferenceStats, 0, 0);
@@ -172,7 +192,7 @@ MM_VerboseHandlerOutputStandardJava::handleMarkEndInternal(MM_EnvironmentBase* e
 }
 
 void
-MM_VerboseHandlerOutputStandardJava::handleSlowExclusive(J9HookInterface **hook, UDATA eventNum, void *eventData)
+MM_VerboseHandlerOutputStandardJava::handleSlowExclusive(J9HookInterface **hook, uintptr_t eventNum, void *eventData)
 {
 	J9VMSlowExclusiveEvent *event = (J9VMSlowExclusiveEvent *) eventData;
 	MM_EnvironmentBase *env = MM_EnvironmentBase::getEnvironment(event->currentThread->omrVMThread);
@@ -191,7 +211,7 @@ MM_VerboseHandlerOutputStandardJava::handleSlowExclusive(J9HookInterface **hook,
 
 #if defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING)
 void
-MM_VerboseHandlerOutputStandardJava::handleClassUnloadEnd(J9HookInterface** hook, UDATA eventNum, void* eventData)
+MM_VerboseHandlerOutputStandardJava::handleClassUnloadEnd(J9HookInterface** hook, uintptr_t eventNum, void* eventData)
 {
 	MM_ClassUnloadingEndEvent* event = (MM_ClassUnloadingEndEvent*)eventData;
 	MM_EnvironmentBase* env = MM_EnvironmentBase::getEnvironment(event->currentThread->omrVMThread);
@@ -240,6 +260,8 @@ MM_VerboseHandlerOutputStandardJava::handleScavengeEndInternal(MM_EnvironmentBas
 		outputUnfinalizedInfo(env, 1, scavengerJavaStats->_unfinalizedCandidates, scavengerJavaStats->_unfinalizedEnqueued);
 
 		outputOwnableSynchronizerInfo(env, 1, scavengerJavaStats->_ownableSynchronizerCandidates, (scavengerJavaStats->_ownableSynchronizerCandidates - scavengerJavaStats->_ownableSynchronizerTotalSurvived));
+
+		outputContinuationInfo(env, 1, scavengerJavaStats->_continuationCandidates, (scavengerJavaStats->_continuationCleared));
 
 		outputReferenceInfo(env, 1, "soft", &scavengerJavaStats->_softReferenceStats, extensions->getDynamicMaxSoftReferenceAge(), extensions->getMaxSoftReferenceAge());
 		outputReferenceInfo(env, 1, "weak", &scavengerJavaStats->_weakReferenceStats, 0, 0);
@@ -318,14 +340,14 @@ MM_VerboseHandlerOutputStandardJava::handleConcurrentHaltedInternal(MM_Environme
 
 #if defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING)
 void
-verboseHandlerClassUnloadingEnd(J9HookInterface** hook, UDATA eventNum, void* eventData, void* userData)
+verboseHandlerClassUnloadingEnd(J9HookInterface** hook, uintptr_t eventNum, void* eventData, void* userData)
 {
 	((MM_VerboseHandlerOutputStandardJava *)userData)->handleClassUnloadEnd(hook, eventNum, eventData);
 }
 #endif /* defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING) */
 
 void
-verboseHandlerSlowExclusive(J9HookInterface **hook, UDATA eventNum, void *eventData, void *userData)
+verboseHandlerSlowExclusive(J9HookInterface **hook, uintptr_t eventNum, void *eventData, void *userData)
 {
 	((MM_VerboseHandlerOutputStandardJava *)userData)->handleSlowExclusive(hook, eventNum, eventData);
 }

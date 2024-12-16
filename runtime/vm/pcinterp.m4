@@ -1,4 +1,4 @@
-dnl Copyright (c) 2017, 2021 IBM Corp. and others
+dnl Copyright IBM Corp. and others 2017
 dnl
 dnl This program and the accompanying materials are made available under
 dnl the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,9 +14,9 @@ dnl Exception [1] and GNU General Public License, version 2 with the
 dnl OpenJDK Assembly Exception [2].
 dnl
 dnl [1] https://www.gnu.org/software/classpath/license.html
-dnl [2] http://openjdk.java.net/legal/assembly-exception.html
+dnl [2] https://openjdk.org/legal/assembly-exception.html
 dnl
-dnl SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+dnl SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
 
 include(phelpers.m4)
 
@@ -76,7 +76,7 @@ ifdef({SAVE_R13},{
 	SAVE_FPR(29)
 	SAVE_FPR(30)
 	SAVE_FPR(31)
- 	mr J9VMTHREAD,r3
+	mr J9VMTHREAD,r3
 	laddr r4,J9TR_VMThread_entryLocalStorage(J9VMTHREAD)
 	addi r0,r1,JIT_GPR_SAVE_OFFSET(0)
 	staddr r0,J9TR_ELS_jitGlobalStorageBase(r4)
@@ -130,6 +130,8 @@ ifdef({ASM_J9VM_ENV_DATA64},{
 	CALL_INDIRECT
 	cmpliaddr r3,J9TR_bcloop_exit_interpreter
 	beq .L_cInterpExit
+	cmpliaddr r3,J9TR_bcloop_reenter_interpreter
+	beq .L_cInterpOnCStack
 	RESTORE_PRESERVED_REGS
 	RESTORE_LR
 	SWITCH_TO_JAVA_STACK

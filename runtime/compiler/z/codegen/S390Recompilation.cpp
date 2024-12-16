@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "z/codegen/S390Recompilation.hpp"
@@ -192,8 +192,6 @@ TR_S390Recompilation::generatePrePrologue()
       // AOT relocation for the interpreter glue address
       TR::S390EncodingRelocation* encodingRelocation = new (cg->trHeapMemory()) TR::S390EncodingRelocation(TR_AbsoluteHelperAddress, helperSymRef);
 
-      AOTcgDiag4(comp, "Add encodingRelocation = %p reloType = %p symbolRef = %p helperId = %x\n", encodingRelocation, encodingRelocation->getReloType(), encodingRelocation->getSymbolReference(), TR_S390samplingRecompileMethod);
-
       const intptr_t samplingRecompileMethodAddress = reinterpret_cast<intptr_t>(helperSymRef->getMethodAddress());
 
       // Encode the address of the sampling method
@@ -235,8 +233,6 @@ TR_S390Recompilation::generatePrePrologue()
 
    // AOT relocation for the body info
    TR::S390EncodingRelocation* encodingRelocation = new (cg->trHeapMemory()) TR::S390EncodingRelocation(TR_BodyInfoAddress, NULL);
-
-   AOTcgDiag3(comp, "Add encodingRelocation = %p reloType = %p symbolRef = %p\n", encodingRelocation, encodingRelocation->getReloType(), encodingRelocation->getSymbolReference());
 
    const intptr_t bodyInfoAddress = reinterpret_cast<intptr_t>(getJittedBodyInfo());
 
@@ -406,8 +402,6 @@ TR_S390Recompilation::generatePrologue(TR::Instruction* cursor)
    // AOT relocation for the helper address
    TR::S390EncodingRelocation* encodingRelocation = new (cg->trHeapMemory()) TR::S390EncodingRelocation(TR_AbsoluteHelperAddress, NULL);
 
-   AOTcgDiag4(comp, "Add encodingRelocation = %p reloType = %p symbolRef = %p helperId = %x\n", encodingRelocation, encodingRelocation->getReloType(), encodingRelocation->getSymbolReference(), TR_S390countingRecompileMethod);
-
    const intptr_t countingRecompileMethodAddress = reinterpret_cast<intptr_t>(helperSymRef->getMethodAddress());
 
    if (comp->target().is64Bit())
@@ -490,8 +484,6 @@ TR_S390Recompilation::generatePrologue(TR::Instruction* cursor)
 
    // AOT relocation for the helper address
    encodingRelocation = new (cg->trHeapMemory()) TR::S390EncodingRelocation(TR_AbsoluteHelperAddress, NULL);
-
-   AOTcgDiag4(comp, "Add encodingRelocation = %p reloType = %p symbolRef = %p helperId = %x\n", encodingRelocation, encodingRelocation->getReloType(), encodingRelocation->getSymbolReference(), TR_S390countingPatchCallSite);
 
    const intptr_t countingPatchCallSiteAddress = reinterpret_cast<intptr_t>(helperSymRef->getMethodAddress());
 

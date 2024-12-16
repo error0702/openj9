@@ -1,6 +1,6 @@
 /*[INCLUDE-IF Sidecar17 & !OPENJDK_METHODHANDLES]*/
-/*******************************************************************************
- * Copyright (c) 2009, 2020 IBM Corp. and others
+/*
+ * Copyright IBM Corp. and others 2009
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,10 +16,10 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
 package java.lang.invoke;
 
 import java.lang.reflect.Field;
@@ -32,18 +32,18 @@ import static java.lang.invoke.MethodHandleResolver.UNSAFE;
  * a static field.
  * <p>
  * vmSlot will hold the Unsafe field offset + low tag.
- * 
+ *
  */
 final class StaticFieldGetterHandle extends FieldHandle {
-	
+
 	StaticFieldGetterHandle(Class<?> referenceClass, String fieldName, Class<?> fieldClass, Class<?> accessClass) throws IllegalAccessException, NoSuchFieldException {
 		super(fieldMethodType(fieldClass), referenceClass, fieldName, fieldClass, KIND_GETSTATICFIELD, accessClass);
 	}
-	
+
 	StaticFieldGetterHandle(Field field) throws IllegalAccessException {
 		super(fieldMethodType(field.getType()), field, KIND_GETSTATICFIELD, true);
 	}
-	
+
 	StaticFieldGetterHandle(StaticFieldGetterHandle originalHandle, MethodType newType) {
 		super(originalHandle, newType);
 	}
@@ -125,4 +125,3 @@ final class StaticFieldGetterHandle extends FieldHandle {
 		compareWithField(left, c);
 	}
 }
-

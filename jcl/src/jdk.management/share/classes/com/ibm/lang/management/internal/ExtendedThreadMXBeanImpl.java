@@ -1,6 +1,6 @@
 /*[INCLUDE-IF Sidecar18-SE]*/
-/*******************************************************************************
- * Copyright (c) 2007, 2016 IBM Corp. and others
+/*
+ * Copyright IBM Corp. and others 2007
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,10 +16,10 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
 package com.ibm.lang.management.internal;
 
 import java.lang.management.ThreadInfo;
@@ -37,7 +37,7 @@ public final class ExtendedThreadMXBeanImpl extends ThreadMXBeanImpl implements 
 
 	/**
 	 * Singleton accessor method.
-	 * 
+	 *
 	 * @return the <code>ExtendedThreadMXBeanImpl</code> singleton.
 	 */
 	public static ThreadMXBean getInstance() {
@@ -67,4 +67,138 @@ public final class ExtendedThreadMXBeanImpl extends ThreadMXBeanImpl implements 
 		return resultArray;
 	}
 
+	private native static long getThreadAllocatedBytesImpl(long threadID);
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	public long getThreadAllocatedBytes(long threadId) {
+		if (isThreadAllocatedMemorySupported()) {
+			if (isThreadAllocatedMemoryEnabled()) {
+				return getThreadAllocatedBytesImpl(threadId);
+			} else {
+				return -1;
+			}
+		} else {
+			throw new UnsupportedOperationException();
+		}
+	}
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	public long[] getThreadAllocatedBytes(long[] threadIds) {
+		int length = threadIds.length;
+		long[] allocatedBytes = new long[length];
+
+		for (int i = 0; i < length; i++) {
+			allocatedBytes[i] = getThreadAllocatedBytes(threadIds[i]);
+		}
+
+		return allocatedBytes;
+	}
+
+	/*[IF Sidecar18-SE-OpenJ9]*/
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	/*[ENDIF] Sidecar18-SE-OpenJ9 */
+	public long getTotalThreadAllocatedBytes() {
+		if (!isThreadAllocatedMemorySupported()) {
+			throw new UnsupportedOperationException();
+		}
+		if (!isThreadAllocatedMemoryEnabled()) {
+			return -1;
+		}
+		long total = 0;
+		long[] allocatedBytes = getThreadAllocatedBytes(getAllThreadIds());
+		for (long threadAllocated : allocatedBytes) {
+			if (threadAllocated != -1) {
+				total += threadAllocated;
+			}
+		}
+		return total;
+	}
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	public long[] getThreadCpuTime(long[] threadIds) {
+		long[] result = new long[threadIds.length];
+		for (int i = 0; i < threadIds.length; i++) {
+			if (threadIds[i] <= 0) {
+				/*[MSG "K05F7", "Thread id must be greater than 0."]*/
+				throw new IllegalArgumentException(com.ibm.oti.util.Msg.getString("K05F7")); //$NON-NLS-1$
+			}
+			result[i] = -1;
+		}
+		if (isCurrentThreadCpuTimeSupported()) {
+			if (isThreadCpuTimeEnabled()) {
+				for (int i = 0; i < threadIds.length; i++) {
+					result[i] = getThreadCpuTime(threadIds[i]);
+				}
+			}
+		} else {
+			/*[MSG "K05F6", "CPU time measurement is not supported on this virtual machine."]*/
+			throw new UnsupportedOperationException(com.ibm.oti.util.Msg.getString("K05F6")); //$NON-NLS-1$
+		}
+		return result;
+	}
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	public long[] getThreadUserTime(long[] threadIds) {
+		long[] result = new long[threadIds.length];
+		for (int i = 0; i < threadIds.length; i++) {
+			if (threadIds[i] <= 0) {
+				/*[MSG "K05F7", "Thread id must be greater than 0."]*/
+				throw new IllegalArgumentException(com.ibm.oti.util.Msg.getString("K05F7")); //$NON-NLS-1$
+			}
+			result[i] = -1;
+		}
+		if (isCurrentThreadCpuTimeSupported()) {
+			if (isThreadCpuTimeEnabled()) {
+				for (int i = 0; i < threadIds.length; i++) {
+					result[i] = getThreadUserTime(threadIds[i]);
+				}
+			}
+		} else {
+			/*[MSG "K05F6", "CPU time measurement is not supported on this virtual machine."]*/
+			throw new UnsupportedOperationException(com.ibm.oti.util.Msg.getString("K05F6")); //$NON-NLS-1$
+		}
+		return result;
+	}
+
+	private boolean isThreadAllocatedMemoryEnabled = true;
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	public boolean isThreadAllocatedMemorySupported() {
+		/* Currently, this capability is always supported. */
+		return true;
+	}
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	public boolean isThreadAllocatedMemoryEnabled() {
+		return isThreadAllocatedMemoryEnabled && isThreadAllocatedMemorySupported();
+	}
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	public void setThreadAllocatedMemoryEnabled(boolean value) {
+		isThreadAllocatedMemoryEnabled = value;
+	}
 }

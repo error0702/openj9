@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "j9.h"
@@ -54,6 +54,7 @@ typedef struct MemRecord {
 static omrthread_monitor_t MemMonitor = NULL;
 static J9Pool* MemPoolGlobal = NULL;
 static BOOLEAN optionFatal = FALSE;
+J9JavaVM* globalJavaVM = NULL;
 
 static jboolean jniCheckIsSameObject (JNIEnv * env, jobject ref1, jobject ref2);
 static UDATA checkArrayCrc (JNIEnv * env, const char *acquireFunction, const char *releaseFunction, jobject object, const void *memory, jint mode, MemRecord * poolElement);
@@ -104,7 +105,7 @@ jniRecordMemoryAcquire(JNIEnv* env, const char* functionName, jobject object, co
 		if (optionFatal) {
 			omrthread_monitor_exit(MemMonitor);
 		}
-		jniCheckFatalErrorNLS(env, J9NLS_JNICHK_OUT_OF_MEMORY, functionName);
+		jniCheckFatalErrorNLS(J9NLS_JNICHK_OUT_OF_MEMORY, functionName);
 	} else {
 		poolElement->env = env;
 		poolElement->acquireFunction = functionName;
@@ -124,6 +125,8 @@ jint
 jniCheckMemoryInit(J9JavaVM* javaVM) 
 {
 	PORT_ACCESS_FROM_JAVAVM(javaVM);
+
+	globalJavaVM = javaVM;
 
 	omrthread_monitor_t globalMonitor = omrthread_global_monitor();
 	if (J9_ARE_NO_BITS_SET(javaVM->checkJNIData.options, JNICHK_NONFATAL)) {
@@ -171,7 +174,7 @@ jniRecordMemoryRelease(JNIEnv* env, const char* acquireFunction, const char* rel
 		case JNI_ABORT:
 			break;
 		default:
-			jniCheckFatalErrorNLS(env, J9NLS_JNICHK_UNRECOGNIZED_MODE, releaseFunction, mode);
+			jniCheckFatalErrorNLS(J9NLS_JNICHK_UNRECOGNIZED_MODE, releaseFunction, mode);
 			return;
 	}
 
@@ -189,7 +192,7 @@ jniRecordMemoryRelease(JNIEnv* env, const char* acquireFunction, const char* rel
 			if (optionFatal) {
 				omrthread_monitor_exit(MemMonitor);
 			}
-			jniCheckFatalErrorNLS(env, J9NLS_JNICHK_BAD_POINTER, releaseFunction, memory);
+			jniCheckFatalErrorNLS(J9NLS_JNICHK_BAD_POINTER, releaseFunction, memory);
 			break;
 		}
 
@@ -199,13 +202,13 @@ jniRecordMemoryRelease(JNIEnv* env, const char* acquireFunction, const char* rel
 			omrthread_monitor_exit(MemMonitor);
 
 			if (!jniCheckIsSameObject(env, poolElement->object, object)) {
-				jniCheckFatalErrorNLS(env, J9NLS_JNICHK_WRONG_OBJECT, 
+				jniCheckFatalErrorNLS(J9NLS_JNICHK_WRONG_OBJECT,
 					releaseFunction,
 					memory, 
 					poolElement->originalObject,
 					object);
 			} else if (strcmp(poolElement->acquireFunction, acquireFunction) != 0) {
-				jniCheckFatalErrorNLS(env, J9NLS_JNICHK_WRONG_FUNCTION,
+				jniCheckFatalErrorNLS(J9NLS_JNICHK_WRONG_FUNCTION,
 					releaseFunction, 
 					releaseFunction, 
 					memory, 
@@ -271,13 +274,11 @@ checkArrayCrc(JNIEnv * env, const char *acquireFunction, const char *releaseFunc
 
 	if (!isCopy) {
 		if (mode == JNI_COMMIT) {
-			jniCheckAdviceNLS(env, 
-				J9NLS_JNICHK_IGNORING_JNI_COMMIT,
+			jniCheckAdviceNLS(J9NLS_JNICHK_IGNORING_JNI_COMMIT,
 				releaseFunction,
 				poolElement->acquireFunction);
 		} else if (mode == JNI_ABORT && bufCrc != poolElement->crc) {
-			jniCheckAdviceNLS(env, 
-				J9NLS_JNICHK_IGNORING_JNI_ABORT,
+			jniCheckAdviceNLS(J9NLS_JNICHK_IGNORING_JNI_ABORT,
 				releaseFunction,
 				poolElement->crc,
 				bufCrc, 
@@ -287,13 +288,12 @@ checkArrayCrc(JNIEnv * env, const char *acquireFunction, const char *releaseFunc
 		switch (mode) {
 		case 0:
 			if (bufCrc == poolElement->crc) {
-				jniCheckAdviceNLS(env, J9NLS_JNICHK_CONSIDER_JNI_ABORT, releaseFunction);
+				jniCheckAdviceNLS(J9NLS_JNICHK_CONSIDER_JNI_ABORT, releaseFunction);
 			}
 			/* FALL THROUGH */
 		case JNI_COMMIT:
 			if (isCopy && arrayCrc != poolElement->crc) {
-				jniCheckWarningNLS(env, 
-						J9NLS_JNICHK_ARRAY_DATA_MODIFIED,
+				jniCheckWarningNLS(J9NLS_JNICHK_ARRAY_DATA_MODIFIED,
 						releaseFunction, 
 						poolElement->acquireFunction,
 						releaseFunction, 
@@ -326,8 +326,7 @@ jniCheckForUnreleasedMemory(JNIEnv* env)
 	while (poolElement) {
 		if (poolElement->env == env) {
 			if ( poolElement->frameOffset == frameOffset ) {
-				jniCheckWarningNLS(env, 
-					J9NLS_JNICHK_ARRAY_MEMORY_NOT_RELEASED,
+				jniCheckWarningNLS(J9NLS_JNICHK_ARRAY_MEMORY_NOT_RELEASED,
 					poolElement->memory,
 					poolElement->acquireFunction);
 

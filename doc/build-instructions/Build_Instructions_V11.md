@@ -1,5 +1,5 @@
 <!--
-Copyright (c) 2018, 2021 IBM Corp. and others
+Copyright IBM Corp. and others 2018
 
 This program and the accompanying materials are made available under
 the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@ Exception [1] and GNU General Public License, version 2 with the
 OpenJDK Assembly Exception [2].
 
 [1] https://www.gnu.org/software/classpath/license.html
-[2] http://openjdk.java.net/legal/assembly-exception.html
+[2] https://openjdk.org/legal/assembly-exception.html
 
-SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
 -->
 
 Building OpenJDK Version 11 with OpenJ9
@@ -56,27 +56,27 @@ See [AArch64 section](#aarch64) for building for AArch64 Linux.
 :penguin:
 Instructions are provided for preparing your system with and without the use of Docker technology.
 
-Skip to [Setting up your build environment without Docker](#setting-up-your-build-environment-without-docker).
+Obtain the [docker build script](https://github.com/eclipse-openj9/openj9/blob/master/buildenv/docker/mkdocker.sh) to determine the correct software pre-requisites for both.
+
+Download the docker build script to your local system or copy and paste the following command:
+
+```
+wget https://raw.githubusercontent.com/eclipse-openj9/openj9/master/buildenv/docker/mkdocker.sh
+```
+
+Optionally, skip to [Setting up your build environment without Docker](#setting-up-your-build-environment-without-docker).
 
 #### Setting up your build environment with Docker :whale:
 If you want to build a binary by using a Docker container, follow these steps to prepare your system:
 
 1. The first thing you need to do is install Docker. You can download the free Community edition from [here](https://docs.docker.com/engine/installation/), which also contains instructions for installing Docker on your system.  You should also read the [Getting started](https://docs.docker.com/get-started/) guide to familiarise yourself with the basic Docker concepts and terminology.
 
-2. Obtain the [docker build script](https://github.com/eclipse-openj9/openj9/blob/master/buildenv/docker/mkdocker.sh) to build and run a container that has all the correct software pre-requisites.
-
-Download the docker build script to your local system or copy and paste the following command:```
-
+2. Next, run the following command to build a Docker image, called **openj9**:
 ```
-wget https://raw.githubusercontent.com/eclipse-openj9/openj9/master/buildenv/docker/mkdocker.sh
+bash mkdocker.sh --tag=openj9 --dist=ubuntu --version=22 --gitcache=no --jdk=11 --build
 ```
 
-3. Next, run the following command to build a Docker image, called **openj9**:
-```
-bash mkdocker.sh --tag=openj9 --dist=ubuntu --version=16.04 --gitcache=no --jdk=11 --build
-```
-
-4. Start a Docker container from the **openj9** image with the following command, where `-v` maps any directory, `<host_directory>`,
+3. Start a Docker container from the **openj9** image with the following command, where `-v` maps any directory, `<host_directory>`,
 on your local system to the containers `/root/hostdir` directory so that you can store the binaries, once they are built:
 ```
 docker run -v <host_directory>:/root/hostdir -it openj9
@@ -91,7 +91,7 @@ Now that you have the Docker image running, you are ready to move to the next st
 If you don't want to user Docker, you can still build directly on your Ubuntu system or in a Ubuntu virtual machine. Use the output of the following command like a recipe card to determine the software dependencies that must be installed on the system, plus a few configuration steps.
 
 ```
-bash mkdocker.sh --tag=openj9 --dist=ubuntu --version=16.04 --gitcache=no --jdk=11 --print
+bash mkdocker.sh --tag=openj9 --dist=ubuntu --version=22 --gitcache=no --jdk=11 --print
 ```
 
 1. Install the list of dependencies that can be obtained with the `apt-get` command from the following section of the Dockerfile:
@@ -101,11 +101,11 @@ apt-get update \
     ...
 ```
 
-2. The previous step installed g++-7 and gcc-7 packages, which might be different
+2. The previous step installed g++-11 and gcc-11 packages, which might be different
 than the default version installed on your system. Export variables to set the
 version used in the build.
 ```
-export CC=gcc-7 CXX=g++-7
+export CC=gcc-11 CXX=g++-11
 ```
 
 3. Only when building with `--with-cmake=no`, download and setup `freemarker.jar` into a directory.
@@ -140,7 +140,7 @@ Now fetch additional sources from the Eclipse OpenJ9 project and its clone of Ec
 bash get_source.sh
 ```
 
-:pencil: **OpenSSL support:** If you want to build an OpenJDK with OpenJ9 binary with OpenSSL support and you do not have a built version of OpenSSL v1.1.x available locally, you must specify `--openssl-version=<version>` where `<version>` is an OpenSSL level like 1.1.0 or 1.1.1. If the specified version of OpenSSL is already available in the standard location (SRC_DIR/openssl), `get_source.sh` uses it. Otherwise, the script deletes the content and downloads the specified version of OpenSSL source to the standard location and builds it. If you already have the version of OpenSSL in the standard location but you want a fresh copy, you must delete your current copy.
+:pencil: **OpenSSL support:** If you want to build an OpenJDK with OpenJ9 binary with OpenSSL support and you do not have a built version of OpenSSL v3.x available locally, you must specify `-openssl-branch=<branch>` where `<branch>` is an OpenSSL branch (or tag) like `openssl-3.0.13`. If the specified version of OpenSSL is already available in the standard location (SRC_DIR/openssl), `get_source.sh` uses it. Otherwise, the script deletes the content and downloads the specified version of OpenSSL source to the standard location and builds it. If you already have the version of OpenSSL in the standard location but you want a fresh copy, you must delete your current copy.
 
 ### 3. Configure
 :penguin:
@@ -149,6 +149,10 @@ When you have all the source files that you need, run the configure script, whic
 bash configure --with-boot-jdk=/home/jenkins/bootjdks/jdk11
 ```
 :warning: The path in the example --with-boot-jdk= option is appropriate for the Docker installation. If not using the Docker environment, set the path appropriate for your setup, such as "<my_home_dir>/bootjdk11" as setup in the previous instructions.
+
+:pencil: Configuring and building is not specific to OpenJ9 but uses the OpenJDK build infrastructure with OpenJ9 added.
+Many other configuration options are available, including options to increase the verbosity of the build output to include command lines (`LOG=cmdlines`), more info or debug information.
+For more information see [OpenJDK build troubleshooting](https://htmlpreview.github.io/?https://raw.githubusercontent.com/openjdk/jdk11u/master/doc/building.html#troubleshooting).
 
 :pencil: **Mixed and compressed references support:** Different types of 64-bit builds can be created:
 - [compressed references](https://www.eclipse.org/openj9/docs/gc_overview/#compressed-references) (only)
@@ -187,11 +191,16 @@ A binary for the full developer kit (jdk) is built and stored in the following d
 
 - **build/linux-x86_64-normal-server-release/images/jdk**
 
-    :whale: If you built your binaries in a Docker container, copy the binaries to the containers **/root/hostdir** directory so that you can access them on your local system. You'll find them in the directory you set for `<host_directory>` when you started your Docker container. See [Setting up your build environment with Docker](#setting-up-your-build-environment-with-docker).
+    :whale: If you built your binaries in a Docker container, copy the binaries to the containers **/root/hostdir** directory so that you can access them on your local system. You'll find them in the directory you set for `<host_directory>` when you started your Docker container. See [Setting up your build environment with Docker](#setting-up-your-build-environment-with-docker-whale).
 
     :pencil: On other architectures the **/jdk** directory is in **build/linux-ppc64le-normal-server-release/images** (Linux on 64-bit Power systems) and **build/linux-s390x-normal-server-release/images** (Linux on 64-bit z Systems).
 
-    :pencil: If you want a binary for the runtime environment (jre), you must run `make legacy-jre-image`, which produces a jre build in the **build/linux-x86_64-normal-server-release/images/jre** directory.
+:pencil: If you want a binary for the runtime environment (jre), you must run `make legacy-jre-image`, which produces a jre build in the **build/linux-x86_64-normal-server-release/images/jre** directory.
+
+:pencil: One of the images created with `make all` is the `debug-image`. This directory contains files that provide debug information for executables and shared libraries when using native debuggers.
+To use it, copy the contents of `debug-image` over the jdk before using the jdk with a native debugger.
+Another image created is the `test` image, which contains executables and native libraries required when running some functional and OpenJDK testing.
+For local testing set the NATIVE_TEST_LIBS environment variable to the test image location, see the [OpenJ9 test user guide](https://github.com/eclipse-openj9/openj9/blob/master/test/docs/OpenJ9TestUserGuide.md).
 
 ### 5. Test
 :penguin:
@@ -216,9 +225,9 @@ OMR      - f29d158
 JCL      - 98f2038 based on jdk-11+28)
 ```
 
-:pencil: **OpenSSL support:** If you built an OpenJDK with OpenJ9 that includes OpenSSL v1.1.x support, the following acknowledgements apply in accordance with the license terms:
+:pencil: **OpenSSL support:** If you built an OpenJDK with OpenJ9 that includes OpenSSL v1.x support, the following acknowledgments apply in accordance with the license terms:
 
-  - *This product includes software developed by the OpenSSL Project for use in the OpenSSL Toolkit. (http://www.openssl.org/).*
+  - *This product includes software developed by the OpenSSL Project for use in the OpenSSL Toolkit. (https://www.openssl.org/).*
   - *This product includes cryptographic software written by Eric Young (eay@cryptsoft.com).*
 
 :penguin: *Congratulations!* :tada:
@@ -233,7 +242,7 @@ The following instructions guide you through the process of building an **OpenJD
 ### 1. Prepare your system
 :blue_book:
 You must install the following AIX Licensed Program Products (LPPs):
-- [xlc/C++ 13.1.3](https://www.ibm.com/developerworks/downloads/r/xlcplusaix/)
+- [xlc/C++ 16](https://www.ibm.com/developerworks/downloads/r/xlcplusaix/)
 - x11.adt.ext
 
 You must also install the boot JDK: [Java11_AIX_PPC64](https://api.adoptopenjdk.net/v3/binary/latest/11/ga/aix/ppc64/jdk/openj9/normal/adoptopenjdk).
@@ -274,7 +283,7 @@ Now fetch additional sources from the Eclipse OpenJ9 project and its clone of Ec
 bash get_source.sh
 ```
 
-:pencil: **OpenSSL support:** If you want to build an OpenJDK with OpenJ9 binary with OpenSSL support and you do not have a built version of OpenSSL v1.1.x available locally, you must specify `--openssl-version=<version>` where `<version>` is an OpenSSL level like 1.1.0 or 1.1.1. If the specified version of OpenSSL is already available in the standard location (SRC_DIR/openssl), `get_source.sh` uses it. Otherwise, the script deletes the content and downloads the specified version of OpenSSL source to the standard location and builds it. If you already have the version of OpenSSL in the standard location but you want a fresh copy, you must delete your current copy.
+:pencil: **OpenSSL support:** If you want to build an OpenJDK with OpenJ9 binary with OpenSSL support and you do not have a built version of OpenSSL v3.x available locally, you must specify `-openssl-branch=<branch>` where `<branch>` is an OpenSSL branch (or tag) like `openssl-3.0.13`. If the specified version of OpenSSL is already available in the standard location (SRC_DIR/openssl), `get_source.sh` uses it. Otherwise, the script deletes the content and downloads the specified version of OpenSSL source to the standard location and builds it. If you already have the version of OpenSSL in the standard location but you want a fresh copy, you must delete your current copy.
 
 ### 3. Configure
 :blue_book:
@@ -284,6 +293,10 @@ bash configure --with-cups-include=<cups_include_path> \
                --disable-warnings-as-errors
 ```
 where `<cups_include_path>` is the absolute path to CUPS. For example, `/opt/freeware/include`.
+
+:pencil: Configuring and building is not specific to OpenJ9 but uses the OpenJDK build infrastructure with OpenJ9 added.
+Many other configuration options are available, including options to increase the verbosity of the build output to include command lines (`LOG=cmdlines`), more info or debug information.
+For more information see [OpenJDK build troubleshooting](https://htmlpreview.github.io/?https://raw.githubusercontent.com/openjdk/jdk11u/master/doc/building.html#troubleshooting).
 
 :pencil: **Mixed and compressed references support:** Different types of 64-bit builds can be created:
 - [compressed references](https://www.eclipse.org/openj9/docs/gc_overview/#compressed-references) (only)
@@ -322,7 +335,12 @@ A binary for the full developer kit (jdk) is built and stored in the following d
 
 - **build/aix-ppc64-normal-server-release/images/jdk**
 
-    :pencil: If you want a binary for the runtime environment (jre), you must run `make legacy-jre-image`, which produces a jre build in the **build/aix-ppc64-normal-server-release/images/jre** directory.
+:pencil: If you want a binary for the runtime environment (jre), you must run `make legacy-jre-image`, which produces a jre build in the **build/aix-ppc64-normal-server-release/images/jre** directory.
+
+:pencil: One of the images created with `make all` is the `debug-image`. This directory contains files that provide debug information for executables and shared libraries when using native debuggers.
+To use it, copy the contents of `debug-image` over the jdk before using the jdk with a native debugger.
+Another image created is the `test` image, which contains executables and native libraries required when running some functional and OpenJDK testing.
+For local testing set the NATIVE_TEST_LIBS environment variable to the test image location, see the [OpenJ9 test user guide](https://github.com/eclipse-openj9/openj9/blob/master/test/docs/OpenJ9TestUserGuide.md).
 
 ### 5. Test
 :blue_book:
@@ -347,9 +365,9 @@ OMR      - 28139f2
 JCL      - e5c64f5 based on jdk-11+21)
 ```
 
-:pencil: **OpenSSL support:** If you built an OpenJDK with OpenJ9 that includes OpenSSL v1.1.x support, the following acknowledgements apply in accordance with the license terms:
+:pencil: **OpenSSL support:** If you built an OpenJDK with OpenJ9 that includes OpenSSL v1.x support, the following acknowledgments apply in accordance with the license terms:
 
-  - *This product includes software developed by the OpenSSL Project for use in the OpenSSL Toolkit. (http://www.openssl.org/).*
+  - *This product includes software developed by the OpenSSL Project for use in the OpenSSL Toolkit. (https://www.openssl.org/).*
   - *This product includes cryptographic software written by Eric Young (eay@cryptsoft.com).*
 
 :blue_book: *Congratulations!* :tada:
@@ -367,9 +385,9 @@ You must install a number of software dependencies to create a suitable build en
 
 - [Cygwin](https://cygwin.com/install.html), which provides a Unix-style command line interface. Install all packages in the `Devel` category. In the `Archive` category, install the packages `zip` and `unzip`. In the `Utils` category, install the `cpio` package. Install any further package dependencies that are identified by the installer. More information about using Cygwin can be found [here](https://cygwin.com/docs.html).
 - [Windows JDK 11](https://api.adoptopenjdk.net/v3/binary/latest/11/ga/windows/x64/jdk/openj9/normal/adoptopenjdk), which is used as the boot JDK.
-- [Microsoft Visual Studio 2017](https://visualstudio.microsoft.com/thank-you-downloading-visual-studio/?sku=Community&rel=15), which is the default compiler level used by OpenJDK11.
+- [Microsoft Visual Studio 2022](https://aka.ms/vs/17/release/vs_community.exe), which is the version currently used by OpenJ9 builds.
 - [Freemarker V2.3.8](https://sourceforge.net/projects/freemarker/files/freemarker/2.3.8/freemarker-2.3.8.tar.gz/download) - only when building with `--with-cmake=no`
-- [LLVM/Clang](http://releases.llvm.org/7.0.0/LLVM-7.0.0-win64.exe)
+- [LLVM/Clang](https://releases.llvm.org/7.0.0/LLVM-7.0.0-win64.exe)
 - [NASM Assembler v2.13.03 or newer](https://www.nasm.us/pub/nasm/releasebuilds/?C=M;O=D)
 
 Add the binary path of Clang to the `PATH` environment variable to override the older version of clang integrated in Cygwin. e.g.
@@ -382,14 +400,7 @@ Add the path to `nasm.exe` to the `PATH` environment variable to override the ol
 export PATH="/cygdrive/c/Program Files/NASM:$PATH" (in Cygwin)
 ```
 
-Update your `LIB` and `INCLUDE` environment variables to provide a path to the Windows debugging tools with the following commands:
-
-```
-set INCLUDE=C:\Program Files\Debugging Tools for Windows (x64)\sdk\inc;%INCLUDE%
-set LIB=C:\Program Files\Debugging Tools for Windows (x64)\sdk\lib;%LIB%
-```
-
-   You can download Visual Studio manually or obtain it using the [wget](http://www.gnu.org/software/wget/faq.html#download) utility. If you choose to use `wget`, follow these steps:
+   You can download Visual Studio manually or obtain it using the [wget](https://www.gnu.org/software/wget/faq.html#download) utility. If you choose to use `wget`, follow these steps:
 
 - Open a cygwin terminal and change to the `/temp` directory:
 ```
@@ -398,17 +409,17 @@ cd /cygdrive/c/temp
 
 - Run the following command:
 ```
-wget https://aka.ms/vs/15/release/vs_community.exe -O vs2017.exe
+wget https://aka.ms/vs/17/release/vs_community.exe -O vs2022.exe
 ```
-- Before installing Visual Studio, change the permissions on the installation file by running `chmod u+x vs2017.exe`.
-- Install Visual Studio by running the file `vs2017.exe` (There is no special step required for installing. Please follow the guide of the installer to install all desired components, the C++ compiler is required).
+- Before installing Visual Studio, change the permissions on the installation file by running `chmod u+x vs2022.exe`.
+- Install Visual Studio by running the file `vs2022.exe` (There is no special step required for installing. Please follow the guide of the installer to install all desired components, the C++ compiler is required).
 
 Not all of the shared libraries that are included with Visual Studio are registered during installation.
 In particular, the `msdia140.dll` libraries must be registered manually by running command prompt as administrator.  To do so, execute the following from a command prompt:
 
 ```
-regsvr32 "C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\DIA SDK\bin\msdia140.dll"
-regsvr32 "C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\DIA SDK\bin\amd64\msdia140.dll"
+regsvr32 "C:\Program Files (x86)\Microsoft Visual Studio\2022\Community\DIA SDK\bin\msdia140.dll"
+regsvr32 "C:\Program Files (x86)\Microsoft Visual Studio\2022\Community\DIA SDK\bin\amd64\msdia140.dll"
 ```
 
 - When building with `--with-cmake=no`, unpack the Freemarker archive:
@@ -437,16 +448,20 @@ bash get_source.sh
 
 :pencil: Create the directory that is going to contain the OpenJDK clone by using the `mkdir` command in the Cygwin bash shell and not using Windows Explorer. This ensures that it will have proper Cygwin attributes, and that its children will inherit those attributes.
 
-:pencil: **OpenSSL support:** If you want to build an OpenJDK with OpenJ9 binary with OpenSSL support and you do not have a built version of OpenSSL v1.1.x available locally, you must obtain a prebuilt OpenSSL v1.1.x binary.
+:pencil: **OpenSSL support:** If you want to build an OpenJDK with OpenJ9 binary with OpenSSL support and you do not have a built version of OpenSSL v3.x available locally, you must specify `-openssl-branch=<branch>` where `<branch>` is an OpenSSL branch (or tag) like `openssl-3.0.13`. If the specified version of OpenSSL is already available in the standard location (SRC_DIR/openssl), `get_source.sh` uses it. Otherwise, the script deletes the content and downloads the specified version of OpenSSL source to the standard location and builds it. If you already have the version of OpenSSL in the standard location but you want a fresh copy, you must delete your current copy.
 
 ### 3. Configure
 :ledger:
 When you have all the source files that you need, run the configure script, which detects how to build in the current build environment.
 ```
-bash configure --disable-warnings-as-errors
+bash configure --disable-warnings-as-errors --with-toolchain-version=2019
 ```
 
 :pencil: If Java 11 is not available on the path, add the `--with-boot-jdk=<path_to_jdk11>` configuration option.
+
+:pencil: Configuring and building is not specific to OpenJ9 but uses the OpenJDK build infrastructure with OpenJ9 added.
+Many other configuration options are available, including options to increase the verbosity of the build output to include command lines (`LOG=cmdlines`), more info or debug information.
+For more information see [OpenJDK build troubleshooting](https://htmlpreview.github.io/?https://raw.githubusercontent.com/openjdk/jdk11u/master/doc/building.html#troubleshooting).
 
 :pencil: **Mixed and compressed references support:** Different types of 64-bit builds can be created:
 - [compressed references](https://www.eclipse.org/openj9/docs/gc_overview/#compressed-references) (only)
@@ -460,7 +475,14 @@ Mixed references is the default to build when no options are specified. _Note th
 - `--with-mixedrefs=static` (this is the default) create a mixed references build which avoids runtime checks by compiling source twice
 - `--with-noncompressedrefs` create a build supporting non-compressed references only
 
-:pencil: **OpenSSL support:** If you want to build an OpenJDK that includes OpenSSL, you must specify `--with-openssl=path_to_library`, where `path_to_library` specifies the path to the prebuilt OpenSSL library that you obtained in **2. Get the source**. If you want to include the OpenSSL cryptographic library in the OpenJDK binary, you must also include `--enable-openssl-bundling`.
+:pencil: **OpenSSL support:** If you want to build an OpenJDK that includes OpenSSL, you must specify `--with-openssl={fetched|path_to_library}`
+
+  where:
+
+  - `fetched` uses the OpenSSL source downloaded by `get-source.sh` in step **2. Get the source**.
+  - `path_to_library` uses a custom OpenSSL library that's already built.
+
+  If you want to include the OpenSSL cryptographic library in the OpenJDK binary, you must include `--enable-openssl-bundling`.
 
 :pencil: When building using `--with-cmake=no`, you must specify `freemarker.jar` with an absolute path, such as `--with-freemarker-jar=/cygdrive/c/temp/freemarker.jar`.
 
@@ -477,7 +499,12 @@ A binary for the full developer kit (jdk) is built and stored in the following d
 
 - **build/windows-x86_64-normal-server-release/images/jdk**
 
-    :pencil: If you want a binary for the runtime environment (jre), you must run `make legacy-jre-image`, which produces a jre build in the **build/windows-x86_64-normal-server-release/images/jre** directory.
+:pencil: If you want a binary for the runtime environment (jre), you must run `make legacy-jre-image`, which produces a jre build in the **build/windows-x86_64-normal-server-release/images/jre** directory.
+
+:pencil: One of the images created with `make all` is the `debug-image`. This directory contains files that provide debug information for executables and shared libraries when using native debuggers.
+To use it, copy the contents of `debug-image` over the jdk before using the jdk with a native debugger.
+Another image created is the `test` image, which contains executables and native libraries required when running some functional and OpenJDK testing.
+For local testing set the NATIVE_TEST_LIBS environment variable to the test image location, see the [OpenJ9 test user guide](https://github.com/eclipse-openj9/openj9/blob/master/test/docs/OpenJ9TestUserGuide.md).
 
 ### 5. Test
 :ledger:
@@ -502,9 +529,9 @@ OMR      - e2e4b67c
 JCL      - a786f96b13 based on jdk-11+21)
 ```
 
-:pencil: **OpenSSL support:** If you built an OpenJDK with OpenJ9 that includes OpenSSL v1.1.x support, the following acknowledgements apply in accordance with the license terms:
+:pencil: **OpenSSL support:** If you built an OpenJDK with OpenJ9 that includes OpenSSL v1.x support, the following acknowledgments apply in accordance with the license terms:
 
-  - *This product includes software developed by the OpenSSL Project for use in the OpenSSL Toolkit. (http://www.openssl.org/).*
+  - *This product includes software developed by the OpenSSL Project for use in the OpenSSL Toolkit. (https://www.openssl.org/).*
   - *This product includes cryptographic software written by Eric Young (eay@cryptsoft.com).*
 
 :ledger: *Congratulations!* :tada:
@@ -574,7 +601,7 @@ Now fetch additional sources from the Eclipse OpenJ9 project and its clone of Ec
 bash get_source.sh
 ```
 
-:pencil: **OpenSSL support:** If you want to build an OpenJDK with OpenJ9 binary with OpenSSL support and you do not have a built version of OpenSSL v1.1.x available locally, you must obtain a prebuilt OpenSSL v1.1.x binary.
+:pencil: **OpenSSL support:** If you want to build an OpenJDK with OpenJ9 binary with OpenSSL support and you do not have a built version of OpenSSL v3.x available locally, you must specify `-openssl-branch=<branch>` where `<branch>` is an OpenSSL branch (or tag) like `openssl-3.0.13`. If the specified version of OpenSSL is already available in the standard location (SRC_DIR/openssl), `get_source.sh` uses it. Otherwise, the script deletes the content and downloads the specified version of OpenSSL source to the standard location and builds it. If you already have the version of OpenSSL in the standard location but you want a fresh copy, you must delete your current copy.
 
 ### 3. Configure
 :apple:
@@ -584,7 +611,9 @@ When you have all the source files that you need, run the configure script, whic
 bash configure --with-boot-jdk=<path_to_boot_JDK11>
 ```
 
-:pencil: Modify the path for the macOS boot JDK that you installed in step 1. If `configure` is unable to detect Freetype, add the option `--with-freetype=<path to freetype>`, where `<path to freetype>` is typically `/usr/local/Cellar/freetype/2.9.1/`.
+:pencil: Configuring and building is not specific to OpenJ9 but uses the OpenJDK build infrastructure with OpenJ9 added.
+Many other configuration options are available, including options to increase the verbosity of the build output to include command lines (`LOG=cmdlines`), more info or debug information.
+For more information see [OpenJDK build troubleshooting](https://htmlpreview.github.io/?https://raw.githubusercontent.com/openjdk/jdk11u/master/doc/building.html#troubleshooting).
 
 :pencil: **Mixed and compressed references support:** Different types of 64-bit builds can be created:
 - [compressed references](https://www.eclipse.org/openj9/docs/gc_overview/#compressed-references) (only)
@@ -598,7 +627,18 @@ Mixed references is the default to build when no options are specified. _Note th
 - `--with-mixedrefs=static` (this is the default) create a mixed references build which avoids runtime checks by compiling source twice
 - `--with-noncompressedrefs` create a build supporting non-compressed references only
 
-:pencil: **OpenSSL support:** If you want to build an OpenJDK that includes OpenSSL, you must specify `--with-openssl=path_to_library`, where `path_to_library` specifies the path to the prebuilt OpenSSL library that you obtained in **2. Get the source**. If you want to include the OpenSSL cryptographic library in the OpenJDK binary, you must also include `--enable-openssl-bundling`.
+:pencil: **AArch64 macOS only:**
+  - Please specify `--with-noncompressedrefs` because compressed references are not supported on AArch64 macOS yet.
+  - `--with-cmake=no` is not supported on AArch64 macOS.  Please use cmake.
+
+:pencil: **OpenSSL support:** If you want to build an OpenJDK that includes OpenSSL, you must specify `--with-openssl={fetched|path_to_library}`
+
+  where:
+
+  - `fetched` uses the OpenSSL source downloaded by `get-source.sh` in step **2. Get the source**.
+  - `path_to_library` uses a custom OpenSSL library that's already built.
+
+  If you want to include the OpenSSL cryptographic library in the OpenJDK binary, you must include `--enable-openssl-bundling`.
 
 :pencil: When building using `--with-cmake=no`, you must specify `freemarker.jar` with an absolute path, such as `--with-freemarker-jar=<path_to>/freemarker.jar`, where `<path_to>` is the location where you stored `freemarker.jar`.
 
@@ -619,7 +659,12 @@ Two builds of OpenJDK with Eclipse OpenJ9 are built and stored in the following 
 
     :pencil: For running applications such as Eclipse, use the **-bundle** version.
 
-    :pencil: If you want a binary for the runtime environment (jre), you must run `make legacy-jre-image`, which produces a jre build in the **build/macosx-x86_64-normal-server-release/images/jre** directory.
+:pencil: If you want a binary for the runtime environment (jre), you must run `make legacy-jre-image`, which produces a jre build in the **build/macosx-x86_64-normal-server-release/images/jre** directory.
+
+:pencil: One of the images created with `make all` is the `debug-image`. This directory contains files that provide debug information for executables and shared libraries when using native debuggers.
+To use it, copy the contents of `debug-image` over the jdk before using the jdk with a native debugger.
+Another image created is the `test` image, which contains executables and native libraries required when running some functional and OpenJDK testing.
+For local testing set the NATIVE_TEST_LIBS environment variable to the test image location, see the [OpenJ9 test user guide](https://github.com/eclipse-openj9/openj9/blob/master/test/docs/OpenJ9TestUserGuide.md).
 
 ### 5. Test
 :apple:
@@ -644,9 +689,9 @@ OMR      - d4cd7c31
 JCL      - 9da99f8b97 based on jdk-11+28)
 ```
 
-:pencil: **OpenSSL support:** If you built an OpenJDK with OpenJ9 that includes OpenSSL v1.1.x support, the following acknowledgements apply in accordance with the license terms:
+:pencil: **OpenSSL support:** If you built an OpenJDK with OpenJ9 that includes OpenSSL v1.x support, the following acknowledgments apply in accordance with the license terms:
 
-- *This product includes software developed by the OpenSSL Project for use in the OpenSSL Toolkit. (http://www.openssl.org/).*
+- *This product includes software developed by the OpenSSL Project for use in the OpenSSL Toolkit. (https://www.openssl.org/).*
 - *This product includes cryptographic software written by Eric Young (eay@cryptsoft.com).*
 
 :ledger: *Congratulations!* :tada:
@@ -678,11 +723,13 @@ Now fetch additional sources from the Eclipse OpenJ9 project and its clone of Ec
 bash get_source.sh
 ```
 
+:pencil: **OpenSSL support:** On an AArch64 Linux system if you want to build an OpenJDK with OpenJ9 binary with OpenSSL support and you do not have a built version of OpenSSL v3.x available locally, you must specify `-openssl-branch=<branch>` where `<branch>` is an OpenSSL branch (or tag) like `openssl-3.0.13`. If the specified version of OpenSSL is already available in the standard location (SRC_DIR/openssl), `get_source.sh` uses it. Otherwise, the script deletes the content and downloads the specified version of OpenSSL source to the standard location and builds it. If you already have the version of OpenSSL in the standard location but you want a fresh copy, you must delete your current copy.
+
 ### 3. Prepare for build on AArch64 Linux
 
 You must install a number of software dependencies to create a suitable build environment on your AArch64 Linux system:
 
-- GNU C/C++ compiler (The Docker image uses GCC 7.5)
+- GNU C/C++ compiler 10.3 (The Docker image uses GCC 7.5)
 - [AArch64 Linux JDK](https://api.adoptopenjdk.net/v3/binary/latest/11/ga/linux/aarch64/jdk/openj9/normal/adoptopenjdk), which is used as the boot JDK.
 - [Freemarker V2.3.8](https://sourceforge.net/projects/freemarker/files/freemarker/2.3.8/freemarker-2.3.8.tar.gz/download) - Only when building with `--with-cmake=no`
 
@@ -722,13 +769,15 @@ bash configure --openjdk-target=${OPENJ9_CC_PREFIX} \
                --with-x=${OPENJ9_CC_DIR}/${OPENJ9_CC_PREFIX}/ \
                --with-freetype-include=${OPENJ9_CC_DIR}/${OPENJ9_CC_PREFIX}/libc/usr/include/freetype2 \
                --with-freetype-lib=${OPENJ9_CC_DIR}/${OPENJ9_CC_PREFIX}/libc/usr/lib \
-               --with-freemarker-jar=/root/freemarker.jar \
                --with-boot-jdk=/root/bootjdk11 \
                --with-build-jdk=/root/bootjdk11 \
-               --with-cmake=no \
                --disable-warnings-as-errors \
                --disable-ddr
 ```
+
+:pencil: Configuring and building is not specific to OpenJ9 but uses the OpenJDK build infrastructure with OpenJ9 added.
+Many other configuration options are available, including options to increase the verbosity of the build output to include command lines (`LOG=cmdlines`), more info or debug information.
+For more information see [OpenJDK build troubleshooting](https://htmlpreview.github.io/?https://raw.githubusercontent.com/openjdk/jdk11u/master/doc/building.html#troubleshooting).
 
 :pencil: **Mixed and compressed references support:** Different types of 64-bit builds can be created:
 - [compressed references](https://www.eclipse.org/openj9/docs/gc_overview/#compressed-references) (only)
@@ -742,13 +791,15 @@ Mixed references is the default to build when no options are specified. _Note th
 - `--with-mixedrefs=static` (this is the default) create a mixed references build which avoids runtime checks by compiling source twice
 - `--with-noncompressedrefs` create a build supporting non-compressed references only
 
-:pencil: **OpenSSL support:** If you want to build an OpenJDK that uses OpenSSL, you must specify `--with-openssl={system|path_to_library}`
+::pencil: **OpenSSL support:** If you want to build an OpenJDK that uses OpenSSL, you must specify `--with-openssl={fetched|system|path_to_library}`
 
   where:
 
+  - `fetched` uses the OpenSSL source downloaded by `get-source.sh` in step **2. Get the source**. Using `--with-openssl=fetched` will fail during the build in the Docker environment.
   - `system` uses the package installed OpenSSL library in the system.  Use this option when you build on your AArch64 Linux system.
-  - `path_to_library` uses an OpenSSL v1.1.x library that's already built.  You can use `${OPENJ9_CC_DIR}/${OPENJ9_CC_PREFIX}/libc/usr` as `path_to_library` when you are configuring in the Docker container.
-  - Using `--with-openssl=fetched` will fail during the build in the Docker environment.
+  - `path_to_library` uses an OpenSSL v3.x library that's already built.  You can use `${OPENJ9_CC_DIR}/${OPENJ9_CC_PREFIX}/libc/usr` as `path_to_library` when you are configuring in the Docker container.
+
+  If you want to include the OpenSSL cryptographic library in the OpenJDK binary, you must include `--enable-openssl-bundling`.
 
 :pencil: **DDR support:** You can build DDR support only on AArch64 Linux.  If you are building in a cross-compilation environment, you need the `--disable-ddr` option.
 
@@ -775,6 +826,11 @@ Copy its contents to your AArch64 Linux device.
 
 :pencil: If you want a binary for the runtime environment (jre), you must run `make legacy-jre-image`, which produces a jre build in the **build/linux-aarch64-normal-server-release/images/jre** directory.
 
+:pencil: One of the images created with `make all` is the `debug-image`. This directory contains files that provide debug information for executables and shared libraries when using native debuggers.
+To use it, copy the contents of `debug-image` over the jdk before using the jdk with a native debugger.
+Another image created is the `test` image, which contains executables and native libraries required when running some functional and OpenJDK testing.
+For local testing set the NATIVE_TEST_LIBS environment variable to the test image location, see the [OpenJ9 test user guide](https://github.com/eclipse-openj9/openj9/blob/master/test/docs/OpenJ9TestUserGuide.md).
+
 ### 6. Test
 :penguin:
 For a simple test, try running the `java -version` command.
@@ -800,9 +856,9 @@ JCL      - d247952 based on jdk-11.0.6+6)
 
 :construction: AArch64 JIT compiler is not fully optimized at the time of writing this, compared with other platforms.
 
-:pencil: **OpenSSL support:** If you built an OpenJDK with OpenJ9 that includes OpenSSL v1.1.x support, the following acknowledgements apply in accordance with the license terms:
+:pencil: **OpenSSL support:** If you built an OpenJDK with OpenJ9 that includes OpenSSL v1.x support, the following acknowledgments apply in accordance with the license terms:
 
-  - *This product includes software developed by the OpenSSL Project for use in the OpenSSL Toolkit. (http://www.openssl.org/).*
+  - *This product includes software developed by the OpenSSL Project for use in the OpenSSL Toolkit. (https://www.openssl.org/).*
   - *This product includes cryptographic software written by Eric Young (eay@cryptsoft.com).*
 
 :penguin: *Congratulations!* :tada:
@@ -855,7 +911,7 @@ For the moment, the `QEMU` package targeted for RISC-V is not ready & unavailabl
 
 Install `e2fsck` if it doesn't exist on your host system:
 ```
-wget http://downloads.sourceforge.net/project/e2fsprogs/e2fsprogs/v1.43.1/e2fsprogs-1.43.1.tar.gz
+wget https://downloads.sourceforge.net/project/e2fsprogs/e2fsprogs/v1.43.1/e2fsprogs-1.43.1.tar.gz
 tar xzf e2fsprogs-1.43.1.tar.gz
 cd e2fsprogs-1.43.1
 ./configure # <== If this step fails, please check the config.log file.
@@ -1234,6 +1290,10 @@ bash configure --disable-warnings-as-errors \
                --with-freemarker-jar=<path_to>/freemarker.jar
 ```
 
+:pencil: Configuring and building is not specific to OpenJ9 but uses the OpenJDK build infrastructure with OpenJ9 added.
+Many other configuration options are available, including options to increase the verbosity of the build output to include command lines (`LOG=cmdlines`),, more info or debug information.
+For more information see [OpenJDK build troubleshooting](https://htmlpreview.github.io/?https://raw.githubusercontent.com/openjdk/jdk11u/master/doc/building.html#troubleshooting).
+
 :pencil:
 If you want to build an OpenJDK that uses OpenSSL, you must specify `--with-openssl=<path_to_library>`
  where:
@@ -1264,6 +1324,11 @@ If you want to specify `make` instead of `make all`, you must add `--default-mak
 A binary for the full developer kit (JDK without DDR support) is built and stored in the following directory:
 
 - **build/linux-riscv64-normal-server-release/images/jdk**
+
+:pencil: One of the images created with `make all` is the `debug-image`. This directory contains files that provide debug information for executables and shared libraries when using native debuggers.
+To use it, copy the contents of `debug-image` over the jdk before using the jdk with a native debugger.
+Another image created is the `test` image, which contains executables and native libraries required when running some functional and OpenJDK testing.
+For local testing set the NATIVE_TEST_LIBS environment variable to the test image location, see the [OpenJ9 test user guide](https://github.com/eclipse-openj9/openj9/blob/master/test/docs/OpenJ9TestUserGuide.md).
 
 ### 8. Test the JDK on Fedora/QEMU
 
@@ -1343,10 +1408,9 @@ Given that there is no JIT support for now, you might need to accelerate the com
 :rocket:
 (this section is based on verification result from HiFive U540 dev board / to be updated)
 
+:pencil: **OpenSSL support:** If you built an OpenJDK with OpenJ9 that includes OpenSSL v1.x support, the following acknowledgments apply in accordance with the license terms:
 
-:pencil: **OpenSSL support:** If you built an OpenJDK with OpenJ9 that includes OpenSSL v1.1.x support, the following acknowledgements apply in accordance with the license terms:
-
-  - *This product includes software developed by the OpenSSL Project for use in the OpenSSL Toolkit. (http://www.openssl.org/).*
+  - *This product includes software developed by the OpenSSL Project for use in the OpenSSL Toolkit. (https://www.openssl.org/).*
   - *This product includes cryptographic software written by Eric Young (eay@cryptsoft.com).*
 
 :rocket: *Congratulations!* :tada:

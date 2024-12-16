@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include <string.h>
@@ -30,8 +30,7 @@
  * Methods, fields, local variables can not contain: '.', ';', '[' '/'.
  * Methods, other than <init> and <clinit> cannot contain '<' or '>'.
  * Classes can contain '[' only at the front if they are array classes.
- * Classes can end with ';' only if they are array classes for class file major version < 62
- * 				For class major file version >= 62. They can be array classes or descriptors of form "LClassName;" or "QClassName;".
+ * Classes can end with ';' only if they are array classes
  * Classes can contain '/'
  * 		if not the first character,
  * 		if not the last character,
@@ -83,29 +82,9 @@ checkNameImpl (J9CfrConstantPoolInfo * info, BOOLEAN isClass, BOOLEAN isMethod, 
 			}
 			return -1;
 		case ';':
-			if (isClass) {
-#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
-				if (J9_ARE_ALL_BITS_SET(info->flags1, CFR_CLASS_FILE_VERSION_SUPPORT_VALUE_TYPE)) {
-					/* If CFR_CLASS_FILE_VERSION_SUPPORT_VALUE_TYPE is set (class major file version >= 62)
-					 * Valid at the end of array classes
-					 * or descriptors of form "LClassName;" or "QClassName;".
-					 */
-					if ((arity || IS_REF_OR_VAL_SIGNATURE(*info->bytes))
-						&& ((c + 1) == end)
-					) {
-						break;
-					}
-				} else {
-#endif /* defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */
-					/* Valid at the end of array classes */
-					if ((arity)
-						&& ((c + 1) == end)
-					) {
-						break;
-					}
-#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
-				}
-#endif /* defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */
+			/* Valid at the end of array classes */
+			if (isClass && arity && ((c + 1) == end)) {
+				break;
 			}
 			return -1;
 		case '<': /* Fall through */
@@ -153,9 +132,9 @@ isInitOrClinitImpl (J9CfrConstantPoolInfo * info)
 }
 
 /**
- * Determine if this name is either "<init>" or "<clinit>".
+ * Determine if this name is "<init>" or "<clinit>".
  *
- * @returns 0 if name is a normal name, 1 if '<init>' and 2 if '<clinit>' , -1 if it starts with '<' but is not a valid class name.
+ * @returns 0 if name is a normal name, CFR_METHOD_NAME_INIT if '<init>', CFR_METHOD_NAME_CLINIT if '<clinit>', and -1 if it starts with '<' but is not a valid class name.
  * @note result is positive if the name is "<init>" or "<clinit>", result is negative if the name is illegal
  */
 I_32
@@ -167,7 +146,7 @@ bcvIsInitOrClinit (J9CfrConstantPoolInfo * info)
 /**
  * Determine if this a valid name for Methods.
  *
- * @returns 1 if '<init>' and 2 if '<clinit>', otherwise 0 or positive if a valid name; negative value if class name is invalid
+ * @returns CFR_METHOD_NAME_INIT if '<init>' or CFR_METHOD_NAME_CLINIT if '<clinit>', otherwise 0 if a valid name; negative value if class name is invalid
  */
 I_32
 bcvCheckMethodName (J9CfrConstantPoolInfo * info)

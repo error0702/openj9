@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "codegen/S390PrivateLinkage.hpp"
@@ -100,17 +100,6 @@ J9::Z::PrivateLinkage::PrivateLinkage(TR::CodeGenerator * codeGen,TR_LinkageConv
    setLongDoubleReturnRegister2  (TR::RealRegister::FPR2 );
    setLongDoubleReturnRegister4  (TR::RealRegister::FPR4 );
    setLongDoubleReturnRegister6  (TR::RealRegister::FPR6 );
-
-   if(comp()->target().cpu.isAtLeast(OMR_PROCESSOR_S390_Z13) && comp()->target().cpu.supportsFeature(OMR_FEATURE_S390_VECTOR_FACILITY) &&
-     !comp()->getOption(TR_DisableSIMD))
-       {
-       codeGen->setSupportsVectorRegisters();
-       codeGen->setSupportsAutoSIMD();
-       }
-   else
-      {
-      comp()->setOption(TR_DisableSIMD);
-      }
 
    const bool enableVectorLinkage = codeGen->getSupportsVectorRegisters();
    if (enableVectorLinkage) setVectorReturnRegister(TR::RealRegister::VRF24);
@@ -373,8 +362,8 @@ J9::Z::PrivateLinkage::mapCompactedStack(TR::ResolvedMethodSymbol * method)
       {
       if (localCursor->getGCMapIndex() >= 0)
          {
-         TR_IGNode *igNode;
-         if (igNode = cg()->getLocalsIG()->getIGNodeForEntity(localCursor))
+         TR_IGNode *igNode = cg()->getLocalsIG()->getIGNodeForEntity(localCursor);
+         if (NULL != igNode)
             {
             IGNodeColour colour = igNode->getColour();
 
@@ -458,8 +447,8 @@ J9::Z::PrivateLinkage::mapCompactedStack(TR::ResolvedMethodSymbol * method)
    for (localCursor = automaticIterator.getFirst(); localCursor; localCursor = automaticIterator.getNext())
       if (localCursor->getGCMapIndex() < 0)
          {
-         TR_IGNode *igNode;
-         if (igNode = cg()->getLocalsIG()->getIGNodeForEntity(localCursor))
+         TR_IGNode *igNode = cg()->getLocalsIG()->getIGNodeForEntity(localCursor);
+         if (NULL != igNode)
             {
             IGNodeColour colour = igNode->getColour();
 
@@ -531,8 +520,8 @@ J9::Z::PrivateLinkage::mapCompactedStack(TR::ResolvedMethodSymbol * method)
    for (localCursor = automaticIterator.getFirst(); localCursor; localCursor = automaticIterator.getNext())
       if (localCursor->getGCMapIndex() < 0)
          {
-         TR_IGNode *igNode;
-         if (igNode = cg()->getLocalsIG()->getIGNodeForEntity(localCursor))
+         TR_IGNode *igNode = igNode = cg()->getLocalsIG()->getIGNodeForEntity(localCursor);
+         if (NULL != igNode)
             {
             IGNodeColour colour = igNode->getColour();
 
@@ -939,17 +928,17 @@ J9::Z::PrivateLinkage::setParameterLinkageRegisterIndex(TR::ResolvedMethodSymbol
          case TR::UnicodeDecimalSignTrailing:
          case TR::Aggregate:
             break;
-         case TR::VectorInt8:
-         case TR::VectorInt16:
-         case TR::VectorInt32:
-         case TR::VectorInt64:
-         case TR::VectorDouble:
-            if (numVectorArgs < self()->getNumVectorArgumentRegisters())
+         default:
+            if (dt.isVector())
                {
-               index = numVectorArgs;
+               // TODO: special handling for Float?
+               if (numVectorArgs < self()->getNumVectorArgumentRegisters())
+                  {
+                  index = numVectorArgs;
+                  }
+               numVectorArgs++;
+               break;
                }
-            numVectorArgs++;
-            break;
          }
       paramCursor->setLinkageRegisterIndex(index);
       paramCursor = paramIterator.getNext();
@@ -1592,7 +1581,7 @@ J9::Z::PrivateLinkage::buildVirtualDispatch(TR::Node * callNode, TR::RegisterDep
          default:
             if (fej9->needsInvokeExactJ2IThunk(callNode, comp()))
                {
-               TR_J2IThunk *thunk = TR::S390J9CallSnippet::generateInvokeExactJ2IThunk(callNode, sizeOfArguments, methodSymbol->getMethod()->signatureChars(), cg());
+               TR_MHJ2IThunk *thunk = TR::S390J9CallSnippet::generateInvokeExactJ2IThunk(callNode, sizeOfArguments, methodSymbol->getMethod()->signatureChars(), cg());
                fej9->setInvokeExactJ2IThunk(thunk, comp());
                }
             break;
@@ -1800,7 +1789,7 @@ J9::Z::PrivateLinkage::buildVirtualDispatch(TR::Node * callNode, TR::RegisterDep
 
          if (!performGuardedDevirtualization &&
              !comp()->getOption(TR_DisableInterpreterProfiling) &&
-             comp()->getOption(TR_enableProfiledDevirtualization) &&
+             (callNode->getSymbolReference() != comp()->getSymRefTab()->findObjectNewInstanceImplSymbol()) &&
              TR_ValueProfileInfoManager::get(comp()) && resolvedMethod
              )
             {
@@ -1832,7 +1821,7 @@ J9::Z::PrivateLinkage::buildVirtualDispatch(TR::Node * callNode, TR::RegisterDep
                {
                TR_ResolvedMethod *profiledVirtualMethod = methodSymRef->getOwningMethod(comp())->getResolvedVirtualMethod(comp(),
                           (TR_OpaqueClassBlock *)topValue, methodSymRef->getOffset());
-               if (profiledVirtualMethod)
+               if (profiledVirtualMethod && !profiledVirtualMethod->isInterpreted())
                   {
                   if (comp()->getOption(TR_TraceCG))
                      {
@@ -1862,11 +1851,7 @@ J9::Z::PrivateLinkage::buildVirtualDispatch(TR::Node * callNode, TR::RegisterDep
 
             if (useProfiledValues)
                {
-               TR::Instruction * unloadableConstInstr = generateRILInstruction(cg(), TR::InstOpCode::LARL, callNode, RegZero, reinterpret_cast<uintptr_t*>(profiledClass));
-               if (fej9->isUnloadAssumptionRequired(profiledClass, comp()->getCurrentMethod()))
-                  {
-                  comp()->getStaticPICSites()->push_front(unloadableConstInstr);
-                  }
+               genLoadProfiledClassAddressConstant(cg(), callNode, profiledClass, RegZero, NULL, dependencies, NULL);
                generateS390CompareAndBranchInstruction(cg(), TR::InstOpCode::getCmpLogicalRegOpCode(), callNode, vftReg, RegZero, TR::InstOpCode::COND_BNE, virtualLabel);
                }
 
@@ -2965,9 +2950,22 @@ TR::Register * J9::Z::JNILinkage::buildDirectDispatch(TR::Node * callNode)
 
    if (isJNICallOutFrame)
      {
-     // Sets up PC, Stack pointer and literals offset slots.
-     setupJNICallOutFrame(callNode, javaStackPointerRealRegister, methodMetaDataVirtualRegister,
-                     returnFromJNICallLabel, jniCallDataSnippet);
+      // Sets up PC, Stack pointer and literals offset slots.
+      setupJNICallOutFrame(callNode, javaStackPointerRealRegister, methodMetaDataVirtualRegister,
+                              returnFromJNICallLabel, jniCallDataSnippet);
+
+#if (JAVA_SPEC_VERSION >= 19)
+#if defined(TR_TARGET_64BIT)
+      /**
+       * For virtual threads, bump the callOutCounter.  It is safe and most efficient to
+       * do this unconditionally.  No need to check for overflow.
+       */
+      generateSIInstruction(cg(), TR::InstOpCode::AGSI, callNode, generateS390MemoryReference(methodMetaDataVirtualRegister, fej9->thisThreadGetCallOutCountOffset(), cg()), 1);
+#else    /* TR_TARGET_64BIT */
+   TR_ASSERT_FATAL(false, "Virtual Thread is not supported on 31-Bit platform\n");
+#endif   /* TR_TARGET_64BIT */
+#endif   /* JAVA_SPEC_VERSION >= 19 */
+
      }
    else
      {
@@ -3021,6 +3019,20 @@ TR::Register * J9::Z::JNILinkage::buildDirectDispatch(TR::Node * callNode)
 #endif
      }
 
+#if (JAVA_SPEC_VERSION >= 19)
+#if defined(TR_TARGET_64BIT)
+   if (isJNICallOutFrame)
+      {
+      /**
+       * For virtual threads, decrement the callOutCounter.  It is safe and most efficient to
+       * do this unconditionally.  No need to check for underflow.
+       */
+      generateSIInstruction(cg(), TR::InstOpCode::AGSI, callNode, generateS390MemoryReference(methodMetaDataVirtualRegister, fej9->thisThreadGetCallOutCountOffset(), cg()), -1);
+      }
+#else    /* TR_TARGET_64BIT */
+   TR_ASSERT_FATAL(false, "Virtual Thread is not supported on 31-Bit platform\n");
+#endif   /* TR_TARGET_64BIT */
+#endif   /* JAVA_SPEC_VERSION >= 19 */
 
    generateRXInstruction(codeGen, TR::InstOpCode::getAddOpCode(), callNode, javaStackPointerRealRegister,
             new (trHeapMemory()) TR::MemoryReference(methodMetaDataVirtualRegister, (int32_t)fej9->thisThreadGetJavaLiteralsOffset(), codeGen));
@@ -3107,6 +3119,8 @@ J9::Z::PrivateLinkage::addSpecialRegDepsForBuildArgs(TR::Node * callNode, TR::Re
       case TR::java_lang_invoke_ComputedCalls_dispatchVirtual:
       case TR::com_ibm_jit_JITHelpers_dispatchVirtual:
          specialArgReg = getVTableIndexArgumentRegister();
+         break;
+      default:
          break;
       }
 

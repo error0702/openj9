@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2021, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2021
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #ifndef j9vm31_h
@@ -84,7 +84,7 @@ typedef struct JNIEnv31 {
  * the parameters interpretation require understanding of the specifiers from the
  * method signature.
  */
-typedef char  *___valist64[4];    // 64-bit uses char *[2].
+typedef char  *___valist64[4]; /* 64-bit uses char *[2]. */
 typedef ___valist64  va_list_64;
 
 /**
@@ -336,6 +336,12 @@ jobjectRefType JNICALL GetObjectRefType(JNIEnv* env, jobject obj);
 #if JAVA_SPEC_VERSION >= 9
 jobject JNICALL GetModule(JNIEnv *env, jclass clazz);
 #endif /* JAVA_SPEC_VERSION >= 9 */
+#if JAVA_SPEC_VERSION >= 19
+jboolean JNICALL IsVirtualThread(JNIEnv *env, jobject obj);
+#endif /* JAVA_SPEC_VERSION >= 19 */
+#if JAVA_SPEC_VERSION >= 24
+jlong JNICALL GetStringUTFLengthAsLong(JNIEnv *env, jstring string);
+#endif /* JAVA_SPEC_VERSION >= 24 */
 
 /* The JNI convert functions that the shim library will implement. */
 jint JNICALL GetStringPlatform(JNIEnv* env, jstring instr, char* outstr, jint outlen, const char* encoding);

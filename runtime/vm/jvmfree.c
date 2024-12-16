@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include <string.h>
@@ -58,6 +58,9 @@ freeClassLoaderEntries(J9VMThread * vmThread, J9ClassPathEntry **entries, UDATA 
 	U_32 i = 0;
 	J9ClassPathEntry *cpEntry = NULL;
 	PORT_ACCESS_FROM_VMC(vmThread);
+#if defined(J9VM_OPT_SNAPSHOTS)
+	VMSNAPSHOTIMPLPORT_ACCESS_FROM_JAVAVM(vm);
+#endif /* defined(J9VM_OPT_SNAPSHOTS) */
 
 	Trc_VM_freeClassLoaderEntries_Entry(vmThread, entries, count);
 
@@ -85,12 +88,26 @@ freeClassLoaderEntries(J9VMThread * vmThread, J9ClassPathEntry **entries, UDATA 
 		cpEntry->pathLength = 0;
 		if (i >= initCount) {
 			/* Additional entries are appended after initial entries, allocated separately. */
-			j9mem_free_memory(cpEntry);
+#if defined(J9VM_OPT_SNAPSHOTS)
+			if (IS_SNAPSHOTTING_ENABLED(vm)) {
+				vmsnapshot_free_memory(cpEntry);
+			} else
+#endif /* defined(J9VM_OPT_SNAPSHOTS) */
+			{
+				j9mem_free_memory(cpEntry);
+			}
 		}
 	}
 	/* Initial entries are allocated together, free them together. */
 	if (count > 0) {
-		j9mem_free_memory(entries[0]);
+#if defined(J9VM_OPT_SNAPSHOTS)
+		if (IS_SNAPSHOTTING_ENABLED(vm)) {
+			vmsnapshot_free_memory(entries[0]);
+		} else
+#endif /* defined(J9VM_OPT_SNAPSHOTS) */
+		{
+			j9mem_free_memory(entries[0]);
+		}
 	}
 
 	Trc_VM_freeClassLoaderEntries_Exit(vmThread);
@@ -122,7 +139,15 @@ freeSharedCacheCLEntries(J9VMThread * vmThread, J9ClassLoader * classloader)
 		}
 		pool_removeElement(cpCachePool, (void *)cachePoolItem);
 	}
-	j9mem_free_memory(classloader->classPathEntries);
+#if defined(J9VM_OPT_SNAPSHOTS)
+	if (IS_SNAPSHOTTING_ENABLED(vm)) {
+		VMSNAPSHOTIMPLPORT_ACCESS_FROM_JAVAVM(vm);
+		vmsnapshot_free_memory(classloader->classPathEntries);
+	} else
+#endif /* defined(J9VM_OPT_SNAPSHOTS) */
+	{
+		j9mem_free_memory(classloader->classPathEntries);
+	}
 	classloader->classPathEntries = NULL;
 	classloader->classPathEntryCount = 0;
 	omrthread_monitor_exit(sharedClassConfig->jclCacheMutex);
@@ -147,6 +172,9 @@ recycleVMThread(J9VMThread * vmThread)
 
 	/* Indicate that the vmThread is dying */
 	vmThread->threadObject = NULL;
+#if JAVA_SPEC_VERSION >= 19
+	vmThread->carrierThreadObject = NULL;
+#endif /* JAVA_SPEC_VERSION >= 19 */
 
 	issueWriteBarrier();
 
@@ -227,6 +255,23 @@ deallocateVMThread(J9VMThread * vmThread, UDATA decrementZombieCount, UDATA send
 		TRIGGER_J9HOOK_VM_THREAD_DESTROY(vm->hookInterface, vmThread);
 	}
 
+#if JAVA_SPEC_VERSION >= 19
+	if (NULL != vmThread->threadObject) {
+		/* Deallocate thread object's tls array. */
+		freeTLS(vmThread, vmThread->threadObject);
+	}
+
+	/* Cleanup Continuation cache */
+	if (NULL != vmThread->continuationT1Cache) {
+		for (U_32 i = 0; i < vm->continuationT1Size; i++) {
+			if (NULL != vmThread->continuationT1Cache[i]) {
+				vm->internalVMFunctions->recycleContinuation(vm, NULL, vmThread->continuationT1Cache[i], TRUE);
+			}
+		}
+		j9mem_free_memory(vmThread->continuationT1Cache);
+	}
+#endif /* JAVA_SPEC_VERSION >= 19 */
+
 	/* freeing the per thread buffers in the portlibrary */
 	j9port_tls_free();
 
@@ -302,15 +347,9 @@ static void
 trcModulesFreeJ9ModuleEntry(J9JavaVM *javaVM, J9Module *j9module)
 {
 	J9VMThread *currentThread = javaVM->mainThread;
-	PORT_ACCESS_FROM_VMC(currentThread);
-	char moduleNameBuf[J9VM_PACKAGE_NAME_BUFFER_LENGTH];
-	char *moduleNameUTF = copyStringToUTF8WithMemAlloc(
-		currentThread, j9module->moduleName, J9_STR_NULL_TERMINATE_RESULT, "", 0, moduleNameBuf, J9VM_PACKAGE_NAME_BUFFER_LENGTH, NULL);
-	if (NULL != moduleNameUTF) {
-		Trc_MODULE_freeJ9ModuleV2_entry(currentThread, moduleNameUTF, j9module);
-		if (moduleNameBuf != moduleNameUTF) {
-			j9mem_free_memory(moduleNameUTF);
-		}
+	J9UTF8 *moduleName = j9module->moduleName;
+	if (NULL != moduleName) {
+		Trc_MODULE_freeJ9ModuleV2_entry(currentThread, (const char *)J9UTF8_DATA(moduleName), j9module);
 	}
 }
 
@@ -353,6 +392,11 @@ freeJ9Module(J9JavaVM *javaVM, J9Module *j9module) {
 		}
 
 		hashTableFree(j9module->removeExportsHashTable);
+	}
+
+	if (NULL != j9module->moduleName) {
+		PORT_ACCESS_FROM_JAVAVM(javaVM);
+		j9mem_free_memory((void *)j9module->moduleName);
 	}
 
 	pool_removeElement(javaVM->modularityPool, j9module);
@@ -398,7 +442,15 @@ cleanUpClassLoader(J9VMThread *vmThread, J9ClassLoader* classLoader)
 			PORT_ACCESS_FROM_VMC(vmThread);
 			/* Free the class path entries  in system class loader */
 			freeClassLoaderEntries(vmThread, classLoader->classPathEntries, classLoader->classPathEntryCount, classLoader->initClassPathEntryCount);
-			j9mem_free_memory(classLoader->classPathEntries);
+#if defined(J9VM_OPT_SNAPSHOTS)
+			VMSNAPSHOTIMPLPORT_ACCESS_FROM_JAVAVM(javaVM);
+			if (IS_SNAPSHOTTING_ENABLED(javaVM)) {
+				vmsnapshot_free_memory(classLoader->classPathEntries);
+			} else
+#endif /* defined(J9VM_OPT_SNAPSHOTS) */
+			{
+				j9mem_free_memory(classLoader->classPathEntries);
+			}
 			classLoader->classPathEntryCount = 0;
 			classLoader->classPathEntries = NULL;
 			if (NULL != classLoader->cpEntriesMutex) {

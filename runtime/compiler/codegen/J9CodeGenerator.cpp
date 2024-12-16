@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #if defined(J9ZOS390)
@@ -257,11 +257,11 @@ J9::CodeGenerator::lowerCompressedRefs(
     and compression:
     compress = actual - heap_base
 
-    iaload f      l2a
+    aloadi f      l2a
       aload O       ladd
                       lshl
                         i2l
-                          iiload f
+                          iloadi f
                             aload O
                         iconst shftKonst
                       lconst HB
@@ -269,11 +269,11 @@ J9::CodeGenerator::lowerCompressedRefs(
     -or- if the field is known to be null
     l2a
       i2l
-        iiload f
+        iloadi f
           aload O
 
 
-    iastore f     iistore f
+    astorei f     istorei f
       aload O       aload O
       value         l2i
                       lshr
@@ -284,7 +284,7 @@ J9::CodeGenerator::lowerCompressedRefs(
                         iconst shftKonst
 
     -or- if the field is known to be null
-    iistore f
+    istorei f
       aload O
       l2i
         a2l      <- nop on most platforms
@@ -297,16 +297,16 @@ J9::CodeGenerator::lowerCompressedRefs(
     compress = actual - heapBase + shadowBase = actual + disp
     actual = compress - disp
 
-    iaload f     i2a
+    aloadi f     i2a
        aload O      isub
-                      iiload f
+                      iloadi f
                        aload O
                       iconst HB
 
-    iastore f    iistore f
+    astorei f    istorei f
        aload O      aload O
                    iushr            // iushr only there to distinguish between
-                     iadd           // real iistores with iadds as the value
+                     iadd           // real istoreis with iadds as the value
                        a2i
                          value
                        iconst HB
@@ -446,28 +446,35 @@ J9::CodeGenerator::lowerCompressedRefs(
       // generate a compression sequence
       //
       TR::Node *a2lNode = TR::Node::create(TR::a2l, 1, address);
-      bool isNonNull = false;
-      if (address->isNonNull())
-         isNonNull = true;
+      bool isNonNull = address->isNonNull();
 
-      TR::Node *addNode = NULL;
-      addNode = a2lNode;
+      // This will be the compressed value in the low half and zero in the high
+      // half (once it's been shifted if necessary).
+      TR::Node *longCompressedNode = a2lNode;
 
-      if (shftOffset)
+      bool isNull = address->isNull();
+      if (shftOffset != NULL && !isNull) // the shift does nothing to zero (null)
          {
-         addNode = TR::Node::create(TR::lushr, 2, addNode, shftOffset);
-         addNode->setContainsCompressionSequence(true);
+         longCompressedNode = TR::Node::create(TR::lushr, 2, longCompressedNode, shftOffset);
+         longCompressedNode->setContainsCompressionSequence(true);
          }
 
-      if (isNonNull)
-         addNode->setIsNonZero(true);
+      longCompressedNode->setIsHighWordZero(true);
 
-      TR::Node *l2iNode = TR::Node::create(TR::l2i, 1, addNode);
+      TR::Node *l2iNode = TR::Node::create(TR::l2i, 1, longCompressedNode);
+
       if (isNonNull)
+         {
+         a2lNode->setIsNonZero(true);
+         longCompressedNode->setIsNonZero(true);
          l2iNode->setIsNonZero(true);
-
-      if (address->isNull())
-         l2iNode->setIsNull(true);
+         }
+      else if (isNull)
+         {
+         a2lNode->setIsZero(true);
+         longCompressedNode->setIsZero(true);
+         l2iNode->setIsZero(true);
+         }
 
       // recreating an arrayset node will replace the TR::arrayset with an istorei, which is undesired
       // as arrayset nodes can set indirect references
@@ -645,16 +652,31 @@ J9::CodeGenerator::lowerTreesPreChildrenVisit(TR::Node *parent, TR::TreeTop *tre
       {
       // J9
       //
-      // Hiding compressedref logic from CodeGen doesn't seem a good practise, the evaluator always need the uncompressedref node for write barrier,
-      // therefore, this part is deprecated. It'll be removed once P and Z update their corresponding evaluators.
-      static bool UseOldCompareAndSwapObject = (bool)feGetEnv("TR_UseOldCompareAndSwapObject");
-      if (self()->comp()->useCompressedPointers() && (UseOldCompareAndSwapObject || !(self()->comp()->target().cpu.isX86() || self()->comp()->target().cpu.isARM64())))
+      /* Hiding compressedref logic from CodeGen isn't a good practice, and the evaluator still needs the uncompressedref node for write barriers.
+       * Therefore, this part is deprecated. It can only be activated on X, P or Z with the TR_UseOldCompareAndSwapObject envvar.
+       *
+       * If TR_DisableCAEIntrinsic is set to disable inlining of compareAndExchange, compressedref logic will not be hidden for compareAndExchange
+       * calls even if TR_UseOldCompareAndSwapObject is set. The reason is that TR_DisableCAEIntrinsic takes priority over TR_UseOldCompareAndSwapObject
+       * so neither the old nor new version of the inlined compareAndExchange are used and the non-inlined version expects that the compressedrefs are
+       * not hidden.
+       *
+       * Similarly, TR_DisableCASInlining (which is only supported on X) can be used to disable inlining on both compareAndSwap and compareAndExchange.
+       * This also takes priority over TR_UseOldCompareAndSwapObject. Once again, the compressedrefs logic will not be hidden since it is expected by
+       * the non-inlined version.
+       */
+      static bool useOldCompareAndSwapObject = (bool)feGetEnv("TR_UseOldCompareAndSwapObject");
+      static bool disableCASInlining = feGetEnv("TR_DisableCASInlining") != NULL;
+      if (((self()->comp()->target().cpu.isX86() && !disableCASInlining) || self()->comp()->target().cpu.isPower() || self()->comp()->target().cpu.isZ()) &&
+          self()->comp()->useCompressedPointers() && useOldCompareAndSwapObject)
          {
          TR::MethodSymbol *methodSymbol = parent->getSymbol()->castToMethodSymbol();
+         static bool disableCAEIntrinsic = feGetEnv("TR_DisableCAEIntrinsic") != NULL;
          // In Java9 Unsafe could be the jdk.internal JNI method or the sun.misc ordinary method wrapper,
          // while in Java8 it can only be the sun.misc package which will itself contain the JNI method.
          // Test for isNative to distinguish between them.
-         if ((methodSymbol->getRecognizedMethod() == TR::sun_misc_Unsafe_compareAndSwapObject_jlObjectJjlObjectjlObject_Z) &&
+         if (((methodSymbol->getRecognizedMethod() == TR::sun_misc_Unsafe_compareAndSwapObject_jlObjectJjlObjectjlObject_Z) ||
+              ((methodSymbol->getRecognizedMethod() == TR::jdk_internal_misc_Unsafe_compareAndExchangeObject) && !disableCAEIntrinsic) ||
+              ((methodSymbol->getRecognizedMethod() == TR::jdk_internal_misc_Unsafe_compareAndExchangeReference) && !disableCAEIntrinsic)) &&
                methodSymbol->isNative() &&
                (!TR::Compiler->om.canGenerateArraylets() || parent->isUnsafeGetPutCASCallOnNonArray()) && parent->isSafeForCGToFastPathUnsafeCall())
             {
@@ -727,7 +749,7 @@ J9::CodeGenerator::createReferenceReadBarrier(TR::TreeTop* treeTop, TR::Node* pa
    // isCollectedReference() responds false to generic int shadows because their type
    // is int. However, address type generic int shadows refer to collected slots.
 
-   if (symbol == TR::comp()->getSymRefTab()->findGenericIntShadowSymbol() || symbol->isCollectedReference())
+   if (symbol == self()->comp()->getSymRefTab()->findGenericIntShadowSymbol() || symbol->isCollectedReference())
       {
       TR::Node::recreate(parent, TR::ardbari);
       if (treeTop->getNode()->getOpCodeValue() == TR::NULLCHK                  &&
@@ -772,7 +794,7 @@ J9::CodeGenerator::lowerTreeIfNeeded(
    if (node->getOpCode().isCall() &&
        !node->getSymbol()->castToMethodSymbol()->isHelper())
       {
-      TR::RecognizedMethod rm = node->getSymbol()->castToMethodSymbol()->getRecognizedMethod();
+      TR::RecognizedMethod rm = node->getSymbol()->castToMethodSymbol()->getMandatoryRecognizedMethod();
 
       if(rm == TR::java_lang_invoke_MethodHandle_invokeBasic ||
         rm == TR::java_lang_invoke_MethodHandle_linkToStatic ||
@@ -837,19 +859,79 @@ J9::CodeGenerator::lowerTreeIfNeeded(
             TR::TreeTop::create(self()->comp(), tt->getPrevTreeTop(), floatTemp1StoreNode);
             }
          }
+      else if (rm == TR::java_lang_invoke_MethodHandle_linkToNative)
+         {
+         // The interpreter will push one extra argument (the appendix) for the
+         // callee to accept. This dummy null argument reserves space for the
+         // appendix on the stack. The interpreter will pop it before
+         // rearranging the arguments and pushing the appendix.
+         //
+         // Without reserving space in this way, pushing the appendix would
+         // introduce an unexpected offset into the stack pointer. Effectively,
+         // the VM would think that all of the arguments were passed from the
+         // JIT frame, resulting in an incorrect stack pointer on return or
+         // during stack walking.
+         //
+         // Note that while linkToNative() is also signature-polymorphic, it is
+         // not necessary to store the argument count into tempSlot. The VM has
+         // an alternative way to determine it.
+         //
+         TR::Node *dummyNull = TR::Node::aconst(node, 0);
+         node->addChildren(&dummyNull, 1);
+         }
       }
 
-   // J9
-   //
-   // if we found this iterator method inlined in a scorching method
-   // we should attempt to prefetch where it's used for performance
-   // structure is needed to determine the loop size to use proper prefetch stride
-   if (!self()->shouldBuildStructure() &&
-      (self()->comp()->getMethodHotness() >= scorching) &&
-      !tt->getEnclosingBlock()->isCold() &&
-      strstr(fej9->sampleSignature(node->getOwningMethod(), 0, 0, self()->trMemory()),"java/util/TreeMap$UnboundedValueIterator.next()"))
+   if (node->getOpCode().isCall() &&
+         node->getSymbol()->getMethodSymbol()->isNative() &&
+         self()->comp()->canTransformUnsafeCopyToArrayCopy())
       {
-      self()->setShouldBuildStructure();
+      TR::RecognizedMethod rm = node->getSymbol()->castToMethodSymbol()->getRecognizedMethod();
+
+      if ((rm == TR::sun_misc_Unsafe_copyMemory || rm == TR::jdk_internal_misc_Unsafe_copyMemory0) &&
+            performTransformation(self()->comp(), "O^O Call arraycopy instead of Unsafe.copyMemory: %s\n", self()->getDebug()->getName(node)))
+         {
+
+#if defined(J9VM_GC_SPARSE_HEAP_ALLOCATION)
+         if (TR::Compiler->om.isOffHeapAllocationEnabled())
+            TR::TransformUtil::transformUnsafeCopyMemorytoArrayCopyForOffHeap(self()->comp(), tt, node);
+         else
+#endif /* J9VM_GC_SPARSE_HEAP_ALLOCATION */
+         {
+            TR::Node *src = node->getChild(1);
+            TR::Node *srcOffset = node->getChild(2);
+            TR::Node *dest = node->getChild(3);
+            TR::Node *destOffset = node->getChild(4);
+            TR::Node *len = node->getChild(5);
+
+            if (self()->comp()->target().is32Bit())
+               {
+               srcOffset = TR::Node::create(TR::l2i, 1, srcOffset);
+               destOffset = TR::Node::create(TR::l2i, 1, destOffset);
+               len = TR::Node::create(TR::l2i, 1, len);
+               src = TR::Node::create(TR::aiadd, 2, src, srcOffset);
+               dest = TR::Node::create(TR::aiadd, 2, dest, destOffset);
+               }
+            else
+               {
+               src = TR::Node::create(TR::aladd, 2, src, srcOffset);
+               dest = TR::Node::create(TR::aladd, 2, dest, destOffset);
+               }
+
+            TR::Node *arraycopyNode = TR::Node::createArraycopy(src, dest, len);
+            TR::TreeTop *arrayCopyTT = TR::TreeTop::create(self()->comp(), arraycopyNode, tt->getNextTreeTop(), tt->getPrevTreeTop());
+
+            tt->getPrevTreeTop()->setNextTreeTop(arrayCopyTT);
+            tt->getNextTreeTop()->setPrevTreeTop(arrayCopyTT);
+
+            for (int i = 0; i <= 5; i++)
+               {
+               node->getChild(i)->decReferenceCount();
+               }
+
+         }
+
+         return;
+         }
       }
 
    // J9
@@ -1123,7 +1205,7 @@ J9::CodeGenerator::lowerTreeIfNeeded(
 #if defined(J9VM_OPT_JITSERVER)
             // This is currently the only place where this flag gets cleared. For JITServer, we should propagate it to the client,
             // to avoid having to call scanForNativeMethodsUntilMonitorNode again.
-            if (auto stream = TR::CompilationInfo::getStream())
+            if (auto stream = self()->comp()->getStream())
                {
                stream->write(JITServer::MessageType::CHTable_clearReservable, classPointer);
                stream->read<JITServer::Void>();
@@ -1312,7 +1394,7 @@ J9::CodeGenerator::lowerTreeIfNeeded(
    //Anchoring node to either extract register pressure(performance)
    //or ensure instanceof doesn't have a parent node of CALL (correctness)
    //
-   char *anchoringReason = "register hog";
+   const char *anchoringReason = "register hog";
    switch (node->getOpCodeValue())
       {
       // Extract heavy register pressure trees when dictated at the start of the walk
@@ -1648,6 +1730,12 @@ J9::CodeGenerator::doInstructionSelection()
       }
 
    bool fixedUpBlock = false;
+
+   if (self()->comp()->getOption(TR_SplitWarmAndColdBlocks) &&
+       !self()->comp()->compileRelocatableCode())
+      {
+      setInstructionSelectionInWarmCodeCache();
+      }
 
    for (TR::TreeTop *tt = self()->comp()->getStartTree(); tt; tt = self()->getCurrentEvaluationTreeTop()->getNextTreeTop())
       {
@@ -2108,6 +2196,26 @@ J9::CodeGenerator::doInstructionSelection()
       if (doEvaluation)
          self()->evaluate(node);
 
+      if (self()->comp()->getOption(TR_SplitWarmAndColdBlocks) &&
+          opCode == TR::BBEnd)
+         {
+         TR::Block *b = self()->getCurrentEvaluationBlock();
+
+         if (b->isLastWarmBlock())
+            {
+            resetInstructionSelectionInWarmCodeCache();
+            // Mark the split point between warm and cold instructions, so they
+            // can be allocated in different code sections.
+            //
+            TR::Instruction *lastInstr = b->getLastInstruction();
+
+            if (self()->comp()->getOption(TR_TraceCG))
+               traceMsg(self()->comp(), "%s Last warm instruction is %p\n", SPLIT_WARM_COLD_STRING, lastInstr);
+
+            lastInstr->setLastWarmInstruction(true);
+            self()->setLastWarmInstruction(lastInstr);
+            }
+         }
 
       if (self()->comp()->getOption(TR_TraceCG) || debug("traceGRA"))
          {
@@ -2532,7 +2640,7 @@ static void addValidationRecords(TR::CodeGenerator *cg)
          {
          traceMsg(cg->comp(), "processing AOT class info: %p in %s\n", *info, cg->comp()->signature());
          traceMsg(cg->comp(), "ramMethod: %p cp: %p cpIndex: %x relo %d\n", (*info)->_method, (*info)->_constantPool, (*info)->_cpIndex, (*info)->_reloKind);
-         traceMsg(cg->comp(), "clazz: %p classChain: %p\n", (*info)->_clazz, (*info)->_classChain);
+         traceMsg(cg->comp(), "clazz: %p classChainOffset: %" OMR_PRIuPTR "\n", (*info)->_clazz, (*info)->_classChainOffset);
 
          TR_OpaqueMethodBlock *ramMethod = (*info)->_method;
 
@@ -2570,11 +2678,16 @@ static void addValidationRecords(TR::CodeGenerator *cg)
 
          TR_ASSERT(siteIndex < (int32_t) cg->comp()->getNumInlinedCallSites(), "did not find AOTClassInfo %p method in inlined site table", *info);
 
-         cg->addExternalRelocation(new (cg->trHeapMemory()) TR::ExternalRelocation(NULL,
-                                                                          (uint8_t *)(intptr_t)siteIndex,
-                                                                          (uint8_t *)(*info),
-                                                                          (*info)->_reloKind, cg),
-                                                                          __FILE__, __LINE__, NULL);
+         cg->addExternalRelocation(
+            TR::ExternalRelocation::create(
+               NULL,
+               (uint8_t *)(intptr_t)siteIndex,
+               (uint8_t *)(*info),
+               (*info)->_reloKind,
+               cg),
+            __FILE__,
+            __LINE__,
+            NULL);
          }
       }
    }
@@ -2590,10 +2703,15 @@ static void addSVMValidationRecords(TR::CodeGenerator *cg)
 
       for (auto it = validationRecords.begin(); it != validationRecords.end(); it++)
          {
-         cg->addExternalRelocation(new (cg->trHeapMemory()) TR::ExternalRelocation(NULL,
-                                                                          (uint8_t *)(*it),
-                                                                          (*it)->_kind, cg),
-                                                                          __FILE__, __LINE__, NULL);
+         cg->addExternalRelocation(
+            TR::ExternalRelocation::create(
+               NULL,
+               (uint8_t *)(*it),
+               (*it)->_kind,
+               cg),
+            __FILE__,
+            __LINE__,
+            NULL);
          }
       }
    }
@@ -2618,16 +2736,9 @@ static TR_ExternalRelocationTargetKind getReloKindFromGuardSite(TR::CodeGenerato
       case TR_NonoverriddenGuard:
          type = TR_InlinedVirtualMethodWithNopGuard;
          break;
-      case TR_RemovedNonoverriddenGuard:
-         type = TR_InlinedVirtualMethod;
-         break;
 
       case TR_InterfaceGuard:
          type = TR_InlinedInterfaceMethodWithNopGuard;
-         break;
-      case TR_RemovedInterfaceGuard:
-         traceMsg(cg->comp(), "TR_RemovedInterfaceMethod\n");
-         type = TR_InlinedInterfaceMethod;
          break;
 
       case TR_AbstractGuard:
@@ -2660,11 +2771,6 @@ static TR_ExternalRelocationTargetKind getReloKindFromGuardSite(TR::CodeGenerato
                               site, site->getGuard(), site->getGuard()->getCallNode());
          break;
 
-      case TR_RemovedProfiledGuard:
-         traceMsg(cg->comp(), "TR_ProfiledInlinedMethodRelocation\n");
-         type = TR_ProfiledInlinedMethodRelocation;
-         break;
-
       case TR_ProfiledGuard:
          if (site->getGuard()->getTestType() == TR_MethodTest)
             {
@@ -2694,7 +2800,7 @@ static TR_ExternalRelocationTargetKind getReloKindFromGuardSite(TR::CodeGenerato
    return type;
    }
 
-static void processAOTGuardSites(TR::CodeGenerator *cg, uint32_t inlinedCallSize, TR_InlinedSiteHastTableEntry *orderedInlinedSiteListTable)
+static void processAOTGuardSites(TR::CodeGenerator *cg, uint32_t inlinedCallSize, TR_InlinedSiteHashTableEntry *orderedInlinedSiteListTable)
    {
    TR::list<TR_AOTGuardSite*> *aotGuardSites = cg->comp()->getAOTGuardPatchSites();
    for(auto it = aotGuardSites->begin(); it != aotGuardSites->end(); ++it)
@@ -2741,18 +2847,28 @@ static void processAOTGuardSites(TR::CodeGenerator *cg, uint32_t inlinedCallSize
          case TR_CheckMethodEnter:
          case TR_CheckMethodExit:
          case TR_HCR:
-            cg->addExternalRelocation(new (cg->trHeapMemory()) TR::ExternalRelocation((uint8_t *)(*it)->getLocation(),
-                                                                             (uint8_t *)(*it)->getDestination(),
-                                                                             type, cg),
-                             __FILE__, __LINE__, NULL);
+            cg->addExternalRelocation(
+               TR::ExternalRelocation::create(
+                  (uint8_t *)(*it)->getLocation(),
+                  (uint8_t *)(*it)->getDestination(),
+                  type,
+                  cg),
+               __FILE__,
+               __LINE__,
+               NULL);
             break;
 
          case TR_Breakpoint:
-            cg->addExternalRelocation(new (cg->trHeapMemory()) TR::ExternalRelocation((uint8_t *)(*it)->getLocation(),
-                                                                             (uint8_t *)(intptr_t)(*it)->getGuard()->getCurrentInlinedSiteIndex(),
-                                                                             (uint8_t *)(*it)->getDestination(),
-                                                                             type, cg),
-                             __FILE__, __LINE__, NULL);
+            cg->addExternalRelocation(
+               TR::ExternalRelocation::create(
+                  (uint8_t *)(*it)->getLocation(),
+                  (uint8_t *)(intptr_t)(*it)->getGuard()->getCurrentInlinedSiteIndex(),
+                  (uint8_t *)(*it)->getDestination(),
+                  type,
+                  cg),
+               __FILE__,
+               __LINE__,
+               NULL);
             break;
 
          case TR_NoRelocation:
@@ -2783,11 +2899,18 @@ static void addInlinedSiteRelocation(TR::CodeGenerator *cg,
    info->data3 = reinterpret_cast<uintptr_t>(receiver);
    info->data4 = reinterpret_cast<uintptr_t>(destinationAddress);
 
-   cg->addExternalRelocation(new (cg->trHeapMemory()) TR::ExternalRelocation(reloLocation, (uint8_t *)info, reloType, cg),
-                   __FILE__,__LINE__, NULL);
+   cg->addExternalRelocation(
+      TR::ExternalRelocation::create(
+         reloLocation,
+         (uint8_t *)info,
+         reloType,
+         cg),
+      __FILE__,
+      __LINE__,
+      NULL);
    }
 
-static void addInliningTableRelocations(TR::CodeGenerator *cg, uint32_t inlinedCallSize, TR_InlinedSiteHastTableEntry *orderedInlinedSiteListTable)
+static void addInliningTableRelocations(TR::CodeGenerator *cg, uint32_t inlinedCallSize, TR_InlinedSiteHashTableEntry *orderedInlinedSiteListTable)
    {
    // If have inlined calls, now add the relocation records in descending order
    // of inlined site index (at relocation time, the order is reverse)
@@ -2833,11 +2956,11 @@ J9::CodeGenerator::processRelocations()
       uint32_t inlinedCallSize = self()->comp()->getNumInlinedCallSites();
 
       // Create temporary hashtable for ordering AOT guard relocations
-      TR_InlinedSiteHastTableEntry *orderedInlinedSiteListTable = NULL;
+      TR_InlinedSiteHashTableEntry *orderedInlinedSiteListTable = NULL;
       if (inlinedCallSize > 0)
          {
-         orderedInlinedSiteListTable= (TR_InlinedSiteHastTableEntry*)self()->comp()->trMemory()->allocateMemory(sizeof(TR_InlinedSiteHastTableEntry) * inlinedCallSize, heapAlloc);
-         memset(orderedInlinedSiteListTable, 0, sizeof(TR_InlinedSiteHastTableEntry)*inlinedCallSize);
+         orderedInlinedSiteListTable= (TR_InlinedSiteHashTableEntry*)self()->comp()->trMemory()->allocateMemory(sizeof(TR_InlinedSiteHashTableEntry) * inlinedCallSize, heapAlloc);
+         memset(orderedInlinedSiteListTable, 0, sizeof(TR_InlinedSiteHashTableEntry)*inlinedCallSize);
          }
 
       // Traverse list of AOT-specific guards and create relocation records
@@ -2912,17 +3035,32 @@ void J9::CodeGenerator::addExternalRelocation(TR::Relocation *r, TR::RelocationD
 #endif /* defined(J9VM_OPT_JITSERVER) */
 
 void J9::CodeGenerator::addProjectSpecializedRelocation(uint8_t *location, uint8_t *target, uint8_t *target2,
-      TR_ExternalRelocationTargetKind kind, char *generatingFileName, uintptr_t generatingLineNumber, TR::Node *node)
+      TR_ExternalRelocationTargetKind kind, const char *generatingFileName, uintptr_t generatingLineNumber, TR::Node *node)
    {
    (target2 == NULL) ?
-         self()->addExternalRelocation(new (self()->trHeapMemory()) TR::ExternalRelocation(location, target, kind, self()),
-               generatingFileName, generatingLineNumber, node) :
-         self()->addExternalRelocation(new (self()->trHeapMemory()) TR::ExternalRelocation(location, target, target2, kind, self()),
-               generatingFileName, generatingLineNumber, node);
+         self()->addExternalRelocation(
+            TR::ExternalRelocation::create(
+               location,
+               target,
+               kind,
+               self()),
+            generatingFileName,
+            generatingLineNumber,
+            node) :
+         self()->addExternalRelocation(
+            TR::ExternalRelocation::create(
+               location,
+               target,
+               target2,
+               kind,
+               self()),
+            generatingFileName,
+            generatingLineNumber,
+            node);
    }
 
 void J9::CodeGenerator::addProjectSpecializedRelocation(TR::Instruction *instr, uint8_t *target, uint8_t *target2,
-      TR_ExternalRelocationTargetKind kind, char *generatingFileName, uintptr_t generatingLineNumber, TR::Node *node)
+      TR_ExternalRelocationTargetKind kind, const char *generatingFileName, uintptr_t generatingLineNumber, TR::Node *node)
    {
    (target2 == NULL) ?
          self()->addExternalRelocation(new (self()->trHeapMemory()) TR::BeforeBinaryEncodingExternalRelocation(instr, target, kind, self()),
@@ -2932,7 +3070,7 @@ void J9::CodeGenerator::addProjectSpecializedRelocation(TR::Instruction *instr, 
    }
 
 void J9::CodeGenerator::addProjectSpecializedPairRelocation(uint8_t *location, uint8_t *location2, uint8_t *target,
-      TR_ExternalRelocationTargetKind kind, char *generatingFileName, uintptr_t generatingLineNumber, TR::Node *node)
+      TR_ExternalRelocationTargetKind kind, const char *generatingFileName, uintptr_t generatingLineNumber, TR::Node *node)
    {
    self()->addExternalRelocation(new (self()->trHeapMemory()) TR::ExternalOrderedPair32BitRelocation(location, location2, target, kind, self()),
          generatingFileName, generatingLineNumber, node);
@@ -2969,8 +3107,15 @@ J9::CodeGenerator::jitAddUnresolvedAddressMaterializationToPatchOnClassRedefinit
    if (self()->comp()->compileRelocatableCode())
 #endif /* defined(J9VM_OPT_JITSERVER) */
       {
-      self()->addExternalRelocation(new (self()->trHeapMemory()) TR::ExternalRelocation((uint8_t *)firstInstruction, 0, TR_HCR, self()),
-                                 __FILE__,__LINE__, NULL);
+      self()->addExternalRelocation(
+         TR::ExternalRelocation::create(
+            (uint8_t *)firstInstruction,
+            0,
+            TR_HCR,
+            self()),
+         __FILE__,
+         __LINE__,
+         NULL);
       }
    else
       {
@@ -3085,7 +3230,7 @@ J9::CodeGenerator::compressedReferenceRematerialization()
             prevTree->join(nextTree);
             }
 
-         if (node->canGCandReturn())
+         if (node->canGCandReturn(self()->comp()))
             {
             ListIterator<TR::Node> nodesIt(&rematerializedNodes);
             for (TR::Node * rematNode = nodesIt.getFirst(); rematNode != NULL; rematNode = nodesIt.getNext())
@@ -4030,7 +4175,10 @@ J9::CodeGenerator::fixUpProfiledInterfaceGuardTest()
          {
          TR_VirtualGuard *vg = comp->findVirtualGuardInfo(node);
          // Mainly we need to make sure that virtual guard which performs the TR_MethodTest and can be NOP'd are needed the range check.
-         if (vg && vg->getTestType() == TR_MethodTest && !(self()->willGenerateNOPForVirtualGuard(node)))
+         if (vg != NULL
+             && vg->getTestType() == TR_MethodTest
+             && !self()->willGenerateNOPForVirtualGuard(node)
+             && !node->vftEntryIsInBounds())
             {
             TR::SymbolReference *callSymRef = vg->getSymbolReference();
             TR_ASSERT_FATAL(callSymRef != NULL, "Guard n%dn for the inlined call should have stored symbol reference for the call", node->getGlobalIndex());
@@ -4656,26 +4804,6 @@ J9::CodeGenerator::setUpForInstructionSelection()
    }
 
 bool
-J9::CodeGenerator::wantToPatchClassPointer(TR::Compilation *comp,
-                             const TR_OpaqueClassBlock *allegedClassPointer,
-                             const uint8_t *inCodeAt)
-   {
-   return TR::CodeGenerator::wantToPatchClassPointer(comp, allegedClassPointer, "in code at", inCodeAt);
-   }
-
-bool
-J9::CodeGenerator::wantToPatchClassPointer(const TR_OpaqueClassBlock *allegedClassPointer, const uint8_t *inCodeAt)
-   {
-   return TR::CodeGenerator::wantToPatchClassPointer(self()->comp(), allegedClassPointer, inCodeAt);
-   }
-
-bool
-J9::CodeGenerator::wantToPatchClassPointer(const TR_OpaqueClassBlock *allegedClassPointer, const TR::Node *forNode)
-   {
-   return TR::CodeGenerator::wantToPatchClassPointer(self()->comp(), allegedClassPointer, "for node", forNode);
-   }
-
-bool
 J9::CodeGenerator::supportsJitMethodEntryAlignment()
    {
    return self()->fej9()->supportsJitMethodEntryAlignment();
@@ -4873,6 +5001,12 @@ J9::CodeGenerator::needRelocationsForCurrentMethodPC()
    }
 
 bool
+J9::CodeGenerator::needRelocationsForCurrentMethodStartPC()
+   {
+   return self()->fej9()->needRelocationsForCurrentMethodStartPC();
+   }
+
+bool
 J9::CodeGenerator::needRelocationsForHelpers()
    {
    return self()->fej9()->needRelocationsForHelpers();
@@ -4924,7 +5058,7 @@ void
 J9::CodeGenerator::trimCodeMemoryToActualSize()
    {
    uint8_t *bufferStart = self()->getBinaryBufferStart();
-   size_t actualCodeLengthInBytes = self()->getCodeEnd() - bufferStart;
+   size_t actualCodeLengthInBytes = self()->getWarmCodeEnd() - bufferStart;
 
    TR::VMAccessCriticalSection trimCodeMemoryAllocation(self()->comp());
    self()->getCodeCache()->trimCodeMemoryAllocation(bufferStart, actualCodeLengthInBytes);
@@ -5135,4 +5269,22 @@ J9::CodeGenerator::isProfiledClassAndCallSiteCompatible(TR_OpaqueClassBlock *pro
       return true;
       }
    return false;
+   }
+
+bool
+J9::CodeGenerator::enableJitDispatchJ9Method()
+   {
+   static const bool disable = feGetEnv("TR_disableJitDispatchJ9Method") != NULL;
+   return !disable
+      && self()->supportsNonHelper(TR::SymbolReferenceTable::jitDispatchJ9MethodSymbol);
+   }
+
+bool
+J9::CodeGenerator::stressJitDispatchJ9MethodJ2I()
+   {
+   if (!self()->enableJitDispatchJ9Method())
+      return false;
+
+   static const bool stress = feGetEnv("TR_stressJitDispatchJ9MethodJ2I") != NULL;
+   return stress;
    }

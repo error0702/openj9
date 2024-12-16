@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include <stdint.h>
@@ -30,6 +30,7 @@
 #include "j9cp.h"
 #include "j9protos.h"
 #include "rommeth.h"
+#include "codegen/AheadOfTimeCompile.hpp"
 #include "codegen/CodeGenerator.hpp"
 #include "env/FrontEnd.hpp"
 #include "codegen/PicHelpers.hpp"
@@ -39,6 +40,7 @@
 #include "control/Options_inlines.hpp"
 #include "env/CHTable.hpp"
 #include "env/ClassLoaderTable.hpp"
+#include "env/DependencyTable.hpp"
 #include "env/PersistentCHTable.hpp"
 #include "env/jittypes.h"
 #include "env/VMAccessCriticalSection.hpp"
@@ -56,12 +58,11 @@
 #include "env/VMJ9.h"
 #include "control/rossa.h"
 #if defined(J9VM_OPT_JITSERVER)
-#include "codegen/AheadOfTimeCompile.hpp"
 #include "control/CompilationRuntime.hpp"
 #include "control/CompilationThread.hpp"
 #include "control/MethodToBeCompiled.hpp"
+#include "runtime/JITServerAOTDeserializer.hpp"
 #endif /* defined(J9VM_OPT_JITSERVER) */
-
 
 // TODO: move this someplace common for RuntimeAssumptions.cpp and here
 #if defined(__IBMCPP__) && !defined(AIXPPC) && !defined(LINUXPPC)
@@ -82,59 +83,20 @@ struct TR_RelocationRecordBinaryTemplate
    {
    uint8_t type(TR_RelocationTarget *reloTarget);
 
-   uint16_t _size;
    uint8_t _type;
-   uint8_t _flags;
-
-#if defined(TR_HOST_64BIT)
-   uint32_t _extra;
-#endif
+   uint16_t _size;
+   uint16_t _flags;
    };
 
-// Generating 32-bit code on a 64-bit machine or vice-versa won't work because the alignment won't
-// be right.  Relying on inheritance in the structures here means padding is automatically inserted
-// at each inheritance boundary: this inserted padding won't match across 32-bit and 64-bit platforms.
-// Making as many fields as possible UDATA should minimize the differences and gives the most freedom
-// in the hierarchy of binary relocation record structures, but the header definitely has an inheritance
-// boundary at offset 4B.
-
-// This struct must be identical to TR_RelocationRecordBinaryTemplate
-// in at least the first three (_size, _type, and _flags) fields
-struct TR_RelocationRecordHelperAddressBinaryTemplate
+struct TR_RelocationRecordHelperAddressBinaryTemplate : public TR_RelocationRecordBinaryTemplate
    {
-   uint16_t _size;
-   uint8_t _type;
-   uint8_t _flags;
    uint32_t _helperID;
    };
-static_assert(offsetof(TR_RelocationRecordBinaryTemplate, _size)
-              == offsetof(TR_RelocationRecordHelperAddressBinaryTemplate, _size),
-              "TR_RelocationRecordHelperAddressBinaryTemplate::_size not the same offset as TR_RelocationRecordBinaryTemplate::_size");
-static_assert(offsetof(TR_RelocationRecordBinaryTemplate, _type)
-              == offsetof(TR_RelocationRecordHelperAddressBinaryTemplate, _type),
-              "TR_RelocationRecordHelperAddressBinaryTemplate::_type not the same offset as TR_RelocationRecordBinaryTemplate::_type");
-static_assert(offsetof(TR_RelocationRecordBinaryTemplate, _flags)
-              == offsetof(TR_RelocationRecordHelperAddressBinaryTemplate, _flags),
-              "TR_RelocationRecordHelperAddressBinaryTemplate::_flags not the same offset as TR_RelocationRecordBinaryTemplate::_flags");
 
-// This struct must be identical to TR_RelocationRecordBinaryTemplate
-// in at least the first three (_size, _type, and _flags) fields
-struct TR_RelocationRecordPicTrampolineBinaryTemplate
+struct TR_RelocationRecordPicTrampolineBinaryTemplate : public TR_RelocationRecordBinaryTemplate
    {
-   uint16_t _size;
-   uint8_t _type;
-   uint8_t _flags;
    uint32_t _numTrampolines;
    };
-static_assert(offsetof(TR_RelocationRecordBinaryTemplate, _size)
-              == offsetof(TR_RelocationRecordPicTrampolineBinaryTemplate, _size),
-              "TR_RelocationRecordPicTrampolineBinaryTemplate::_size not the offset same as TR_RelocationRecordBinaryTemplate::_size");
-static_assert(offsetof(TR_RelocationRecordBinaryTemplate, _type)
-              == offsetof(TR_RelocationRecordPicTrampolineBinaryTemplate, _type),
-              "TR_RelocationRecordPicTrampolineBinaryTemplate::_type not the offset same as TR_RelocationRecordBinaryTemplate::_type");
-static_assert(offsetof(TR_RelocationRecordBinaryTemplate, _flags)
-              == offsetof(TR_RelocationRecordPicTrampolineBinaryTemplate, _flags),
-              "TR_RelocationRecordPicTrampolineBinaryTemplate::_flags not the offset same as TR_RelocationRecordBinaryTemplate::_flags");
 
 struct TR_RelocationRecordWithInlinedSiteIndexBinaryTemplate : public TR_RelocationRecordBinaryTemplate
    {
@@ -166,6 +128,11 @@ struct TR_RelocationRecordConstantPoolWithIndexBinaryTemplate : public TR_Reloca
 struct TR_RelocationRecordJ2IVirtualThunkPointerBinaryTemplate : public TR_RelocationRecordConstantPoolBinaryTemplate
    {
    IDATA _offsetToJ2IVirtualThunkPointer;
+   };
+
+struct TR_RelocationRecordDirectToJNIBinaryTemplate : public TR_RelocationRecordConstantPoolWithIndexBinaryTemplate
+   {
+   uint8_t _offsetToReloLocation;
    };
 
 struct TR_RelocationRecordInlinedAllocationBinaryTemplate : public TR_RelocationRecordConstantPoolWithIndexBinaryTemplate
@@ -380,6 +347,26 @@ struct TR_RelocationRecordValidateMethodFromSingleAbstractImplBinaryTemplate : p
    int32_t _vftSlot;
    };
 
+struct TR_RelocationRecordValidateDynamicMethodFromCallsiteIndexBinaryTemplate : public TR_RelocationRecordBinaryTemplate
+   {
+   uint16_t _methodID;
+   uint16_t _callerID;
+   int32_t _callsiteIndex;
+   uint8_t _appendixObjectNull;
+   uint16_t _definingClassID;
+   uint32_t _methodIndex;
+   };
+
+struct TR_RelocationRecordValidateHandleMethodFromCPIndexBinaryTemplate : public TR_RelocationRecordBinaryTemplate
+   {
+   uint16_t _methodID;
+   uint16_t _callerID;
+   int32_t _cpIndex;
+   uint8_t _appendixObjectNull;
+   uint16_t _definingClassID;
+   uint32_t _methodIndex;
+   };
+
 struct TR_RelocationRecordValidateStackWalkerMaySkipFramesBinaryTemplate : public TR_RelocationRecordBinaryTemplate
    {
    uint16_t _methodID;
@@ -417,6 +404,36 @@ struct TR_RelocationRecordBlockFrequencyBinaryTemplate: public TR_RelocationReco
 struct TR_RelocationRecordBreapointGuardBinaryTemplate : public TR_RelocationRecordWithInlinedSiteIndexBinaryTemplate
    {
    UDATA _destinationAddress;
+   };
+
+struct TR_RelocationRecordValidateJ2IThunkFromMethodBinaryTemplate : public TR_RelocationRecordBinaryTemplate
+   {
+   uint16_t _thunkID;
+   uint16_t _methodID;
+   };
+
+struct TR_RelocationRecordValidateIsClassVisibleBinaryTemplate : public TR_RelocationRecordBinaryTemplate
+   {
+   uint16_t _sourceClassID;
+   uint16_t _destClassID;
+   uint8_t _isVisible;
+   };
+
+struct TR_RelocationRecordMethodEnterExitHookAddressBinaryTemplate : public TR_RelocationRecordBinaryTemplate
+   {
+   uint8_t _isEnterHookAddr;
+   };
+
+struct TR_RelocationRecordCallsiteTableEntryAddressBinaryTemplate : public TR_RelocationRecordBinaryTemplate
+   {
+   uint16_t _methodID;
+   int32_t _callsiteIndex;
+   };
+
+struct TR_RelocationRecordMethodTypeTableEntryAddressBinaryTemplate : public TR_RelocationRecordBinaryTemplate
+   {
+   uint16_t _methodID;
+   int32_t _cpIndex;
    };
 
 // END OF BINARY TEMPLATES
@@ -477,7 +494,7 @@ TR_RelocationRecordGroup::wellKnownClassChainOffsets(
    return reinterpret_cast<const uintptr_t*>(classChains);
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordGroup::applyRelocations(TR_RelocationRuntime *reloRuntime,
                                            TR_RelocationTarget *reloTarget,
                                            uint8_t *reloOrigin)
@@ -495,7 +512,7 @@ TR_RelocationRecordGroup::applyRelocations(TR_RelocationRuntime *reloRuntime,
          {
          if (aotStats)
             aotStats->numWellKnownClassesValidationsFailed++;
-         return compilationAotClassReloFailure;
+         return TR_RelocationErrorCode::wkcValidationFailure;
          }
       }
 
@@ -508,8 +525,8 @@ TR_RelocationRecordGroup::applyRelocations(TR_RelocationRuntime *reloRuntime,
       // Create a specific type of relocation record based on the information
       // in the binary record pointed to by `recordPointer`
       TR_RelocationRecord *reloRecord = TR_RelocationRecord::create(&storage, reloRuntime, reloTarget, recordPointer);
-      int32_t rc = handleRelocation(reloRuntime, reloTarget, reloRecord, reloOrigin);
-      if (rc != 0)
+      TR_RelocationErrorCode rc = handleRelocation(reloRuntime, reloTarget, reloRecord, reloOrigin);
+      if (rc != TR_RelocationErrorCode::relocationOK)
          {
          uint8_t reloType = recordPointer->type(reloTarget);
          aotStats->numRelocationsFailedByType[reloType]++;
@@ -519,11 +536,11 @@ TR_RelocationRecordGroup::applyRelocations(TR_RelocationRuntime *reloRuntime,
       recordPointer = reloRecord->nextBinaryRecord(reloTarget);
       }
 
-   return 0;
+   return TR_RelocationErrorCode::relocationOK;
    }
 
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordGroup::handleRelocation(TR_RelocationRuntime *reloRuntime,
                                            TR_RelocationTarget *reloTarget,
                                            TR_RelocationRecord *reloRecord,
@@ -542,12 +559,12 @@ TR_RelocationRecordGroup::handleRelocation(TR_RelocationRuntime *reloRuntime,
       case TR_RelocationRecordAction::ignore:
          {
          RELO_LOG(reloRuntime->reloLogger(), 6, "\tignore!\n");
-         return 0;
+         return TR_RelocationErrorCode::relocationOK;
          }
       case TR_RelocationRecordAction::failCompilation:
          {
          RELO_LOG(reloRuntime->reloLogger(), 6, "\tINTERNAL ERROR!\n");
-         return compilationAotClassReloFailure;
+         return TR_RelocationErrorCode::reloActionFailCompile;
          }
       default:
          {
@@ -555,7 +572,7 @@ TR_RelocationRecordGroup::handleRelocation(TR_RelocationRuntime *reloRuntime,
          }
       }
 
-   return compilationAotClassReloFailure;
+   return TR_RelocationErrorCode::unknownReloAction;
    }
 
 TR_RelocationRecord *
@@ -819,6 +836,12 @@ TR_RelocationRecord::create(TR_RelocationRecord *storage, TR_RelocationRuntime *
       case TR_ValidateMethodFromSingleAbstractImplementer:
          reloRecord = new (storage) TR_RelocationRecordValidateMethodFromSingleAbstractImpl(reloRuntime, record);
          break;
+      case TR_ValidateDynamicMethodFromCallsiteIndex:
+         reloRecord = new (storage) TR_RelocationRecordValidateDynamicMethodFromCallsiteIndex(reloRuntime, record);
+         break;
+      case TR_ValidateHandleMethodFromCPIndex:
+         reloRecord = new (storage) TR_RelocationRecordValidateHandleMethodFromCPIndex(reloRuntime, record);
+         break;
       case TR_SymbolFromManager:
          reloRecord = new (storage) TR_RelocationRecordSymbolFromManager(reloRuntime, record);
          break;
@@ -833,6 +856,30 @@ TR_RelocationRecord::create(TR_RelocationRecord *storage, TR_RelocationRuntime *
          break;
       case TR_Breakpoint:
          reloRecord = new (storage) TR_RelocationRecordBreakpointGuard(reloRuntime, record);
+         break;
+      case TR_ValidateJ2IThunkFromMethod:
+         reloRecord = new (storage) TR_RelocationRecordValidateJ2IThunkFromMethod(reloRuntime, record);
+         break;
+      case TR_StaticDefaultValueInstance:
+         reloRecord = new (storage) TR_RelocationRecordStaticDefaultValueInstance(reloRuntime, record);
+         break;
+      case TR_ValidateIsClassVisible:
+         reloRecord = new (storage) TR_RelocationRecordValidateIsClassVisible(reloRuntime, record);
+         break;
+      case TR_CatchBlockCounter:
+         reloRecord = new (storage) TR_RelocationRecordCatchBlockCounter(reloRuntime, record);
+         break;
+      case TR_StartPC:
+         reloRecord = new (storage) TR_RelocationRecordStartPC(reloRuntime, record);
+         break;
+      case TR_MethodEnterExitHookAddress:
+         reloRecord = new (storage) TR_RelocationRecordMethodEnterExitHookAddress(reloRuntime, record);
+         break;
+      case TR_CallsiteTableEntryAddress:
+         reloRecord = new (storage) TR_RelocationRecordCallsiteTableEntryAddress(reloRuntime, record);
+         break;
+      case TR_MethodTypeTableEntryAddress:
+         reloRecord = new (storage) TR_RelocationRecordMethodTypeTableEntryAddress(reloRuntime, record);
          break;
       default:
          // TODO: error condition
@@ -934,31 +981,40 @@ TR_RelocationRecord::eipRelative(TR_RelocationTarget *reloTarget)
    }
 
 void
+TR_RelocationRecord::updateFlags(TR_RelocationTarget *reloTarget, uint16_t flagsToSet)
+   {
+   flagsToSet |= reloTarget->loadUnsigned16b((uint8_t *) &_record->_flags);
+   reloTarget->storeUnsigned16b(flagsToSet, (uint8_t *) &_record->_flags);
+   }
+
+void
 TR_RelocationRecord::setFlag(TR_RelocationTarget *reloTarget, uint8_t flag)
    {
-   uint8_t flags = reloTarget->loadUnsigned8b((uint8_t *) &_record->_flags) | (flag & RELOCATION_CROSS_PLATFORM_FLAGS_MASK);
-   reloTarget->storeUnsigned8b(flags, (uint8_t *) &_record->_flags);
+   uint16_t flagsToSet = static_cast<uint16_t>(flag);
+   TR_ASSERT_FATAL((flagsToSet & RELOCATION_RELOC_FLAGS_MASK) == 0,  "flag %x bits overlap relo flags bits\n", flag);
+
+   updateFlags(reloTarget, flagsToSet);
    }
 
 uint8_t
 TR_RelocationRecord::flags(TR_RelocationTarget *reloTarget)
    {
-   return reloTarget->loadUnsigned8b((uint8_t *) &_record->_flags) & RELOCATION_CROSS_PLATFORM_FLAGS_MASK;
+   return reloTarget->loadUnsigned16b((uint8_t *) &_record->_flags) & RELOCATION_CROSS_PLATFORM_FLAGS_MASK;
    }
 
 void
 TR_RelocationRecord::setReloFlags(TR_RelocationTarget *reloTarget, uint8_t reloFlags)
    {
-   TR_ASSERT_FATAL((reloFlags & RELOCATION_CROSS_PLATFORM_FLAGS_MASK) == 0,  "reloFlags bits overlap cross-platform flags bits\n");
-   uint8_t crossPlatFlags = flags(reloTarget);
-   uint8_t flags = crossPlatFlags | (reloFlags & RELOCATION_RELOC_FLAGS_MASK);
-   reloTarget->storeUnsigned8b(flags, (uint8_t *) &_record->_flags);
+   uint16_t flagsToSet = static_cast<uint16_t>(reloFlags) << RELOCATION_RELOC_FLAGS_SHIFT;
+   TR_ASSERT_FATAL((flagsToSet & RELOCATION_CROSS_PLATFORM_FLAGS_MASK) == 0,  "reloFlags %x bits overlap cross-platform flags bits\n", reloFlags);
+
+   updateFlags(reloTarget, flagsToSet);
    }
 
 uint8_t
 TR_RelocationRecord::reloFlags(TR_RelocationTarget *reloTarget)
    {
-   return reloTarget->loadUnsigned8b((uint8_t *) &_record->_flags) & RELOCATION_RELOC_FLAGS_MASK;
+   return (reloTarget->loadUnsigned16b((uint8_t *) &_record->_flags) & RELOCATION_RELOC_FLAGS_MASK) >> RELOCATION_RELOC_FLAGS_SHIFT;
    }
 
 void
@@ -990,12 +1046,12 @@ TR_RelocationRecord::action(TR_RelocationRuntime *reloRuntime)
    return TR_RelocationRecordAction::apply;
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecord::applyRelocationAtAllOffsets(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloOrigin)
    {
    int32_t sizeOfHeader = bytesInHeader(reloRuntime, reloTarget);
    if (sizeOfHeader <= 0)
-      return compilationAotUnknownReloTypeFailure;
+      return TR_RelocationErrorCode::unknownRelocation;
 
    if (reloTarget->isOrderedPairRelocation(this, reloTarget))
       {
@@ -1010,10 +1066,12 @@ TR_RelocationRecord::applyRelocationAtAllOffsets(TR_RelocationRuntime *reloRunti
             uint8_t *reloLocationHigh = reloOrigin + offsetHigh + 2; // Add 2 to skip the first 16 bits of instruction
             uint8_t *reloLocationLow = reloOrigin + offsetLow + 2; // Add 2 to skip the first 16 bits of instruction
             RELO_LOG(reloRuntime->reloLogger(), 6, "\treloLocation: from %p high %p low %p (offsetHigh %x offsetLow %x)\n", offsetPtr, reloLocationHigh, reloLocationLow, offsetHigh, offsetLow);
-            int32_t rc = applyRelocation(reloRuntime, reloTarget, reloLocationHigh, reloLocationLow);
-            if (rc != 0)
+            omrthread_jit_write_protect_disable();
+            TR_RelocationErrorCode rc = applyRelocation(reloRuntime, reloTarget, reloLocationHigh, reloLocationLow);
+            omrthread_jit_write_protect_enable();
+            if (rc != TR_RelocationErrorCode::relocationOK)
                {
-               RELO_LOG(reloRuntime->reloLogger(), 6, "\tapplyRelocationAtAllOffsets: rc = %d\n", rc);
+               RELO_LOG(reloRuntime->reloLogger(), 6, "\tapplyRelocationAtAllOffsets: rc = %s\n", reloRuntime->getReloErrorCodeName(rc));
                return rc;
                }
             }
@@ -1029,10 +1087,12 @@ TR_RelocationRecord::applyRelocationAtAllOffsets(TR_RelocationRuntime *reloRunti
             uint8_t *reloLocationHigh = reloOrigin + offsetHigh + 2; // Add 2 to skip the first 16 bits of instruction
             uint8_t *reloLocationLow = reloOrigin + offsetLow + 2; // Add 2 to skip the first 16 bits of instruction
             RELO_LOG(reloRuntime->reloLogger(), 6, "\treloLocation: from %p high %p low %p (offsetHigh %x offsetLow %x)\n", offsetPtr, reloLocationHigh, reloLocationLow, offsetHigh, offsetLow);
-            int32_t rc = applyRelocation(reloRuntime, reloTarget, reloLocationHigh, reloLocationLow);
-            if (rc != 0)
+            omrthread_jit_write_protect_disable();
+            TR_RelocationErrorCode rc = applyRelocation(reloRuntime, reloTarget, reloLocationHigh, reloLocationLow);
+            omrthread_jit_write_protect_enable();
+            if (rc != TR_RelocationErrorCode::relocationOK)
                {
-               RELO_LOG(reloRuntime->reloLogger(), 6, "\tapplyRelocationAtAllOffsets: rc = %d\n", rc);
+               RELO_LOG(reloRuntime->reloLogger(), 6, "\tapplyRelocationAtAllOffsets: rc = %s\n", reloRuntime->getReloErrorCodeName(rc));
                return rc;
                }
             }
@@ -1049,10 +1109,12 @@ TR_RelocationRecord::applyRelocationAtAllOffsets(TR_RelocationRuntime *reloRunti
             int32_t offset = *offsetPtr;
             uint8_t *reloLocation = reloOrigin + offset;
             RELO_LOG(reloRuntime->reloLogger(), 6, "\treloLocation: from %p at %p (offset %x)\n", offsetPtr, reloLocation, offset);
-            int32_t rc = applyRelocation(reloRuntime, reloTarget, reloLocation);
-            if (rc != 0)
+            omrthread_jit_write_protect_disable();
+            TR_RelocationErrorCode rc = applyRelocation(reloRuntime, reloTarget, reloLocation);
+            omrthread_jit_write_protect_enable();
+            if (rc != TR_RelocationErrorCode::relocationOK)
                {
-               RELO_LOG(reloRuntime->reloLogger(), 6, "\tapplyRelocationAtAllOffsets: rc = %d\n", rc);
+               RELO_LOG(reloRuntime->reloLogger(), 6, "\tapplyRelocationAtAllOffsets: rc = %s\n", reloRuntime->getReloErrorCodeName(rc));
                return rc;
                }
             }
@@ -1066,16 +1128,18 @@ TR_RelocationRecord::applyRelocationAtAllOffsets(TR_RelocationRuntime *reloRunti
             int16_t offset = *offsetPtr;
             uint8_t *reloLocation = reloOrigin + offset;
             RELO_LOG(reloRuntime->reloLogger(), 6, "\treloLocation: from %p at %p (offset %x)\n", offsetPtr, reloLocation, offset);
-            int32_t rc = applyRelocation(reloRuntime, reloTarget, reloLocation);
-            if (rc != 0)
+            omrthread_jit_write_protect_disable();
+            TR_RelocationErrorCode rc = applyRelocation(reloRuntime, reloTarget, reloLocation);
+            omrthread_jit_write_protect_enable();
+            if (rc != TR_RelocationErrorCode::relocationOK)
                {
-               RELO_LOG(reloRuntime->reloLogger(), 6, "\tapplyRelocationAtAllOffsets: rc = %d\n", rc);
+               RELO_LOG(reloRuntime->reloLogger(), 6, "\tapplyRelocationAtAllOffsets: rc = %s\n", reloRuntime->getReloErrorCodeName(rc));
                return rc;
                }
             }
          }
       }
-      return 0;
+      return TR_RelocationErrorCode::relocationOK;
    }
 
 // Handlers for individual relocation record types
@@ -1112,26 +1176,27 @@ TR_RelocationRecordWithOffset::preparePrivateData(TR_RelocationRuntime *reloRunt
    RELO_LOG(reloRuntime->reloLogger(), 6, "\tpreparePrivateData: addressToPatch: %p \n", reloPrivateData->_addressToPatch);
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordWithOffset::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    TR_RelocationRecordWithOffsetPrivateData *reloPrivateData = &(privateData()->offset);
    reloTarget->storeAddressSequence(reloPrivateData->_addressToPatch, reloLocation, reloFlags(reloTarget));
 
-   return 0;
+   return TR_RelocationErrorCode::relocationOK;
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordWithOffset::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocationHigh, uint8_t *reloLocationLow)
    {
    TR_RelocationRecordWithOffsetPrivateData *reloPrivateData = &(privateData()->offset);
    reloTarget->storeAddress(reloPrivateData->_addressToPatch, reloLocationHigh, reloLocationLow, reloFlags(reloTarget));
-   return 0;
+
+   return TR_RelocationErrorCode::relocationOK;
    }
 
 // TR_BlockFrequency
 //
-char *
+const char *
 TR_RelocationRecordBlockFrequency::name()
    {
    return "TR_BlockFrequency";
@@ -1177,33 +1242,33 @@ TR_RelocationRecordBlockFrequency::preparePrivateData(TR_RelocationRuntime *relo
    RELO_LOG(reloRuntime->reloLogger(), 6, "\tpreparePrivateData: addressToPatch: %p \n", reloPrivateData->_addressToPatch);
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordBlockFrequency::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    TR_RelocationRecordBlockFrequencyPrivateData *reloPrivateData = &(privateData()->blockFrequency);
    if (!reloPrivateData->_addressToPatch)
       {
-      return compilationAotBlockFrequencyReloFailure;
+      return TR_RelocationErrorCode::blockFrequencyRelocationFailure;
       }
    reloTarget->storeAddressSequence(reloPrivateData->_addressToPatch, reloLocation, reloFlags(reloTarget));
-   return 0;
+   return TR_RelocationErrorCode::relocationOK;
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordBlockFrequency::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocationHigh, uint8_t *reloLocationLow)
    {
    TR_RelocationRecordBlockFrequencyPrivateData *reloPrivateData = &(privateData()->blockFrequency);
    if (!reloPrivateData->_addressToPatch)
       {
-      return compilationAotBlockFrequencyReloFailure;
+      return TR_RelocationErrorCode::blockFrequencyRelocationFailure;
       }
    reloTarget->storeAddress(reloPrivateData->_addressToPatch, reloLocationHigh, reloLocationLow, reloFlags(reloTarget));
-   return 0;
+   return TR_RelocationErrorCode::relocationOK;
    }
 
 // TR_RecompQueuedFlag
 //
-char *
+const char *
 TR_RelocationRecordRecompQueuedFlag::name()
    {
    return "TR_RecompQueuedFlag";
@@ -1228,33 +1293,33 @@ TR_RelocationRecordRecompQueuedFlag::preparePrivateData(TR_RelocationRuntime *re
    }
 
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordRecompQueuedFlag::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    TR_RelocationRecordRecompQueuedFlagPrivateData *reloPrivateData = &(privateData()->recompQueuedFlag);
    if (!reloPrivateData->_addressToPatch)
       {
-      return compilationAotRecompQueuedFlagReloFailure;
+      return TR_RelocationErrorCode::recompQueuedFlagRelocationFailure;
       }
    reloTarget->storeAddressSequence(reloPrivateData->_addressToPatch, reloLocation, reloFlags(reloTarget));
-   return 0;
+   return TR_RelocationErrorCode::relocationOK;
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordRecompQueuedFlag::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocationHigh, uint8_t *reloLocationLow)
    {
    TR_RelocationRecordRecompQueuedFlagPrivateData *reloPrivateData = &(privateData()->recompQueuedFlag);
    if (!reloPrivateData->_addressToPatch)
       {
-      return compilationAotRecompQueuedFlagReloFailure;
+      return TR_RelocationErrorCode::recompQueuedFlagRelocationFailure;
       }
    reloTarget->storeAddress(reloPrivateData->_addressToPatch, reloLocationHigh, reloLocationLow, reloFlags(reloTarget));
-   return 0;
+   return TR_RelocationErrorCode::relocationOK;
    }
 
 // TR_GlobalValue
 //
-char *
+const char *
 TR_RelocationRecordGlobalValue::name()
    {
    return "TR_GlobalValue";
@@ -1269,7 +1334,7 @@ TR_RelocationRecordGlobalValue::preparePrivateData(TR_RelocationRuntime *reloRun
    }
 
 // TR_BodyInfoLoad
-char *
+const char *
 TR_RelocationRecordBodyInfoLoad::name()
    {
    return "TR_BodyInfoLoad";
@@ -1283,24 +1348,24 @@ TR_RelocationRecordBodyInfoLoad::preparePrivateData(TR_RelocationRuntime *reloRu
    RELO_LOG(reloRuntime->reloLogger(), 6, "\tpreparePrivateData: body info %p \n", reloPrivateData->_addressToPatch);
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordBodyInfoLoad::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    TR_RelocationRecordWithOffsetPrivateData *reloPrivateData = &(privateData()->offset);
    reloTarget->storeAddressSequence(reloPrivateData->_addressToPatch, reloLocation, reloFlags(reloTarget));
-   return 0;
+   return TR_RelocationErrorCode::relocationOK;
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordBodyInfoLoad::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocationHigh, uint8_t *reloLocationLow)
    {
    TR_RelocationRecordWithOffsetPrivateData *reloPrivateData = &(privateData()->offset);
    reloTarget->storeAddress(reloPrivateData->_addressToPatch, reloLocationHigh, reloLocationLow, reloFlags(reloTarget));
-   return 0;
+   return TR_RelocationErrorCode::relocationOK;
    }
 
 // TR_ArrayCopyHelper
-char *
+const char *
 TR_RelocationRecordArrayCopyHelper::name()
    {
    return "TR_ArrayCopyHelper";
@@ -1318,25 +1383,25 @@ TR_RelocationRecordArrayCopyHelper::preparePrivateData(TR_RelocationRuntime *rel
    RELO_LOG(reloRuntime->reloLogger(), 6, "\tpreparePrivateData: arraycopy helper %p\n", reloPrivateData->_addressToPatch);
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordArrayCopyHelper::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    TR_RelocationRecordArrayCopyPrivateData *reloPrivateData = &(privateData()->arraycopy);
    reloTarget->storeAddressSequence(reloPrivateData->_addressToPatch, reloLocation, reloFlags(reloTarget));
 
-   return 0;
+   return TR_RelocationErrorCode::relocationOK;
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordArrayCopyHelper::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocationHigh, uint8_t *reloLocationLow)
    {
    TR_RelocationRecordArrayCopyPrivateData *reloPrivateData = &(privateData()->arraycopy);
    reloTarget->storeAddress(reloPrivateData->_addressToPatch, reloLocationHigh, reloLocationLow, reloFlags(reloTarget));
-   return 0;
+   return TR_RelocationErrorCode::relocationOK;
    }
 
 // TR_ArrayCopyToc
-char *
+const char *
 TR_RelocationRecordArrayCopyToc::name()
    {
    return "TR_ArrayCopyToc";
@@ -1355,7 +1420,7 @@ TR_RelocationRecordArrayCopyToc::preparePrivateData(TR_RelocationRuntime *reloRu
    }
 
 // TR_RamMethodSequence
-char *
+const char *
 TR_RelocationRecordRamSequence::name()
    {
    return "TR_RamMethodSequence";
@@ -1452,7 +1517,7 @@ TR_RelocationRecordWithInlinedSiteIndex::action(TR_RelocationRuntime *reloRuntim
 
 
 // Constant Pool relocations
-char *
+const char *
 TR_RelocationRecordConstantPool::name()
    {
    return "TR_ConstantPool";
@@ -1530,7 +1595,7 @@ TR_RelocationRecordConstantPool::computeNewConstantPool(TR_RelocationRuntime *re
    return newCP;
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordConstantPool::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    uint8_t *baseLocation = 0;
@@ -1538,31 +1603,31 @@ TR_RelocationRecordConstantPool::applyRelocation(TR_RelocationRuntime *reloRunti
       {
       //j9tty_printf(PORTLIB, "\nInternal Error AOT: relocateConstantPool: Relocation type was IP-relative.\n");
       // TODO: better error condition exit(-1);
-      return 0;
+      return TR_RelocationErrorCode::relocationOK;
       }
 
    uintptr_t oldValue =  (uintptr_t) reloTarget->loadAddress(reloLocation);
    uintptr_t newCP = computeNewConstantPool(reloRuntime, reloTarget, oldValue);
    reloTarget->storeAddress((uint8_t *)newCP, reloLocation);
 
-   return 0;
+   return TR_RelocationErrorCode::relocationOK;
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordConstantPool::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocationHigh, uint8_t *reloLocationLow)
    {
    if (eipRelative(reloTarget))
       {
       //j9tty_printf(PORTLIB, "\nInternal Error AOT: relocateConstantPool: Relocation type was IP-relative.\n");
       // TODO: better error condition exit(-1);
-      return 0;
+      return TR_RelocationErrorCode::relocationOK;
       }
 
    uintptr_t oldValue = (uintptr_t) reloTarget->loadAddress(reloLocationHigh, reloLocationLow);
    uintptr_t newCP = computeNewConstantPool(reloRuntime, reloTarget, oldValue);
    reloTarget->storeAddress((uint8_t *)newCP, reloLocationHigh, reloLocationLow, reloFlags(reloTarget));
 
-   return 0;
+   return TR_RelocationErrorCode::relocationOK;
    }
 
 // ConstantPoolWithIndex relocation base class
@@ -1753,7 +1818,7 @@ TR_RelocationRecordConstantPoolWithIndex::getAbstractMethodFromCP(TR_RelocationR
    }
 
 // TR_HelperAddress
-char *
+const char *
 TR_RelocationRecordHelperAddress::name()
    {
    return "TR_HelperAddress";
@@ -1797,7 +1862,7 @@ TR_RelocationRecordHelperAddress::preparePrivateData(TR_RelocationRuntime *reloR
    RELO_LOG(reloRuntime->reloLogger(), 6, "\tpreparePrivateData: helperAddress %p\n", reloPrivateData->_helper);
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordHelperAddress::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    uint8_t *baseLocation = 0;
@@ -1813,10 +1878,10 @@ TR_RelocationRecordHelperAddress::applyRelocation(TR_RelocationRuntime *reloRunt
    else
       reloTarget->storeAddress(helperOffset, reloLocation);
 
-   return 0;
+   return TR_RelocationErrorCode::relocationOK;
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordHelperAddress::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocationHigh, uint8_t *reloLocationLow)
    {
    TR_ASSERT(0, "TR_RelocationRecordHelperAddress::applyRelocation for ordered pair, we should never call this");
@@ -1826,16 +1891,16 @@ TR_RelocationRecordHelperAddress::applyRelocation(TR_RelocationRuntime *reloRunt
 
    reloTarget->storeAddress(helperOffset, reloLocationHigh, reloLocationLow, reloFlags(reloTarget));
 
-   return 0;
+   return TR_RelocationErrorCode::relocationOK;
    }
 
-char *
+const char *
 TR_RelocationRecordAbsoluteHelperAddress::name()
    {
    return "TR_AbsoluteHelperAddress";
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordAbsoluteHelperAddress::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    TR_RelocationRecordHelperAddressPrivateData *reloPrivateData = &(privateData()->helperAddress);
@@ -1844,21 +1909,21 @@ TR_RelocationRecordAbsoluteHelperAddress::applyRelocation(TR_RelocationRuntime *
       reloTarget->storeAddressSequence(helperAddress, reloLocation, reloFlags(reloTarget));
    else
       reloTarget->storeAddress(helperAddress, reloLocation);
-   return 0;
+   return TR_RelocationErrorCode::relocationOK;
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordAbsoluteHelperAddress::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocationHigh, uint8_t *reloLocationLow)
    {
    TR_RelocationRecordHelperAddressPrivateData *reloPrivateData = &(privateData()->helperAddress);
    uint8_t *helperAddress = reloPrivateData->_helper;
    reloTarget->storeAddress(helperAddress, reloLocationHigh, reloLocationLow, reloFlags(reloTarget));
-   return 0;
+   return TR_RelocationErrorCode::relocationOK;
    }
 
 // Method Address Relocations
 //
-char *
+const char *
 TR_RelocationRecordMethodAddress::name()
    {
    return "TR_MethodAddress";
@@ -1871,7 +1936,7 @@ TR_RelocationRecordMethodAddress::currentMethodAddress(TR_RelocationRuntime *rel
    return oldMethodAddress - methodHdr->compileMethodCodeStartPC + (uintptr_t) reloRuntime->newMethodCodeStart();
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordMethodAddress::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    bool eipRel = eipRelative(reloTarget);
@@ -1891,10 +1956,10 @@ TR_RelocationRecordMethodAddress::applyRelocation(TR_RelocationRuntime *reloRunt
    else
       reloTarget->storeAddress(newAddress, reloLocation);
 
-   return 0;
+   return TR_RelocationErrorCode::relocationOK;
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordMethodAddress::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocationHigh, uint8_t *reloLocationLow)
    {
    TR_RelocationRecordWithOffsetPrivateData *reloPrivateData = &(privateData()->offset);
@@ -1903,12 +1968,12 @@ TR_RelocationRecordMethodAddress::applyRelocation(TR_RelocationRuntime *reloRunt
 
    RELO_LOG(reloRuntime->reloLogger(), 6, "\t\tapplyRelocation: oldAddress %p newAddress %p\n", oldAddress, newAddress);
    reloTarget->storeAddress(newAddress, reloLocationHigh, reloLocationLow, reloFlags(reloTarget));
-   return 0;
+   return TR_RelocationErrorCode::relocationOK;
    }
 
 // Direct JNI Address Relocations
 
-char *
+const char *
 TR_RelocationRecordDirectJNICall::name()
    {
    return "TR_JNITargetAddress";
@@ -1940,54 +2005,66 @@ TR_RelocationRecordDirectJNIVirtualMethodCall::getMethodFromCP(TR_RelocationRunt
    return getVirtualMethodFromCP(reloRuntime, void_cp, cpIndex);
    }
 
-int32_t TR_RelocationRecordRamMethodConst::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
+void
+TR_RelocationRecordDirectJNICall::setOffsetToReloLocation(TR_RelocationTarget *reloTarget, uint8_t offsetToReloLocation)
    {
+   reloTarget->storeUnsigned8b(offsetToReloLocation, &((TR_RelocationRecordDirectToJNIBinaryTemplate *)_record)->_offsetToReloLocation);
+   }
+
+uint8_t
+TR_RelocationRecordDirectJNICall::offsetToReloLocation(TR_RelocationTarget *reloTarget)
+   {
+   return reloTarget->loadUnsigned8b(&((TR_RelocationRecordDirectToJNIBinaryTemplate *)_record)->_offsetToReloLocation);
+   }
+
+TR_RelocationErrorCode
+TR_RelocationRecordDirectJNICall::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
+   {
+   void *addressForAssumption = reloLocation;
+   reloLocation = reloLocation + offsetToReloLocation(reloTarget);
+
    TR_RelocationRuntimeLogger *reloLogger = reloRuntime->reloLogger();
    J9ConstantPool * newConstantPool =(J9ConstantPool *) computeNewConstantPool(reloRuntime, reloTarget, constantPool(reloTarget));
    TR_OpaqueMethodBlock *ramMethod = getMethodFromCP(reloRuntime, newConstantPool, cpIndex(reloTarget));
 
    if (!ramMethod)
-      {
-      return compilationAotClassReloFailure;
-      }
-
-   reloTarget->storeAddressRAM((uint8_t *)ramMethod, reloLocation);
-   return 0;
-   }
-
-int32_t
-TR_RelocationRecordDirectJNICall::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
-   {
-   uintptr_t oldAddress = (uintptr_t) reloTarget->loadAddress(reloLocation);
-
-   TR_RelocationRuntimeLogger *reloLogger = reloRuntime->reloLogger();
-   J9ConstantPool * newConstantPool =(J9ConstantPool *) computeNewConstantPool(reloRuntime, reloTarget, constantPool(reloTarget));
-   TR_OpaqueMethodBlock *ramMethod = getMethodFromCP(reloRuntime, newConstantPool, cpIndex(reloTarget));
-
-   if (!ramMethod) return compilationAotClassReloFailure;
-
+      return TR_RelocationErrorCode::directJNICallRelocationFailure;
 
    TR_ResolvedMethod *callerResolvedMethod = reloRuntime->fej9()->createResolvedMethod(reloRuntime->comp()->trMemory(), ramMethod, NULL);
    void * newAddress = NULL;
    if (callerResolvedMethod->isJNINative())
       newAddress = callerResolvedMethod->startAddressForJNIMethod(reloRuntime->comp());
 
-
-   if (!newAddress) return compilationAotClassReloFailure;
+   if (!newAddress)
+      return TR_RelocationErrorCode::directJNICallRelocationFailure;
 
    RELO_LOG(reloLogger, 6, "\tJNI call relocation: found JNI target address %p\n", newAddress);
 
-   createJNICallSite((void *)ramMethod, (void *)reloLocation,getMetadataAssumptionList(reloRuntime->exceptionTable()));
+   createJNICallSite((void *)ramMethod, addressForAssumption, getMetadataAssumptionList(reloRuntime->exceptionTable()));
    RELO_LOG(reloRuntime->reloLogger(), 6, "\t\tapplyRelocation: registered JNI Call redefinition site\n");
 
    reloTarget->storeRelativeAddressSequence((uint8_t *)newAddress, reloLocation, fixedSequence1);
-   return 0;
+   return TR_RelocationErrorCode::relocationOK;
+   }
 
+TR_RelocationErrorCode
+TR_RelocationRecordRamMethodConst::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
+   {
+   TR_RelocationRuntimeLogger *reloLogger = reloRuntime->reloLogger();
+   J9ConstantPool * newConstantPool =(J9ConstantPool *) computeNewConstantPool(reloRuntime, reloTarget, constantPool(reloTarget));
+   TR_OpaqueMethodBlock *ramMethod = getMethodFromCP(reloRuntime, newConstantPool, cpIndex(reloTarget));
+
+   if (!ramMethod)
+      return TR_RelocationErrorCode::ramMethodConstRelocationFailure;
+
+   reloTarget->storeAddressRAM((uint8_t *)ramMethod, reloLocation);
+   return TR_RelocationErrorCode::relocationOK;
    }
 
 
+
 // Data Address Relocations
-char *
+const char *
 TR_RelocationRecordDataAddress::name()
    {
    return "TR_DataAddress";
@@ -2056,7 +2133,7 @@ TR_RelocationRecordDataAddress::findDataAddress(TR_RelocationRuntime *reloRuntim
    return address;
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordDataAddress::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    uint8_t *newAddress = findDataAddress(reloRuntime, reloTarget);
@@ -2066,7 +2143,7 @@ TR_RelocationRecordDataAddress::applyRelocation(TR_RelocationRuntime *reloRuntim
 #endif
 
    if (!newAddress)
-      return compilationAotStaticFieldReloFailure;
+      return TR_RelocationErrorCode::staticFieldValidationFailure;
 
    TR_AOTStats *aotStats = reloRuntime->aotStats();
    if (aotStats)
@@ -2075,22 +2152,22 @@ TR_RelocationRecordDataAddress::applyRelocation(TR_RelocationRuntime *reloRuntim
       }
 
    reloTarget->storeAddressSequence(newAddress, reloLocation, reloFlags(reloTarget));
-   return 0;
+   return TR_RelocationErrorCode::relocationOK;
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordDataAddress::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocationHigh, uint8_t *reloLocationLow)
    {
    uint8_t *newAddress = findDataAddress(reloRuntime, reloTarget);
 
    if (!newAddress)
-      return compilationAotStaticFieldReloFailure;
+      return TR_RelocationErrorCode::staticFieldValidationFailure;
    reloTarget->storeAddress(newAddress, reloLocationHigh, reloLocationLow, reloFlags(reloTarget));
-   return 0;
+   return TR_RelocationErrorCode::relocationOK;
    }
 
 // Class Object Relocations
-char *
+const char *
 TR_RelocationRecordClassAddress::name()
    {
    return "TR_ClassAddress";
@@ -2136,81 +2213,63 @@ TR_RelocationRecordClassAddress::computeNewClassAddress(TR_RelocationRuntime *re
    return (TR_OpaqueClassBlock *)resolvedClass;
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordClassAddress::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
-   uintptr_t oldAddress = (uintptr_t) reloTarget->loadAddress(reloLocation);
-
    uintptr_t newConstantPool = computeNewConstantPool(reloRuntime, reloTarget, constantPool(reloTarget));
    TR_OpaqueClassBlock *newAddress = computeNewClassAddress(reloRuntime, newConstantPool, inlinedSiteIndex(reloTarget), cpIndex(reloTarget));
 
-   if (!newAddress) return compilationAotClassReloFailure;
-
-   if (TR::CodeGenerator::wantToPatchClassPointer(reloRuntime->comp(), newAddress, reloLocation))
-      {
-      createClassRedefinitionPicSite((void *)newAddress, (void *)reloLocation, sizeof(UDATA), 0,
-                                     getMetadataAssumptionList(reloRuntime->exceptionTable()));
-      RELO_LOG(reloRuntime->reloLogger(), 6, "\t\tapplyRelocation: hcr enabled, registered class redefinition site\n");
-      }
+   if (!newAddress) return TR_RelocationErrorCode::classValidationFailure;
 
    reloTarget->storeAddressSequence((uint8_t *)newAddress, reloLocation, reloFlags(reloTarget));
-   return 0;
+   return TR_RelocationErrorCode::relocationOK;
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordClassAddress::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocationHigh, uint8_t *reloLocationLow)
    {
-   uintptr_t oldValue = (uintptr_t) reloTarget->loadAddress(reloLocationHigh, reloLocationLow);
-   uintptr_t newConstantPool = computeNewConstantPool(reloRuntime, reloTarget, oldValue);
+   uintptr_t newConstantPool = computeNewConstantPool(reloRuntime, reloTarget, constantPool(reloTarget));
    TR_OpaqueClassBlock *newAddress = computeNewClassAddress(reloRuntime, newConstantPool, inlinedSiteIndex(reloTarget), cpIndex(reloTarget));
 
-   if (!newAddress) return compilationAotClassReloFailure;
-
-   if (TR::CodeGenerator::wantToPatchClassPointer(reloRuntime->comp(), newAddress, reloLocationHigh))
-      {
-      // This looks wrong
-      createClassRedefinitionPicSite((void *)newAddress, (void *)reloLocationHigh, sizeof(UDATA), 0,
-         getMetadataAssumptionList(reloRuntime->exceptionTable()));
-      RELO_LOG(reloRuntime->reloLogger(), 6, "\t\tapplyRelocation: hcr enabled, registered class redefinition site\n");
-      }
+   if (!newAddress) return TR_RelocationErrorCode::classValidationFailure;
 
    reloTarget->storeAddress((uint8_t *) newAddress, reloLocationHigh, reloLocationLow, reloFlags(reloTarget));
-   return 0;
+   return TR_RelocationErrorCode::relocationOK;
    }
 
 // MethodObject Relocations
-char *
+const char *
 TR_RelocationRecordMethodObject::name()
    {
    return "TR_MethodObject";
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordMethodObject::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    uintptr_t oldAddress = (uintptr_t) reloTarget->loadAddress(reloLocation);
    uintptr_t newAddress = currentConstantPool(reloRuntime, reloTarget, oldAddress);
    reloTarget->storeAddress((uint8_t *) newAddress, reloLocation);
-   return 0;
+   return TR_RelocationErrorCode::relocationOK;
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordMethodObject::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocationHigh, uint8_t *reloLocationLow)
    {
    uintptr_t oldAddress = (uintptr_t) reloTarget->loadAddress(reloLocationHigh, reloLocationLow);
    uintptr_t newAddress = currentConstantPool(reloRuntime, reloTarget, oldAddress);
    reloTarget->storeAddress((uint8_t *) newAddress, reloLocationHigh, reloLocationLow, reloFlags(reloTarget));
-   return 0;
+   return TR_RelocationErrorCode::relocationOK;
    }
 
 // TR_BodyInfoAddress Relocation
-char *
+const char *
 TR_RelocationRecordBodyInfo::name()
    {
    return "TR_BodyInfo";
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordBodyInfo::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    J9JITExceptionTable *exceptionTable = reloRuntime->exceptionTable();
@@ -2220,17 +2279,17 @@ TR_RelocationRecordBodyInfo::applyRelocation(TR_RelocationRuntime *reloRuntime, 
 #else
    fixPersistentMethodInfo((void *)exceptionTable, false);
 #endif /* defined(J9VM_OPT_JITSERVER) */
-   return 0;
+   return TR_RelocationErrorCode::relocationOK;
    }
 
 // TR_Thunks Relocation
-char *
+const char *
 TR_RelocationRecordThunks::name()
    {
    return "TR_Thunks";
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordThunks::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    uint8_t *oldAddress = reloTarget->loadAddress(reloLocation);
@@ -2244,56 +2303,40 @@ TR_RelocationRecordThunks::applyRelocation(TR_RelocationRuntime *reloRuntime, TR
    return relocateAndRegisterThunk(reloRuntime, reloTarget, newConstantPool, cpIndex, reloLocation);
    }
 
-int32_t
-TR_RelocationRecordThunks::relocateAndRegisterThunk(
+// Returns 0 for success, or a TR_CompilationErrorCode value on failure.
+// On success, the address of the J2I thunk is stored into *outThunkAddress.
+static TR_RelocationErrorCode relocateAndRegisterThunk(
    TR_RelocationRuntime *reloRuntime,
    TR_RelocationTarget *reloTarget,
-   uintptr_t cp,
-   uintptr_t cpIndex,
-   uint8_t *reloLocation)
+   int32_t signatureLength,
+   char *signatureString,
+   void **outThunkAddress)
    {
+   *outThunkAddress = NULL;
+
    J9JITConfig *jitConfig = reloRuntime->jitConfig();
    J9JavaVM *javaVM = reloRuntime->jitConfig()->javaVM;
-   J9ConstantPool *constantPool = (J9ConstantPool *)cp;
 
-   J9ROMClass * romClass = J9_CLASS_FROM_CP(constantPool)->romClass;
-   J9ROMMethodRef *romMethodRef = &J9ROM_CP_BASE(romClass, J9ROMMethodRef)[cpIndex];
-   J9ROMNameAndSignature * nameAndSignature = J9ROMMETHODREF_NAMEANDSIGNATURE(romMethodRef);
-
-   bool matchFound = false;
-
-   int32_t signatureLength = J9UTF8_LENGTH(J9ROMNAMEANDSIGNATURE_SIGNATURE(nameAndSignature));
-   char *signatureString = (char *) J9UTF8_DATA(J9ROMNAMEANDSIGNATURE_SIGNATURE(nameAndSignature));
-
-   RELO_LOG(reloRuntime->reloLogger(), 6, "\t\trelocateAndRegisterThunk: %.*s%.*s\n", J9UTF8_LENGTH(J9ROMNAMEANDSIGNATURE_NAME(nameAndSignature)), J9UTF8_DATA(J9ROMNAMEANDSIGNATURE_NAME(nameAndSignature)),  signatureLength, signatureString);
+   RELO_LOG(reloRuntime->reloLogger(), 6, "\t\trelocateAndRegisterThunk: %.*s\n", signatureLength, signatureString);
 
    // Everything below is run with VM Access in hand
    TR::VMAccessCriticalSection relocateAndRegisterThunkCriticalSection(reloRuntime->fej9());
 
-   void *existingThunk = j9ThunkLookupNameAndSig(jitConfig, nameAndSignature);
+   void *existingThunk = j9ThunkLookupSignature(jitConfig, signatureLength, signatureString);
    if (existingThunk != NULL)
       {
       /* Matching thunk found */
-      RELO_LOG(reloRuntime->reloLogger(), 6, "\t\t\trelocateAndRegisterThunk:found matching thunk %p\n", existingThunk);
-      relocateJ2IVirtualThunkPointer(reloTarget, reloLocation, existingThunk);
-      return 0; // return successful
+      RELO_LOG(reloRuntime->reloLogger(), 6, "\t\t\trelocateAndRegisterThunk: found matching thunk %p\n", existingThunk);
+      *outThunkAddress = existingThunk;
+      return TR_RelocationErrorCode::relocationOK; // return successful
       }
 
-   // search shared cache for thunk, copy it over and create thunk entry
-   J9SharedDataDescriptor firstDescriptor;
-   firstDescriptor.address = NULL;
-
-   javaVM->sharedClassConfig->findSharedData(reloRuntime->currentThread(),
-                                             signatureString,
-                                             signatureLength,
-                                             J9SHR_DATA_TYPE_AOTTHUNK,
-                                             false,
-                                             &firstDescriptor,
-                                             NULL);
+   uintptr_t thunkSize;
+   uint8_t *persistentThunk = (uint8_t *)j9ThunkFindPersistentThunk(jitConfig, signatureString, signatureLength, &thunkSize);
 
    // if found thunk, then need to copy thunk into code cache, create thunk mapping, and register thunk mapping
    //
-   if (firstDescriptor.address)
+   if (persistentThunk)
       {
       //Copy thunk from shared cache into local memory and relocate target address
       //
@@ -2304,14 +2347,15 @@ TR_RelocationRecordThunks::relocateAndRegisterThunk(
       // allocate in the current code cache. The reason is that, when a new code cache is needed
       // the reservation of the old cache is cancelled and further allocation attempts from
       // the old cache (which is not switched) will fail
-      U_8 *thunkStart = TR::CodeCacheManager::instance()->allocateCodeMemory(firstDescriptor.length, 0, &codeCache, &coldCode, true);
+      U_8 *thunkStart = TR::CodeCacheManager::instance()->allocateCodeMemory(thunkSize, 0, &codeCache, &coldCode, true);
       U_8 *thunkAddress;
+      omrthread_jit_write_protect_disable();
       if (thunkStart)
          {
          // Relocate the thunk
          //
          RELO_LOG(reloRuntime->reloLogger(), 7, "\t\t\trelocateAndRegisterThunk: thunkStart from cache %p\n", thunkStart);
-         memcpy(thunkStart, firstDescriptor.address, firstDescriptor.length);
+         memcpy(thunkStart, persistentThunk, thunkSize);
 
          thunkAddress = thunkStart + 2*sizeof(I_32);
 
@@ -2320,32 +2364,56 @@ TR_RelocationRecordThunks::relocateAndRegisterThunk(
          RELO_LOG(reloRuntime->reloLogger(), 7, "\t\t\trelocateAndRegisterThunk: vmHelper %p\n", vmHelper);
          reloTarget->performThunkRelocation(thunkAddress, (UDATA)vmHelper);
 
-         j9ThunkNewNameAndSig(jitConfig, nameAndSignature, thunkAddress);
+         j9ThunkNewSignature(jitConfig, signatureLength, signatureString, thunkAddress);
 
          if (J9_EVENT_IS_HOOKED(javaVM->hookInterface, J9HOOK_VM_DYNAMIC_CODE_LOAD))
             ALWAYS_TRIGGER_J9HOOK_VM_DYNAMIC_CODE_LOAD(javaVM->hookInterface, javaVM->internalVMFunctions->currentVMThread(javaVM), NULL, (void *) thunkAddress, *((uint32_t *)thunkAddress - 2), "JIT virtual thunk", NULL);
 
-         relocateJ2IVirtualThunkPointer(reloTarget, reloLocation, thunkAddress);
+         *outThunkAddress = thunkAddress;
          }
       else
          {
          codeCache->unreserve(); // cancel the reservation
          // return error
-         return compilationAotCacheFullReloFailure;
+         return TR_RelocationErrorCode::cacheFullRelocationFailure;
          }
-
       }
-    else
+   else
       {
       // return error
-      return compilationAotThunkReloFailure;
+      return TR_RelocationErrorCode::thunkRelocationFailure;
       }
 
-   return 0;
+   return TR_RelocationErrorCode::relocationOK;
+   }
+
+TR_RelocationErrorCode
+TR_RelocationRecordThunks::relocateAndRegisterThunk(
+   TR_RelocationRuntime *reloRuntime,
+   TR_RelocationTarget *reloTarget,
+   uintptr_t cp,
+   uintptr_t cpIndex,
+   uint8_t *reloLocation)
+   {
+   J9ConstantPool *constantPool = (J9ConstantPool *)cp;
+   J9ROMClass * romClass = J9_CLASS_FROM_CP(constantPool)->romClass;
+   J9ROMMethodRef *romMethodRef = &J9ROM_CP_BASE(romClass, J9ROMMethodRef)[cpIndex];
+   J9ROMNameAndSignature * nameAndSignature = J9ROMMETHODREF_NAMEANDSIGNATURE(romMethodRef);
+   int32_t signatureLength = J9UTF8_LENGTH(J9ROMNAMEANDSIGNATURE_SIGNATURE(nameAndSignature));
+   char *signatureString = (char *) J9UTF8_DATA(J9ROMNAMEANDSIGNATURE_SIGNATURE(nameAndSignature));
+
+   void *thunkAddress;
+   TR_RelocationErrorCode err = ::relocateAndRegisterThunk(
+      reloRuntime, reloTarget, signatureLength, signatureString, &thunkAddress);
+
+   if (err == TR_RelocationErrorCode::relocationOK)
+      relocateJ2IVirtualThunkPointer(reloTarget, reloLocation, thunkAddress);
+
+   return err;
    }
 
 // TR_J2IVirtualThunkPointer Relocation
-char *
+const char *
 TR_RelocationRecordJ2IVirtualThunkPointer::name()
    {
    return "TR_J2IVirtualThunkPointer";
@@ -2388,7 +2456,7 @@ TR_RelocationRecordJ2IVirtualThunkPointer::offsetToJ2IVirtualThunkPointer(
    }
 
 // TR_PicTrampolines Relocation
-char *
+const char *
 TR_RelocationRecordPicTrampolines::name()
    {
    return "TR_PicTrampolines";
@@ -2415,27 +2483,27 @@ TR_RelocationRecordPicTrampolines::numTrampolines(TR_RelocationTarget *reloTarge
    return reloTarget->loadUnsigned32b((uint8_t *) &(((TR_RelocationRecordPicTrampolineBinaryTemplate *)_record)->_numTrampolines));
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordPicTrampolines::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    if (reloRuntime->codeCache()->reserveSpaceForTrampoline_bridge(numTrampolines(reloTarget)) != OMR::CodeCacheErrorCode::ERRORCODE_SUCCESS)
       {
       RELO_LOG(reloRuntime->reloLogger(), 1,"\t\tapplyRelocation: aborting AOT relocation because pic trampoline was not reserved. Will be retried.\n");
-      return compilationAotPicTrampolineReloFailure;
+      return TR_RelocationErrorCode::picTrampolineRelocationFailure;
       }
 
-   return 0;
+   return TR_RelocationErrorCode::relocationOK;
    }
 
 // TR_Trampolines Relocation
 
-char *
+const char *
 TR_RelocationRecordTrampolines::name()
    {
    return "TR_Trampolines";
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordTrampolines::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    uint8_t *oldAddress = reloTarget->loadAddress(reloLocation);
@@ -2448,10 +2516,10 @@ TR_RelocationRecordTrampolines::applyRelocation(TR_RelocationRuntime *reloRuntim
    if (reloRuntime->codeCache()->reserveUnresolvedTrampoline((void *)newConstantPool, cpIndex) != OMR::CodeCacheErrorCode::ERRORCODE_SUCCESS)
       {
       RELO_LOG(reloRuntime->reloLogger(), 6, "\t\tapplyRelocation: aborting AOT relocation because trampoline was not reserved. Will be retried.\n");
-      return compilationAotTrampolineReloFailure;
+      return TR_RelocationErrorCode::trampolineRelocationFailure;
       }
 
-   return 0;
+   return TR_RelocationErrorCode::relocationOK;
    }
 
 // TR_InlinedAllocation relocation
@@ -2528,7 +2596,7 @@ TR_RelocationRecordInlinedAllocation::verifyClass(TR_RelocationRuntime *reloRunt
    return false;
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordInlinedAllocation::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    TR_RelocationRecordInlinedAllocationPrivateData *reloPrivateData = &(privateData()->inlinedAllocation);
@@ -2546,11 +2614,11 @@ TR_RelocationRecordInlinedAllocation::applyRelocation(TR_RelocationRuntime *relo
       {
       RELO_LOG(reloRuntime->reloLogger(), 6, "\t\tapplyRelocation: inlined alloc looks OK\n");
       }
-   return 0;
+   return TR_RelocationErrorCode::relocationOK;
    }
 
 // TR_VerifyRefArrayForAlloc Relocation
-char *
+const char *
 TR_RelocationRecordVerifyRefArrayForAlloc::name()
    {
    return "TR_VerifyRefArrayForAlloc";
@@ -2564,7 +2632,7 @@ TR_RelocationRecordVerifyRefArrayForAlloc::verifyClass(TR_RelocationRuntime *rel
 
 
 // TR_VerifyClassObjectForAlloc Relocation
-char *
+const char *
 TR_RelocationRecordVerifyClassObjectForAlloc::name()
    {
    return "TR_VerifyClassObjectForAlloc";
@@ -2625,11 +2693,12 @@ TR_RelocationRecordInlinedMethod::print(TR_RelocationRuntime *reloRuntime)
 void
 TR_RelocationRecordInlinedMethod::setRomClassOffsetInSharedCache(
    TR_RelocationTarget *reloTarget, uintptr_t romClassOffsetInSharedCache,
-   TR::AheadOfTimeCompile *aotCompile, const AOTCacheClassChainRecord *classChainRecord
+   TR::AheadOfTimeCompile *aotCompile, TR_OpaqueClassBlock *ramClass, const AOTCacheClassChainRecord *classChainRecord
 )
    {
    uintptr_t *addr = &((TR_RelocationRecordInlinedMethodBinaryTemplate *)_record)->_romClassOffsetInSharedCache;
    reloTarget->storeRelocationRecordValue(romClassOffsetInSharedCache, addr);
+   aotCompile->comp()->addAOTMethodDependency(ramClass);
 #if defined(J9VM_OPT_JITSERVER)
    aotCompile->addClassSerializationRecord(classChainRecord, addr);
 #endif /* defined(J9VM_OPT_JITSERVER) */
@@ -2641,6 +2710,7 @@ TR_RelocationRecordInlinedMethod::setRomClassOffsetInSharedCache(TR_RelocationTa
    {
    uintptr_t *addr = &((TR_RelocationRecordInlinedMethodBinaryTemplate *)_record)->_romClassOffsetInSharedCache;
    reloTarget->storeRelocationRecordValue(romClassOffsetInSharedCache, addr);
+   aotCompile->comp()->addAOTMethodDependency(ramClass);
 #if defined(J9VM_OPT_JITSERVER)
    aotCompile->addClassSerializationRecord(ramClass, addr);
 #endif /* defined(J9VM_OPT_JITSERVER) */
@@ -2707,10 +2777,8 @@ TR_RelocationRecordInlinedMethod::inlinedSiteCanBeActivated(TR_RelocationRuntime
       return false;
       }
 
-   if (reloRuntime->fej9()->isAnyMethodTracingEnabled((TR_OpaqueMethodBlock *) currentMethod)
-       || (!reloRuntime->comp()->getOption(TR_FullSpeedDebug)
-           && (reloRuntime->fej9()->canMethodEnterEventBeHooked()
-               || reloRuntime->fej9()->canMethodExitEventBeHooked())))
+   if (reloRuntime->fej9()->isMethodTracingEnabled((TR_OpaqueMethodBlock *)currentMethod)
+       && !(reloFlags(reloTarget) & methodTracingEnabled))
       {
       RELO_LOG(reloRuntime->reloLogger(), 6, "\tinlinedSiteCanBeActivated: target may need enter/exit tracing so disabling inline site\n");
       return false;
@@ -2769,7 +2837,8 @@ TR_RelocationRecordInlinedMethod::inlinedSiteValid(TR_RelocationRuntime *reloRun
          else
             reloPrivateData->_receiverClass = NULL;
 
-         if (reloFlags(reloTarget) != inlinedMethodIsStatic && reloFlags(reloTarget) != inlinedMethodIsSpecial)
+         if (((reloFlags(reloTarget) & inlinedMethodIsStatic) == 0)
+             && ((reloFlags(reloTarget) & inlinedMethodIsSpecial) == 0))
             {
             TR_ResolvedMethod *calleeResolvedMethod = reloRuntime->fej9()->createResolvedMethod(reloRuntime->comp()->trMemory(),
                                                                                                 (TR_OpaqueMethodBlock *)currentMethod,
@@ -2827,7 +2896,7 @@ TR_RelocationRecordInlinedMethod::inlinedSiteValid(TR_RelocationRuntime *reloRun
    return inlinedSiteIsValid;
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordInlinedMethod::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    reloRuntime->incNumInlinedMethodRelos();
@@ -2841,7 +2910,7 @@ TR_RelocationRecordInlinedMethod::applyRelocation(TR_RelocationRuntime *reloRunt
       if (!reloRuntime->comp()->getOption(TR_UseSymbolValidationManager))
          {
          RELO_LOG(reloRuntime->reloLogger(), 6,"\t\tapplyRelocation: Failing AOT Load\n");
-         return compilationAotClassReloFailure;
+         return TR_RelocationErrorCode::inlinedMethodRelocationFailure;
          }
 
       RELO_LOG(reloRuntime->reloLogger(), 6,"\t\tapplyRelocation: invalidating guard\n");
@@ -2868,7 +2937,7 @@ TR_RelocationRecordInlinedMethod::applyRelocation(TR_RelocationRuntime *reloRunt
          }
       }
 
-   return 0;
+   return TR_RelocationErrorCode::relocationOK;
    }
 
 // TR_RelocationRecordNopGuard
@@ -2925,7 +2994,7 @@ TR_RelocationRecordNopGuard::preparePrivateData(TR_RelocationRuntime *reloRuntim
    }
 
 // TR_InlinedStaticMethodWithNopGuard
-char *
+const char *
 TR_RelocationRecordInlinedStaticMethodWithNopGuard::name()
    {
    return "TR_InlinedStaticMethodWithNopGuard";
@@ -2951,7 +3020,7 @@ TR_RelocationRecordInlinedStaticMethodWithNopGuard::updateSucceededStats(TR_AOTS
 
 
 // TR_RelocationRecordInlinedStaticMethod
-char *
+const char *
 TR_RelocationRecordInlinedStaticMethod::name()
    {
    return "TR_InlinedStaticMethod";
@@ -2964,7 +3033,7 @@ TR_RelocationRecordInlinedStaticMethod::getMethodFromCP(TR_RelocationRuntime *re
    }
 
 // TR_InlinedSpecialMethodWithNopGuard
-char *
+const char *
 TR_RelocationRecordInlinedSpecialMethodWithNopGuard::name()
    {
    return "TR_InlinedSpecialMethodWithNopGuard";
@@ -2989,7 +3058,7 @@ TR_RelocationRecordInlinedSpecialMethodWithNopGuard::updateSucceededStats(TR_AOT
    }
 
 // TR_RelocationRecordInlinedSpecialMethod
-char *
+const char *
 TR_RelocationRecordInlinedSpecialMethod::name()
    {
    return "TR_InlinedSpecialMethod";
@@ -3002,7 +3071,7 @@ TR_RelocationRecordInlinedSpecialMethod::getMethodFromCP(TR_RelocationRuntime *r
    }
 
 // TR_InlinedVirtualMethodWithNopGuard
-char *
+const char *
 TR_RelocationRecordInlinedVirtualMethodWithNopGuard::name()
    {
    return "TR_InlinedVirtualMethodWithNopGuard";
@@ -3036,7 +3105,7 @@ TR_RelocationRecordInlinedVirtualMethodWithNopGuard::updateSucceededStats(TR_AOT
    }
 
 // TR_RelocationRecordInlinedVirtualMethod
-char *
+const char *
 TR_RelocationRecordInlinedVirtualMethod::name()
    {
    return "TR_InlinedVirtualMethod";
@@ -3049,7 +3118,7 @@ TR_RelocationRecordInlinedVirtualMethod::getMethodFromCP(TR_RelocationRuntime *r
    }
 
 // TR_InlinedInterfaceMethodWithNopGuard
-char *
+const char *
 TR_RelocationRecordInlinedInterfaceMethodWithNopGuard::name()
    {
    return "TR_InlinedInterfaceMethodWithNopGuard";
@@ -3089,7 +3158,7 @@ TR_RelocationRecordInlinedInterfaceMethodWithNopGuard::getMethodFromCP(TR_Reloca
    }
 
 // TR_RelocationRecordInlinedInterfaceMethod
-char *
+const char *
 TR_RelocationRecordInlinedInterfaceMethod::name()
    {
    return "TR_InlinedInterfaceMethod";
@@ -3102,7 +3171,7 @@ TR_RelocationRecordInlinedInterfaceMethod::getMethodFromCP(TR_RelocationRuntime 
    }
 
 // TR_InlinedAbstractMethodWithNopGuard
-char *
+const char *
 TR_RelocationRecordInlinedAbstractMethodWithNopGuard::name()
    {
    return "TR_InlinedAbstractMethodWithNopGuard";
@@ -3140,7 +3209,7 @@ TR_RelocationRecordInlinedAbstractMethodWithNopGuard::updateSucceededStats(TR_AO
    }
 
 // TR_RelocationRecordInlinedAbstractMethod
-char *
+const char *
 TR_RelocationRecordInlinedAbstractMethod::name()
    {
    return "TR_InlinedAbstractMethod";
@@ -3153,7 +3222,7 @@ TR_RelocationRecordInlinedAbstractMethod::getMethodFromCP(TR_RelocationRuntime *
    }
 
 // TR_ProfiledInlinedMethod
-char *
+const char *
 TR_RelocationRecordProfiledInlinedMethod::name()
    {
    return "TR_ProfiledInlinedMethod";
@@ -3193,11 +3262,13 @@ TR_RelocationRecordProfiledInlinedMethod::classChainIdentifyingLoaderOffsetInSha
 void
 TR_RelocationRecordProfiledInlinedMethod::setClassChainForInlinedMethod(
    TR_RelocationTarget *reloTarget, uintptr_t classChainForInlinedMethod,
-   TR::AheadOfTimeCompile *aotCompile, const AOTCacheClassChainRecord *classChainRecord
+   TR::AheadOfTimeCompile *aotCompile, const AOTCacheClassChainRecord *classChainRecord,
+   TR_OpaqueClassBlock *classForInlinedMethod
 )
    {
    uintptr_t *addr = &((TR_RelocationRecordProfiledInlinedMethodBinaryTemplate *)_record)->_classChainForInlinedMethod;
    reloTarget->storeRelocationRecordValue(classChainForInlinedMethod, addr);
+   aotCompile->comp()->addAOTMethodDependency(classForInlinedMethod, classChainForInlinedMethod);
 #if defined(J9VM_OPT_JITSERVER)
    aotCompile->addClassChainSerializationRecord(classChainRecord, addr);
 #endif /* defined(J9VM_OPT_JITSERVER) */
@@ -3219,13 +3290,6 @@ uintptr_t
 TR_RelocationRecordProfiledInlinedMethod::methodIndex(TR_RelocationTarget *reloTarget)
    {
    return reloTarget->loadRelocationRecordValue((uintptr_t *) &((TR_RelocationRecordProfiledInlinedMethodBinaryTemplate *)_record)->_methodIndex);
-   }
-
-
-bool
-TR_RelocationRecordProfiledInlinedMethod::checkInlinedClassValidity(TR_RelocationRuntime *reloRuntime, TR_OpaqueClassBlock *inlinedClass)
-   {
-   return true;
    }
 
 TR_OpaqueMethodBlock *
@@ -3268,27 +3332,47 @@ TR_RelocationRecordProfiledInlinedMethod::preparePrivateData(TR_RelocationRuntim
       }
    else
       {
-      J9ROMClass *inlinedCodeRomClass = reloRuntime->fej9()->sharedCache()->romClassFromOffsetInSharedCache(romClassOffsetInSharedCache(reloTarget));
+      auto sharedCache = reloRuntime->fej9()->sharedCache();
+      uintptr_t romClassOffset = romClassOffsetInSharedCache(reloTarget);
+      J9ROMClass *inlinedCodeRomClass = sharedCache->romClassFromOffsetInSharedCache(romClassOffset);
       J9UTF8 *inlinedCodeClassName = J9ROMCLASS_CLASSNAME(inlinedCodeRomClass);
-      RELO_LOG(reloRuntime->reloLogger(), 6,"\tpreparePrivateData: inlinedCodeRomClass %p %.*s\n", inlinedCodeRomClass, J9UTF8_LENGTH(inlinedCodeClassName), J9UTF8_DATA(inlinedCodeClassName));
+      RELO_LOG(reloRuntime->reloLogger(), 6, "\tpreparePrivateData: inlinedCodeRomClass %p %.*s\n", inlinedCodeRomClass,
+               J9UTF8_LENGTH(inlinedCodeClassName), J9UTF8_DATA(inlinedCodeClassName));
 
-      void *classChainIdentifyingLoader = reloRuntime->fej9()->sharedCache()->pointerFromOffsetInSharedCache(classChainIdentifyingLoaderOffsetInSharedCache(reloTarget));
-      RELO_LOG(reloRuntime->reloLogger(), 6,"\tpreparePrivateData: classChainIdentifyingLoader %p\n", classChainIdentifyingLoader);
-      J9ClassLoader *classLoader = (J9ClassLoader *) reloRuntime->fej9()->sharedCache()->persistentClassLoaderTable()->lookupClassLoaderAssociatedWithClassChain(classChainIdentifyingLoader);
-
-      RELO_LOG(reloRuntime->reloLogger(), 6,"\tpreparePrivateData: classLoader %p\n", classLoader);
+      void *classChainIdentifyingLoader = sharedCache->pointerFromOffsetInSharedCache(
+                                          classChainIdentifyingLoaderOffsetInSharedCache(reloTarget));
+      RELO_LOG(reloRuntime->reloLogger(), 6, "\tpreparePrivateData: classChainIdentifyingLoader %p\n",
+               classChainIdentifyingLoader);
+      J9ClassLoader *classLoader = (J9ClassLoader *)sharedCache->lookupClassLoaderAssociatedWithClassChain(classChainIdentifyingLoader);
+      RELO_LOG(reloRuntime->reloLogger(), 6, "\tpreparePrivateData: classLoader %p\n", classLoader);
 
       if (classLoader)
          {
          TR::VMAccessCriticalSection preparePrivateDataCriticalSection(reloRuntime->fej9());
-         inlinedCodeClass = (TR_OpaqueClassBlock *) jitGetClassInClassloaderFromUTF8(reloRuntime->currentThread(),
-                                                                                     classLoader,
-                                                                                     J9UTF8_DATA(inlinedCodeClassName),
-                                                                                     J9UTF8_LENGTH(inlinedCodeClassName));
+         inlinedCodeClass = (TR_OpaqueClassBlock *)jitGetClassInClassloaderFromUTF8(reloRuntime->currentThread(),
+                                                                                    classLoader,
+                                                                                    J9UTF8_DATA(inlinedCodeClassName),
+                                                                                    J9UTF8_LENGTH(inlinedCodeClassName));
+#if defined(J9VM_OPT_JITSERVER)
+         // If this is a deserialized method from the JITServer AOT cache, the lookup could have failed because the
+         // class is runtime-generated (e.g., a lambda). Try to look it up in the AOT deserializer cache instead.
+         if (!inlinedCodeClass && reloRuntime->comp()->isDeserializedAOTMethod())
+            {
+            auto deserializer = TR::CompilationInfo::get()->getJITServerAOTDeserializer();
+            inlinedCodeClass = (TR_OpaqueClassBlock *)deserializer->getGeneratedClass(classLoader, romClassOffset,
+                                                                                      reloRuntime->comp());
+            }
+#endif /* defined(J9VM_OPT_JITSERVER) */
+         }
+      if (!inlinedCodeClass)
+         {
+         if (auto dependencyTable = reloRuntime->comp()->getPersistentInfo()->getAOTDependencyTable())
+            inlinedCodeClass = (TR_OpaqueClassBlock *)dependencyTable->findCandidateWithChainAndLoader(reloRuntime->comp(), classChainForInlinedMethod(reloTarget),
+                                                                                                       classChainIdentifyingLoader);
          }
       }
 
-   if (inlinedCodeClass && checkInlinedClassValidity(reloRuntime, inlinedCodeClass))
+   if (inlinedCodeClass)
       {
       RELO_LOG(reloRuntime->reloLogger(), 6,"\tpreparePrivateData: inlined class valid\n");
       reloPrivateData->_inlinedCodeClass = inlinedCodeClass;
@@ -3358,17 +3442,10 @@ TR_RelocationRecordProfiledGuard::invalidateGuard(TR_RelocationRuntime *reloRunt
    }
 
 // TR_ProfileClassGuard
-char *
+const char *
 TR_RelocationRecordProfiledClassGuard::name()
    {
    return "TR_ProfiledClassGuard";
-   }
-
-bool
-TR_RelocationRecordProfiledClassGuard::checkInlinedClassValidity(TR_RelocationRuntime *reloRuntime, TR_OpaqueClassBlock *inlinedCodeClass)
-   {
-   return true;
-   return !reloRuntime->fej9()->classHasBeenExtended(inlinedCodeClass) && !reloRuntime->options()->getOption(TR_DisableProfiledInlining);
    }
 
 void
@@ -3392,17 +3469,10 @@ TR_RelocationRecordProfiledClassGuard::updateFailedStats(TR_AOTStats *aotStats)
 
 
 // TR_ProfiledMethodGuard
-char *
+const char *
 TR_RelocationRecordProfiledMethodGuard::name()
    {
    return "TR_ProfiledMethodGuard";
-   }
-
-bool
-TR_RelocationRecordProfiledMethodGuard::checkInlinedClassValidity(TR_RelocationRuntime *reloRuntime, TR_OpaqueClassBlock *inlinedCodeClass)
-   {
-   return true;
-   return !reloRuntime->options()->getOption(TR_DisableProfiledMethodInlining);
    }
 
 void
@@ -3427,26 +3497,26 @@ TR_RelocationRecordProfiledMethodGuard::updateFailedStats(TR_AOTStats *aotStats)
 
 
 // TR_RamMethod Relocation
-char *
+const char *
 TR_RelocationRecordRamMethod::name()
    {
    return "TR_RamMethod";
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordRamMethod::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    RELO_LOG(reloRuntime->reloLogger(), 6, "\t\tapplyRelocation: method pointer %p\n", reloRuntime->exceptionTable()->ramMethod);
    reloTarget->storeAddress((uint8_t *)reloRuntime->exceptionTable()->ramMethod, reloLocation);
-   return 0;
+   return TR_RelocationErrorCode::relocationOK;
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordRamMethod::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocationHigh, uint8_t *reloLocationLow)
    {
    RELO_LOG(reloRuntime->reloLogger(), 6, "\t\tapplyRelocation: method pointer %p\n", reloRuntime->exceptionTable()->ramMethod);
    reloTarget->storeAddress((uint8_t *)reloRuntime->exceptionTable()->ramMethod, reloLocationHigh, reloLocationLow, reloFlags(reloTarget));
-   return 0;
+   return TR_RelocationErrorCode::relocationOK;
    }
 
 // TR_MethodTracingCheck Relocation
@@ -3481,17 +3551,17 @@ TR_RelocationRecordMethodTracingCheck::preparePrivateData(TR_RelocationRuntime *
    RELO_LOG(reloRuntime->reloLogger(), 6,"\tpreparePrivateData: check destination %p\n", reloPrivateData->_destinationAddress);
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordMethodTracingCheck::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    TR_RelocationRecordMethodTracingCheckPrivateData *reloPrivateData = &(privateData()->methodTracingCheck);
    _patchVirtualGuard(reloLocation, reloPrivateData->_destinationAddress, 1 /* currently assume SMP only */);
-   return 0;
+   return TR_RelocationErrorCode::relocationOK;
    }
 
 
 // TR_MethodEnterCheck
-char *
+const char *
 TR_RelocationRecordMethodEnterCheck::name()
    {
    return "TR_MethodEnterCheck";
@@ -3507,7 +3577,7 @@ TR_RelocationRecordMethodEnterCheck::action(TR_RelocationRuntime *reloRuntime)
 
 
 // TR_MethodExitCheck
-char *
+const char *
 TR_RelocationRecordMethodExitCheck::name()
    {
    return "TR_MethodExitCheck";
@@ -3523,7 +3593,7 @@ TR_RelocationRecordMethodExitCheck::action(TR_RelocationRuntime *reloRuntime)
 
 
 // TR_RelocationRecordValidateClass
-char *
+const char *
 TR_RelocationRecordValidateClass::name()
    {
    return "TR_ValidateClass";
@@ -3540,14 +3610,15 @@ TR_RelocationRecordValidateClass::print(TR_RelocationRuntime *reloRuntime)
 
 void
 TR_RelocationRecordValidateClass::setClassChainOffsetInSharedCache(
-   TR_RelocationTarget *reloTarget, uintptr_t classChainOffsetInSharedCache,
-   TR::AheadOfTimeCompile *aotCompile, const AOTCacheClassChainRecord *classChainRecord
+   TR_RelocationTarget *reloTarget, const TR::AOTClassInfo *aotCI,
+   TR::AheadOfTimeCompile *aotCompile
 )
    {
    uintptr_t *addr = &((TR_RelocationRecordValidateClassBinaryTemplate *)_record)->_classChainOffsetInSharedCache;
-   reloTarget->storeRelocationRecordValue(classChainOffsetInSharedCache, addr);
+   reloTarget->storeRelocationRecordValue(aotCI->_classChainOffset, addr);
+   aotCompile->comp()->addAOTMethodDependency(aotCI->_clazz, aotCI->_classChainOffset);
 #if defined(J9VM_OPT_JITSERVER)
-   aotCompile->addClassChainSerializationRecord(classChainRecord, addr);
+   aotCompile->addClassChainSerializationRecord(aotCI->getAOTCacheClassChainRecord(), addr);
 #endif /* defined(J9VM_OPT_JITSERVER) */
    }
 
@@ -3572,7 +3643,7 @@ TR_RelocationRecordValidateClass::validateClass(TR_RelocationRuntime *reloRuntim
    return reloRuntime->fej9()->sharedCache()->classMatchesCachedVersion(clazz, (uintptr_t *) classChain);
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordValidateClass::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    reloRuntime->incNumValidations();
@@ -3582,7 +3653,7 @@ TR_RelocationRecordValidateClass::applyRelocation(TR_RelocationRuntime *reloRunt
    TR_OpaqueClassBlock *definingClass = getClassFromCP(reloRuntime, reloTarget, (void *) cp);
    RELO_LOG(reloRuntime->reloLogger(), 6, "\t\tapplyRelocation: definingClass %p\n", definingClass);
 
-   int32_t returnCode = 0;
+   TR_RelocationErrorCode returnCode = TR_RelocationErrorCode::relocationOK;
    bool verified = false;
    if (definingClass)
       {
@@ -3621,15 +3692,15 @@ TR_RelocationRecordValidateClass::getClassFromCP(TR_RelocationRuntime *reloRunti
    return definingClass;
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordValidateClass::failureCode()
    {
-   return compilationAotClassReloFailure;
+   return TR_RelocationErrorCode::classValidationFailure;
    }
 
 
 // TR_VerifyInstanceField
-char *
+const char *
 TR_RelocationRecordValidateInstanceField::name()
    {
    return "TR_ValidateInstanceField";
@@ -3647,14 +3718,14 @@ TR_RelocationRecordValidateInstanceField::getClassFromCP(TR_RelocationRuntime *r
    return definingClass;
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordValidateInstanceField::failureCode()
    {
-   return compilationAotValidateFieldFailure;
+   return TR_RelocationErrorCode::instanceFieldValidationFailure;
    }
 
 // TR_VerifyStaticField
-char *
+const char *
 TR_RelocationRecordValidateStaticField::name()
    {
    return "TR_ValidateStaticField";
@@ -3672,13 +3743,14 @@ TR_RelocationRecordValidateStaticField::print(TR_RelocationRuntime *reloRuntime)
 void
 TR_RelocationRecordValidateStaticField::setRomClassOffsetInSharedCache(
    TR_RelocationTarget *reloTarget, uintptr_t romClassOffsetInSharedCache,
-   TR::AheadOfTimeCompile *aotCompile, const AOTCacheClassChainRecord *classChainRecord
+   TR::AheadOfTimeCompile *aotCompile, TR::AOTClassInfo *aotCI
 )
    {
    uintptr_t *addr = &((TR_RelocationRecordValidateStaticFieldBinaryTemplate *)_record)->_romClassOffsetInSharedCache;
    reloTarget->storeRelocationRecordValue(romClassOffsetInSharedCache, addr);
+   aotCompile->comp()->addAOTMethodDependency(aotCI->_clazz, aotCI->_classChainOffset);
 #if defined(J9VM_OPT_JITSERVER)
-   aotCompile->addClassSerializationRecord(classChainRecord, addr);
+   aotCompile->addClassSerializationRecord(aotCI->getAOTCacheClassChainRecord(), addr);
 #endif /* defined(J9VM_OPT_JITSERVER) */
    }
 
@@ -3694,7 +3766,7 @@ TR_RelocationRecordValidateStaticField::getClass(TR_RelocationRuntime *reloRunti
    TR_OpaqueClassBlock *definingClass = NULL;
    if (void_cp)
       {
-      definingClass = TR_ResolvedJ9Method::definingClassFromCPFieldRef(reloRuntime->comp(), (J9ConstantPool *) void_cp, cpIndex(reloTarget), true); 
+      definingClass = TR_ResolvedJ9Method::definingClassFromCPFieldRef(reloRuntime->comp(), (J9ConstantPool *) void_cp, cpIndex(reloTarget), true);
       }
 
    return definingClass;
@@ -3713,7 +3785,7 @@ TR_RelocationRecordValidateStaticField::validateClass(TR_RelocationRuntime *relo
 
 
 // TR_RelocationRecordValidateArbitraryClass
-char *
+const char *
 TR_RelocationRecordValidateArbitraryClass::name()
    {
    return "TR_ValidateArbitraryClass";
@@ -3751,14 +3823,15 @@ TR_RelocationRecordValidateArbitraryClass::classChainIdentifyingLoaderOffset(TR_
 
 void
 TR_RelocationRecordValidateArbitraryClass::setClassChainOffsetForClassBeingValidated(
-   TR_RelocationTarget *reloTarget, uintptr_t offset,
-   TR::AheadOfTimeCompile *aotCompile, const AOTCacheClassChainRecord *classChainRecord
+   TR_RelocationTarget *reloTarget, const TR::AOTClassInfo *aotCI,
+   TR::AheadOfTimeCompile *aotCompile
 )
    {
    uintptr_t *addr = &((TR_RelocationRecordValidateArbitraryClassBinaryTemplate *)_record)->_classChainOffsetForClassBeingValidated;
-   reloTarget->storeRelocationRecordValue(offset, addr);
+   reloTarget->storeRelocationRecordValue(aotCI->_classChainOffset, addr);
+   aotCompile->comp()->addAOTMethodDependency(aotCI->_clazz, aotCI->_classChainOffset);
 #if defined(J9VM_OPT_JITSERVER)
-   aotCompile->addClassChainSerializationRecord(classChainRecord, addr);
+   aotCompile->addClassChainSerializationRecord(aotCI->getAOTCacheClassChainRecord(), addr);
 #endif /* defined(J9VM_OPT_JITSERVER) */
    }
 
@@ -3773,36 +3846,39 @@ TR_RelocationRecordValidateArbitraryClass::preparePrivateData(TR_RelocationRunti
    {
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordValidateArbitraryClass::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    TR_AOTStats *aotStats = reloRuntime->aotStats();
    if (aotStats)
       aotStats->numClassValidations++;
 
-   void *classChainIdentifyingLoader = reloRuntime->fej9()->sharedCache()->pointerFromOffsetInSharedCache(classChainIdentifyingLoaderOffset(reloTarget));
+   auto sharedCache = reloRuntime->fej9()->sharedCache();
+   void *classChainIdentifyingLoader = sharedCache->pointerFromOffsetInSharedCache(classChainIdentifyingLoaderOffset(reloTarget));
    RELO_LOG(reloRuntime->reloLogger(), 6, "\t\tpreparePrivateData: classChainIdentifyingLoader %p\n", classChainIdentifyingLoader);
 
-   J9ClassLoader *classLoader = (J9ClassLoader *) reloRuntime->fej9()->sharedCache()->persistentClassLoaderTable()->lookupClassLoaderAssociatedWithClassChain(classChainIdentifyingLoader);
+   J9ClassLoader *classLoader = (J9ClassLoader *)sharedCache->lookupClassLoaderAssociatedWithClassChain(classChainIdentifyingLoader);
    RELO_LOG(reloRuntime->reloLogger(), 6, "\t\tpreparePrivateData: classLoader %p\n", classLoader);
 
    if (classLoader)
       {
-      uintptr_t *classChainForClassBeingValidated = (uintptr_t *) reloRuntime->fej9()->sharedCache()->pointerFromOffsetInSharedCache(classChainOffsetForClassBeingValidated(reloTarget));
-      TR_OpaqueClassBlock *clazz = reloRuntime->fej9()->sharedCache()->lookupClassFromChainAndLoader(classChainForClassBeingValidated, classLoader);
+      uintptr_t *classChainForClassBeingValidated = (uintptr_t *)sharedCache->pointerFromOffsetInSharedCache(
+                                                    classChainOffsetForClassBeingValidated(reloTarget));
+      TR_OpaqueClassBlock *clazz = sharedCache->lookupClassFromChainAndLoader(classChainForClassBeingValidated,
+                                                                              classLoader, reloRuntime->comp());
       RELO_LOG(reloRuntime->reloLogger(), 6, "\t\tpreparePrivateData: clazz %p\n", clazz);
 
       if (clazz)
-         return 0;
+         return TR_RelocationErrorCode::relocationOK;
       }
 
    if (aotStats)
       aotStats->numClassValidationsFailed++;
 
-   return compilationAotClassReloFailure;
+   return TR_RelocationErrorCode::arbitraryClassValidationFailure;
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordValidateClassByName::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    uint16_t classID = this->classID(reloTarget);
@@ -3811,9 +3887,9 @@ TR_RelocationRecordValidateClassByName::applyRelocation(TR_RelocationRuntime *re
    uintptr_t *classChain = (uintptr_t*)reloRuntime->fej9()->sharedCache()->pointerFromOffsetInSharedCache(classChainOffset);
 
    if (reloRuntime->comp()->getSymbolValidationManager()->validateClassByNameRecord(classID, beholderID, classChain))
-      return 0;
+      return TR_RelocationErrorCode::relocationOK;
    else
-      return compilationAotClassReloFailure;
+      return TR_RelocationErrorCode::classByNameValidationFailure;
    }
 
 void
@@ -3853,14 +3929,16 @@ TR_RelocationRecordValidateClassByName::beholderID(TR_RelocationTarget *reloTarg
 
 void
 TR_RelocationRecordValidateClassByName::setClassChainOffset(
-   TR_RelocationTarget *reloTarget, uintptr_t classChainOffset,
-   TR::AheadOfTimeCompile *aotCompile, const AOTCacheClassChainRecord *classChainRecord
+   TR_RelocationTarget *reloTarget, const TR::ClassValidationRecordWithChain *validationRecord,
+   TR::AheadOfTimeCompile *aotCompile
 )
    {
+   TR::ClassValidationRecordWithChain *foo = NULL;
    uintptr_t *addr = &((TR_RelocationRecordValidateClassByNameBinaryTemplate *)_record)->_classChainOffsetInSCC;
-   reloTarget->storeRelocationRecordValue(classChainOffset, addr);
+   reloTarget->storeRelocationRecordValue(validationRecord->_classChainOffset, addr);
+   aotCompile->comp()->addAOTMethodDependency(validationRecord->_class, validationRecord->_classChainOffset);
 #if defined(J9VM_OPT_JITSERVER)
-   aotCompile->addClassChainSerializationRecord(classChainRecord, addr);
+   aotCompile->addClassChainSerializationRecord(validationRecord->getAOTCacheClassChainRecord(), addr);
 #endif /* defined(J9VM_OPT_JITSERVER) */
    }
 
@@ -3870,7 +3948,7 @@ TR_RelocationRecordValidateClassByName::classChainOffset(TR_RelocationTarget *re
    return reloTarget->loadRelocationRecordValue((uintptr_t *) &((TR_RelocationRecordValidateClassByNameBinaryTemplate *)_record)->_classChainOffsetInSCC);
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordValidateProfiledClass::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    uint16_t classID = this->classID(reloTarget);
@@ -3882,9 +3960,9 @@ TR_RelocationRecordValidateProfiledClass::applyRelocation(TR_RelocationRuntime *
    void *classChain = reloRuntime->fej9()->sharedCache()->pointerFromOffsetInSharedCache(classChainOffset);
 
    if (reloRuntime->comp()->getSymbolValidationManager()->validateProfiledClassRecord(classID, classChainForCL, classChain))
-      return 0;
+      return TR_RelocationErrorCode::relocationOK;
    else
-      return compilationAotClassReloFailure;
+      return TR_RelocationErrorCode::profiledClassValidationFailure;
    }
 
 void
@@ -3912,14 +3990,15 @@ TR_RelocationRecordValidateProfiledClass::classID(TR_RelocationTarget *reloTarge
 
 void
 TR_RelocationRecordValidateProfiledClass::setClassChainOffset(
-   TR_RelocationTarget *reloTarget, uintptr_t classChainOffset,
-   TR::AheadOfTimeCompile *aotCompile, const AOTCacheClassChainRecord *classChainRecord
+   TR_RelocationTarget *reloTarget, const TR::ProfiledClassRecord *validationRecord,
+   TR::AheadOfTimeCompile *aotCompile
 )
    {
    uintptr_t *addr = &((TR_RelocationRecordValidateProfiledClassBinaryTemplate *)_record)->_classChainOffsetInSCC;
-   reloTarget->storeRelocationRecordValue(classChainOffset, addr);
+   reloTarget->storeRelocationRecordValue(validationRecord->_classChainOffset, addr);
+   aotCompile->comp()->addAOTMethodDependency(validationRecord->_class, validationRecord->_classChainOffset);
 #if defined(J9VM_OPT_JITSERVER)
-   aotCompile->addClassChainSerializationRecord(classChainRecord, addr);
+   aotCompile->addClassChainSerializationRecord(validationRecord->getAOTCacheClassChainRecord(), addr);
 #endif /* defined(J9VM_OPT_JITSERVER) */
    }
 
@@ -3948,7 +4027,7 @@ TR_RelocationRecordValidateProfiledClass::classChainOffsetForClassLoader(TR_Relo
    return reloTarget->loadRelocationRecordValue((uintptr_t *) &((TR_RelocationRecordValidateProfiledClassBinaryTemplate *)_record)->_classChainOffsetForCLInScc);
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordValidateClassFromCP::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    uint16_t classID = this->classID(reloTarget);
@@ -3956,9 +4035,9 @@ TR_RelocationRecordValidateClassFromCP::applyRelocation(TR_RelocationRuntime *re
    uint32_t cpIndex = this->cpIndex(reloTarget);
 
    if (reloRuntime->comp()->getSymbolValidationManager()->validateClassFromCPRecord(classID, beholderID, cpIndex))
-      return 0;
+      return TR_RelocationErrorCode::relocationOK;
    else
-      return compilationAotClassReloFailure;
+      return TR_RelocationErrorCode::classFromCPValidationFailure;
    }
 
 void
@@ -4008,7 +4087,7 @@ TR_RelocationRecordValidateClassFromCP::cpIndex(TR_RelocationTarget *reloTarget)
    return reloTarget->loadUnsigned32b((uint8_t *) &((TR_RelocationRecordValidateClassFromCPBinaryTemplate *)_record)->_cpIndex);
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordValidateDefiningClassFromCP::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    uint16_t classID = this->classID(reloTarget);
@@ -4017,9 +4096,9 @@ TR_RelocationRecordValidateDefiningClassFromCP::applyRelocation(TR_RelocationRun
    bool isStatic = this->isStatic(reloTarget);
 
    if (reloRuntime->comp()->getSymbolValidationManager()->validateDefiningClassFromCPRecord(classID, beholderID, cpIndex, isStatic))
-      return 0;
+      return TR_RelocationErrorCode::relocationOK;
    else
-      return compilationAotClassReloFailure;
+      return TR_RelocationErrorCode::definingClassFromCPValidationFailure;
    }
 
 void
@@ -4082,7 +4161,7 @@ TR_RelocationRecordValidateDefiningClassFromCP::cpIndex(TR_RelocationTarget *rel
    return reloTarget->loadUnsigned32b((uint8_t *) &((TR_RelocationRecordValidateDefiningClassFromCPBinaryTemplate *)_record)->_cpIndex);
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordValidateStaticClassFromCP::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    uint16_t classID = this->classID(reloTarget);
@@ -4090,21 +4169,21 @@ TR_RelocationRecordValidateStaticClassFromCP::applyRelocation(TR_RelocationRunti
    uint32_t cpIndex = this->cpIndex(reloTarget);
 
    if (reloRuntime->comp()->getSymbolValidationManager()->validateStaticClassFromCPRecord(classID, beholderID, cpIndex))
-      return 0;
+      return TR_RelocationErrorCode::relocationOK;
    else
-      return compilationAotClassReloFailure;
+      return TR_RelocationErrorCode::staticClassFromCPValidationFailure;
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordValidateArrayClassFromComponentClass::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    uint16_t arrayClassID = this->arrayClassID(reloTarget);
    uint16_t componentClassID = this->componentClassID(reloTarget);
 
    if (reloRuntime->comp()->getSymbolValidationManager()->validateArrayClassFromComponentClassRecord(arrayClassID, componentClassID))
-      return 0;
+      return TR_RelocationErrorCode::relocationOK;
    else
-      return compilationAotClassReloFailure;
+      return TR_RelocationErrorCode::arrayClassFromComponentClassValidationFailure;
    }
 
 void
@@ -4141,16 +4220,16 @@ TR_RelocationRecordValidateArrayClassFromComponentClass::componentClassID(TR_Rel
    return reloTarget->loadUnsigned16b((uint8_t *) &((TR_RelocationRecordValidateArrayFromCompBinaryTemplate *)_record)->_componentClassID);
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordValidateSuperClassFromClass::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    uint16_t superClassID = this->superClassID(reloTarget);
    uint16_t childClassID = this->childClassID(reloTarget);
 
    if (reloRuntime->comp()->getSymbolValidationManager()->validateSuperClassFromClassRecord(superClassID, childClassID))
-      return 0;
+      return TR_RelocationErrorCode::relocationOK;
    else
-      return compilationAotClassReloFailure;
+      return TR_RelocationErrorCode::superClassFromClassValidationFailure;
    }
 
 void
@@ -4187,7 +4266,7 @@ TR_RelocationRecordValidateSuperClassFromClass::childClassID(TR_RelocationTarget
    return reloTarget->loadUnsigned16b((uint8_t *) &((TR_RelocationRecordValidateSuperClassFromClassBinaryTemplate *)_record)->_childClassID);
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordValidateClassInstanceOfClass::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    uint16_t classOneID = this->classOneID(reloTarget);
@@ -4197,9 +4276,9 @@ TR_RelocationRecordValidateClassInstanceOfClass::applyRelocation(TR_RelocationRu
    bool isInstanceOf = this->isInstanceOf(reloTarget);
 
    if (reloRuntime->comp()->getSymbolValidationManager()->validateClassInstanceOfClassRecord(classOneID, classTwoID, objectTypeIsFixed, castTypeIsFixed, isInstanceOf))
-      return 0;
+      return TR_RelocationErrorCode::relocationOK;
    else
-      return compilationAotClassReloFailure;
+      return TR_RelocationErrorCode::classInstanceOfClassValidationFailure;
    }
 
 void
@@ -4275,7 +4354,7 @@ TR_RelocationRecordValidateClassInstanceOfClass::classTwoID(TR_RelocationTarget 
    return reloTarget->loadUnsigned16b((uint8_t *) &((TR_RelocationRecordValidateClassInstanceOfClassBinaryTemplate *)_record)->_classTwoID);
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordValidateSystemClassByName::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    uint16_t systemClassID = this->systemClassID(reloTarget);
@@ -4283,9 +4362,9 @@ TR_RelocationRecordValidateSystemClassByName::applyRelocation(TR_RelocationRunti
    uintptr_t *classChain = (uintptr_t*)reloRuntime->fej9()->sharedCache()->pointerFromOffsetInSharedCache(classChainOffset);
 
    if (reloRuntime->comp()->getSymbolValidationManager()->validateSystemClassByNameRecord(systemClassID, classChain))
-      return 0;
+      return TR_RelocationErrorCode::relocationOK;
    else
-      return compilationAotClassReloFailure;
+      return TR_RelocationErrorCode::systemClassByNameValidationFailure;
    }
 
 void
@@ -4312,14 +4391,15 @@ TR_RelocationRecordValidateSystemClassByName::systemClassID(TR_RelocationTarget 
 
 void
 TR_RelocationRecordValidateSystemClassByName::setClassChainOffset(
-   TR_RelocationTarget *reloTarget, uintptr_t classChainOffset,
-   TR::AheadOfTimeCompile *aotCompile, const AOTCacheClassChainRecord *classChainRecord
+   TR_RelocationTarget *reloTarget, const TR::ClassValidationRecordWithChain *validationRecord,
+   TR::AheadOfTimeCompile *aotCompile
 )
    {
    uintptr_t *addr = &((TR_RelocationRecordValidateSystemClassByNameBinaryTemplate *)_record)->_classChainOffsetInSCC;
-   reloTarget->storeRelocationRecordValue(classChainOffset, addr);
+   reloTarget->storeRelocationRecordValue(validationRecord->_classChainOffset, addr);
+   aotCompile->comp()->addAOTMethodDependency(validationRecord->_class, validationRecord->_classChainOffset);
 #if defined(J9VM_OPT_JITSERVER)
-   aotCompile->addClassChainSerializationRecord(classChainRecord, addr);
+   aotCompile->addClassChainSerializationRecord(validationRecord->getAOTCacheClassChainRecord(), addr);
 #endif /* defined(J9VM_OPT_JITSERVER) */
    }
 
@@ -4329,7 +4409,7 @@ TR_RelocationRecordValidateSystemClassByName::classChainOffset(TR_RelocationTarg
    return reloTarget->loadRelocationRecordValue((uintptr_t *) &((TR_RelocationRecordValidateSystemClassByNameBinaryTemplate *)_record)->_classChainOffsetInSCC);
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordValidateClassFromITableIndexCP::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    uint16_t classID = this->classID(reloTarget);
@@ -4337,12 +4417,12 @@ TR_RelocationRecordValidateClassFromITableIndexCP::applyRelocation(TR_Relocation
    uint32_t cpIndex = this->cpIndex(reloTarget);
 
    if (reloRuntime->comp()->getSymbolValidationManager()->validateClassFromITableIndexCPRecord(classID, beholderID, cpIndex))
-      return 0;
+      return TR_RelocationErrorCode::relocationOK;
    else
-      return compilationAotClassReloFailure;
+      return TR_RelocationErrorCode::classFromITableIndexCPValidationFailure;
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordValidateDeclaringClassFromFieldOrStatic::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    uint16_t classID = this->classID(reloTarget);
@@ -4350,24 +4430,24 @@ TR_RelocationRecordValidateDeclaringClassFromFieldOrStatic::applyRelocation(TR_R
    uint32_t cpIndex = this->cpIndex(reloTarget);
 
    if (reloRuntime->comp()->getSymbolValidationManager()->validateDeclaringClassFromFieldOrStaticRecord(classID, beholderID, cpIndex))
-      return 0;
+      return TR_RelocationErrorCode::relocationOK;
    else
-      return compilationAotClassReloFailure;
+      return TR_RelocationErrorCode::declaringClassFromFieldOrStaticValidationFailure;
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordValidateConcreteSubClassFromClass::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    uint16_t superClassID = this->superClassID(reloTarget);
    uint16_t childClassID = this->childClassID(reloTarget);
 
    if (reloRuntime->comp()->getSymbolValidationManager()->validateConcreteSubClassFromClassRecord(childClassID, superClassID))
-      return 0;
+      return TR_RelocationErrorCode::relocationOK;
    else
-      return compilationAotClassReloFailure;
+      return TR_RelocationErrorCode::concreteSubclassFromClassValidationFailure;
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordValidateClassChain::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    uint16_t classID = this->classID(reloTarget);
@@ -4375,9 +4455,9 @@ TR_RelocationRecordValidateClassChain::applyRelocation(TR_RelocationRuntime *rel
    void *classChain = reloRuntime->fej9()->sharedCache()->pointerFromOffsetInSharedCache(classChainOffset);
 
    if (reloRuntime->comp()->getSymbolValidationManager()->validateClassChainRecord(classID, classChain))
-      return 0;
+      return TR_RelocationErrorCode::relocationOK;
    else
-      return compilationAotClassReloFailure;
+      return TR_RelocationErrorCode::classChainValidationFailure;
    }
 
 void
@@ -4404,14 +4484,15 @@ TR_RelocationRecordValidateClassChain::classID(TR_RelocationTarget *reloTarget)
 
 void
 TR_RelocationRecordValidateClassChain::setClassChainOffset(
-   TR_RelocationTarget *reloTarget, uintptr_t classChainOffset,
-   TR::AheadOfTimeCompile *aotCompile, const AOTCacheClassChainRecord *classChainRecord
+   TR_RelocationTarget *reloTarget, const TR::ClassChainRecord *validationRecord,
+   TR::AheadOfTimeCompile *aotCompile
 )
    {
    uintptr_t *addr = &((TR_RelocationRecordValidateClassChainBinaryTemplate *)_record)->_classChainOffsetInSCC;
-   reloTarget->storeRelocationRecordValue(classChainOffset, addr);
+   reloTarget->storeRelocationRecordValue(validationRecord->_classChainOffset, addr);
+   aotCompile->comp()->addAOTMethodDependency(validationRecord->_class, validationRecord->_classChainOffset);
 #if defined(J9VM_OPT_JITSERVER)
-   aotCompile->addClassChainSerializationRecord(classChainRecord, addr);
+   aotCompile->addClassChainSerializationRecord(validationRecord->getAOTCacheClassChainRecord(), addr);
 #endif /* defined(J9VM_OPT_JITSERVER) */
    }
 
@@ -4421,7 +4502,7 @@ TR_RelocationRecordValidateClassChain::classChainOffset(TR_RelocationTarget *rel
    return reloTarget->loadRelocationRecordValue((uintptr_t *) &((TR_RelocationRecordValidateClassChainBinaryTemplate *)_record)->_classChainOffsetInSCC);
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordValidateMethodFromClass::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    uint16_t methodID = this->methodID(reloTarget);
@@ -4429,9 +4510,9 @@ TR_RelocationRecordValidateMethodFromClass::applyRelocation(TR_RelocationRuntime
    uint32_t index = this->index(reloTarget);
 
    if (reloRuntime->comp()->getSymbolValidationManager()->validateMethodFromClassRecord(methodID, beholderID, index))
-      return 0;
+      return TR_RelocationErrorCode::relocationOK;
    else
-      return compilationAotClassReloFailure;
+      return TR_RelocationErrorCode::methodFromClassValidationFailure;
    }
 
 void
@@ -4541,7 +4622,7 @@ TR_RelocationRecordValidateMethodFromCP::cpIndex(TR_RelocationTarget *reloTarget
    return reloTarget->loadUnsigned16b((uint8_t *) &((TR_RelocationRecordValidateMethodFromCPBinaryTemplate *)_record)->_cpIndex);
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordValidateStaticMethodFromCP::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    uint16_t methodID = this->methodID(reloTarget);
@@ -4549,16 +4630,16 @@ TR_RelocationRecordValidateStaticMethodFromCP::applyRelocation(TR_RelocationRunt
    uint16_t beholderID = this->beholderID(reloTarget);
    uint32_t cpIndex = this->cpIndex(reloTarget);
 
-   if ((reloFlags(reloTarget) & TR_VALIDATE_STATIC_OR_SPECIAL_METHOD_FROM_CP_IS_SPLIT) != 0)
+   if ((reloFlags(reloTarget) & staticSpecialMethodFromCpIsSplit) != 0)
       cpIndex |= J9_STATIC_SPLIT_TABLE_INDEX_FLAG;
 
    if (reloRuntime->comp()->getSymbolValidationManager()->validateStaticMethodFromCPRecord(methodID, definingClassID, beholderID, cpIndex))
-      return 0;
+      return TR_RelocationErrorCode::relocationOK;
    else
-      return compilationAotClassReloFailure;
+      return TR_RelocationErrorCode::staticMethodFromCPValidationFailure;
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordValidateSpecialMethodFromCP::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    uint16_t methodID = this->methodID(reloTarget);
@@ -4566,16 +4647,16 @@ TR_RelocationRecordValidateSpecialMethodFromCP::applyRelocation(TR_RelocationRun
    uint16_t beholderID = this->beholderID(reloTarget);
    uint32_t cpIndex = this->cpIndex(reloTarget);
 
-   if ((reloFlags(reloTarget) & TR_VALIDATE_STATIC_OR_SPECIAL_METHOD_FROM_CP_IS_SPLIT) != 0)
+   if ((reloFlags(reloTarget) & staticSpecialMethodFromCpIsSplit) != 0)
       cpIndex |= J9_SPECIAL_SPLIT_TABLE_INDEX_FLAG;
 
    if (reloRuntime->comp()->getSymbolValidationManager()->validateSpecialMethodFromCPRecord(methodID, definingClassID, beholderID, cpIndex))
-      return 0;
+      return TR_RelocationErrorCode::relocationOK;
    else
-      return compilationAotClassReloFailure;
+      return TR_RelocationErrorCode::specialMethodFromCPValidationFailure;
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordValidateVirtualMethodFromCP::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    uint16_t methodID = this->methodID(reloTarget);
@@ -4584,12 +4665,12 @@ TR_RelocationRecordValidateVirtualMethodFromCP::applyRelocation(TR_RelocationRun
    uint32_t cpIndex = this->cpIndex(reloTarget);
 
    if (reloRuntime->comp()->getSymbolValidationManager()->validateVirtualMethodFromCPRecord(methodID, definingClassID, beholderID, cpIndex))
-      return 0;
+      return TR_RelocationErrorCode::relocationOK;
    else
-      return compilationAotClassReloFailure;
+      return TR_RelocationErrorCode::virtualMethodFromCPValidationFailure;
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordValidateVirtualMethodFromOffset::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    uint16_t methodID = this->methodID(reloTarget);
@@ -4600,9 +4681,9 @@ TR_RelocationRecordValidateVirtualMethodFromOffset::applyRelocation(TR_Relocatio
    bool ignoreRtResolve = (virtualCallOffsetAndIgnoreRtResolve & 1) != 0;
 
    if (reloRuntime->comp()->getSymbolValidationManager()->validateVirtualMethodFromOffsetRecord(methodID, definingClassID, beholderID, virtualCallOffset, ignoreRtResolve))
-      return 0;
+      return TR_RelocationErrorCode::relocationOK;
    else
-      return compilationAotClassReloFailure;
+      return TR_RelocationErrorCode::virtualMethodFromOffsetValidationFailure;
    }
 
 void
@@ -4671,7 +4752,7 @@ TR_RelocationRecordValidateVirtualMethodFromOffset::virtualCallOffsetAndIgnoreRt
    return reloTarget->loadUnsigned16b((uint8_t *) &((TR_RelocationRecordValidateVirtualMethodFromOffsetBinaryTemplate *)_record)->_virtualCallOffsetAndIgnoreRtResolve);
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordValidateInterfaceMethodFromCP::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    uint16_t methodID = this->methodID(reloTarget);
@@ -4681,9 +4762,9 @@ TR_RelocationRecordValidateInterfaceMethodFromCP::applyRelocation(TR_RelocationR
    uint32_t cpIndex = this->cpIndex(reloTarget);
 
    if (reloRuntime->comp()->getSymbolValidationManager()->validateInterfaceMethodFromCPRecord(methodID, definingClassID, beholderID, lookupID, cpIndex))
-      return 0;
+      return TR_RelocationErrorCode::relocationOK;
    else
-      return compilationAotClassReloFailure;
+      return TR_RelocationErrorCode::interfaceMethodFromCPValidationFailure;
    }
 
 
@@ -4760,7 +4841,7 @@ TR_RelocationRecordValidateInterfaceMethodFromCP::cpIndex(TR_RelocationTarget *r
    return reloTarget->loadUnsigned16b((uint8_t *) &((TR_RelocationRecordValidateInterfaceMethodFromCPBinaryTemplate *)_record)->_cpIndex);
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordValidateImproperInterfaceMethodFromCP::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    uint16_t methodID = this->methodID(reloTarget);
@@ -4769,12 +4850,12 @@ TR_RelocationRecordValidateImproperInterfaceMethodFromCP::applyRelocation(TR_Rel
    int32_t cpIndex = this->cpIndex(reloTarget);
 
    if (reloRuntime->comp()->getSymbolValidationManager()->validateImproperInterfaceMethodFromCPRecord(methodID, definingClassID, beholderID, cpIndex))
-      return 0;
+      return TR_RelocationErrorCode::relocationOK;
    else
-      return compilationAotClassReloFailure;
+      return TR_RelocationErrorCode::improperInterfaceMethodFromCPValidationFailure;
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordValidateMethodFromClassAndSig::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    uint16_t methodID = this->methodID(reloTarget);
@@ -4786,9 +4867,9 @@ TR_RelocationRecordValidateMethodFromClassAndSig::applyRelocation(TR_RelocationR
    J9ROMMethod *romMethod = reloRuntime->fej9()->sharedCache()->romMethodFromOffsetInSharedCache(romMethodOffset);
 
    if (reloRuntime->comp()->getSymbolValidationManager()->validateMethodFromClassAndSignatureRecord(methodID, definingClassID, lookupClassID, beholderID, romMethod))
-      return 0;
+      return TR_RelocationErrorCode::relocationOK;
    else
-      return compilationAotClassReloFailure;
+      return TR_RelocationErrorCode::methodFromClassAndSigValidationFailure;
    }
 
 void
@@ -4871,7 +4952,233 @@ TR_RelocationRecordValidateMethodFromClassAndSig::romMethodOffsetInSCC(TR_Reloca
    return reloTarget->loadRelocationRecordValue((uintptr_t *) &((TR_RelocationRecordValidateMethodFromClassAndSigBinaryTemplate *)_record)->_romMethodOffsetInSCC);
    }
 
+TR_RelocationErrorCode
+TR_RelocationRecordValidateDynamicMethodFromCallsiteIndex::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
+   {
+   bool valid = false;
+
+   uint16_t methodID = this->methodID(reloTarget);
+   uint16_t callerID = this->callerID(reloTarget);
+   int32_t callsiteIndex = this->callsiteIndex(reloTarget);
+   bool appendixObjectNull = this->appendixObjectNull(reloTarget);
+   uint16_t definingClassID = this->definingClassID(reloTarget);
+   uint32_t methodIndex = this->methodIndex(reloTarget);
+
+   valid =
+      reloRuntime->comp()->getSymbolValidationManager()->validateDynamicMethodFromCallsiteIndex(
+         methodID,
+         callerID,
+         callsiteIndex,
+         appendixObjectNull,
+         definingClassID,
+         methodIndex);
+
+   if (valid)
+      return TR_RelocationError::relocationOK;
+   else
+      return TR_RelocationError::dynamicMethodFromCallsiteIndexValidationFailure;
+   }
+
+void
+TR_RelocationRecordValidateDynamicMethodFromCallsiteIndex::print(TR_RelocationRuntime *reloRuntime)
+   {
+   TR_RelocationTarget *reloTarget = reloRuntime->reloTarget();
+   TR_RelocationRuntimeLogger *reloLogger = reloRuntime->reloLogger();
+   TR_RelocationRecord::print(reloRuntime);
+   reloLogger->printf("\tmethodID %d\n", methodID(reloTarget));
+   reloLogger->printf("\tcallerID %d\n", callerID(reloTarget));
+   reloLogger->printf("\tcallsiteIndex %d\n", callsiteIndex(reloTarget));
+   reloLogger->printf("\tappendixObjectNull %s\n", appendixObjectNull(reloTarget) ? "true" : "false");
+   reloLogger->printf("\tdefiningClassID %d\n", definingClassID(reloTarget));
+   reloLogger->printf("\tmethodIndex %d\n", methodIndex(reloTarget));
+   }
+
+void
+TR_RelocationRecordValidateDynamicMethodFromCallsiteIndex::setMethodID(TR_RelocationTarget *reloTarget, uint16_t methodID)
+   {
+   reloTarget->storeUnsigned16b(methodID, (uint8_t *) &((TR_RelocationRecordValidateDynamicMethodFromCallsiteIndexBinaryTemplate *)_record)->_methodID);
+   }
+
+uint16_t
+TR_RelocationRecordValidateDynamicMethodFromCallsiteIndex::methodID(TR_RelocationTarget *reloTarget)
+   {
+   return reloTarget->loadUnsigned16b((uint8_t *) &((TR_RelocationRecordValidateDynamicMethodFromCallsiteIndexBinaryTemplate *)_record)->_methodID);
+   }
+
+void
+TR_RelocationRecordValidateDynamicMethodFromCallsiteIndex::setCallerID(TR_RelocationTarget *reloTarget, uint16_t callerID)
+   {
+   reloTarget->storeUnsigned16b(callerID, (uint8_t *) &((TR_RelocationRecordValidateDynamicMethodFromCallsiteIndexBinaryTemplate *)_record)->_callerID);
+   }
+
+uint16_t
+TR_RelocationRecordValidateDynamicMethodFromCallsiteIndex::callerID(TR_RelocationTarget *reloTarget)
+   {
+   return reloTarget->loadUnsigned16b((uint8_t *) &((TR_RelocationRecordValidateDynamicMethodFromCallsiteIndexBinaryTemplate *)_record)->_callerID);
+   }
+
+void
+TR_RelocationRecordValidateDynamicMethodFromCallsiteIndex::setCallsiteIndex(TR_RelocationTarget *reloTarget, int32_t callsiteIndex)
+   {
+   reloTarget->storeSigned32b(callsiteIndex, (uint8_t *) &((TR_RelocationRecordValidateDynamicMethodFromCallsiteIndexBinaryTemplate *)_record)->_callsiteIndex);
+   }
+
 int32_t
+TR_RelocationRecordValidateDynamicMethodFromCallsiteIndex::callsiteIndex(TR_RelocationTarget *reloTarget)
+   {
+   return reloTarget->loadSigned32b((uint8_t *) &((TR_RelocationRecordValidateDynamicMethodFromCallsiteIndexBinaryTemplate *)_record)->_callsiteIndex);
+   }
+
+void
+TR_RelocationRecordValidateDynamicMethodFromCallsiteIndex::setAppendixObjectNull(TR_RelocationTarget *reloTarget, bool appendixObjectNull)
+   {
+   reloTarget->storeUnsigned8b((uint8_t)appendixObjectNull, (uint8_t *) &((TR_RelocationRecordValidateDynamicMethodFromCallsiteIndexBinaryTemplate *)_record)->_appendixObjectNull);
+   }
+
+bool
+TR_RelocationRecordValidateDynamicMethodFromCallsiteIndex::appendixObjectNull(TR_RelocationTarget *reloTarget)
+   {
+   return (bool)reloTarget->loadUnsigned8b((uint8_t *) &((TR_RelocationRecordValidateDynamicMethodFromCallsiteIndexBinaryTemplate *)_record)->_appendixObjectNull);
+   }
+
+void
+TR_RelocationRecordValidateDynamicMethodFromCallsiteIndex::setDefiningClassID(TR_RelocationTarget *reloTarget, uint16_t definingClassID)
+   {
+   reloTarget->storeUnsigned16b(definingClassID, (uint8_t *) &((TR_RelocationRecordValidateDynamicMethodFromCallsiteIndexBinaryTemplate *)_record)->_definingClassID);
+   }
+
+uint16_t
+TR_RelocationRecordValidateDynamicMethodFromCallsiteIndex::definingClassID(TR_RelocationTarget *reloTarget)
+   {
+   return reloTarget->loadUnsigned16b((uint8_t *) &((TR_RelocationRecordValidateDynamicMethodFromCallsiteIndexBinaryTemplate *)_record)->_definingClassID);
+   }
+
+void
+TR_RelocationRecordValidateDynamicMethodFromCallsiteIndex::setMethodIndex(TR_RelocationTarget *reloTarget, uint32_t methodIndex)
+   {
+   reloTarget->storeUnsigned32b(methodIndex, (uint8_t *) &((TR_RelocationRecordValidateDynamicMethodFromCallsiteIndexBinaryTemplate *)_record)->_methodIndex);
+   }
+
+uint32_t
+TR_RelocationRecordValidateDynamicMethodFromCallsiteIndex::methodIndex(TR_RelocationTarget *reloTarget)
+   {
+   return reloTarget->loadUnsigned32b((uint8_t *) &((TR_RelocationRecordValidateDynamicMethodFromCallsiteIndexBinaryTemplate *)_record)->_methodIndex);
+   }
+
+TR_RelocationErrorCode
+TR_RelocationRecordValidateHandleMethodFromCPIndex::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
+   {
+   bool valid = false;
+
+   uint16_t methodID = this->methodID(reloTarget);
+   uint16_t callerID = this->callerID(reloTarget);
+   int32_t cpIndex = this->cpIndex(reloTarget);
+   bool appendixObjectNull = this->appendixObjectNull(reloTarget);
+   uint16_t definingClassID = this->definingClassID(reloTarget);
+   uint32_t methodIndex = this->methodIndex(reloTarget);
+
+   valid =
+      reloRuntime->comp()->getSymbolValidationManager()->validateHandleMethodFromCPIndex(
+         methodID,
+         callerID,
+         cpIndex,
+         appendixObjectNull,
+         definingClassID,
+         methodIndex);
+
+   if (valid)
+      return TR_RelocationError::relocationOK;
+   else
+      return TR_RelocationError::handleMethodFromCPIndexValidationFailure;
+   }
+
+void
+TR_RelocationRecordValidateHandleMethodFromCPIndex::print(TR_RelocationRuntime *reloRuntime)
+   {
+   TR_RelocationTarget *reloTarget = reloRuntime->reloTarget();
+   TR_RelocationRuntimeLogger *reloLogger = reloRuntime->reloLogger();
+   TR_RelocationRecord::print(reloRuntime);
+   reloLogger->printf("\tmethodID %d\n", methodID(reloTarget));
+   reloLogger->printf("\tcallerID %d\n", callerID(reloTarget));
+   reloLogger->printf("\tcpIndex %d\n", cpIndex(reloTarget));
+   reloLogger->printf("\tappendixObjectNull %s\n", appendixObjectNull(reloTarget) ? "true" : "false");
+   reloLogger->printf("\tdefiningClassID %d\n", definingClassID(reloTarget));
+   reloLogger->printf("\tmethodIndex %d\n", methodIndex(reloTarget));
+   }
+
+void
+TR_RelocationRecordValidateHandleMethodFromCPIndex::setMethodID(TR_RelocationTarget *reloTarget, uint16_t methodID)
+   {
+   reloTarget->storeUnsigned16b(methodID, (uint8_t *) &((TR_RelocationRecordValidateHandleMethodFromCPIndexBinaryTemplate *)_record)->_methodID);
+   }
+
+uint16_t
+TR_RelocationRecordValidateHandleMethodFromCPIndex::methodID(TR_RelocationTarget *reloTarget)
+   {
+   return reloTarget->loadUnsigned16b((uint8_t *) &((TR_RelocationRecordValidateHandleMethodFromCPIndexBinaryTemplate *)_record)->_methodID);
+   }
+
+void
+TR_RelocationRecordValidateHandleMethodFromCPIndex::setCallerID(TR_RelocationTarget *reloTarget, uint16_t callerID)
+   {
+   reloTarget->storeUnsigned16b(callerID, (uint8_t *) &((TR_RelocationRecordValidateHandleMethodFromCPIndexBinaryTemplate *)_record)->_callerID);
+   }
+
+uint16_t
+TR_RelocationRecordValidateHandleMethodFromCPIndex::callerID(TR_RelocationTarget *reloTarget)
+   {
+   return reloTarget->loadUnsigned16b((uint8_t *) &((TR_RelocationRecordValidateHandleMethodFromCPIndexBinaryTemplate *)_record)->_callerID);
+   }
+
+void
+TR_RelocationRecordValidateHandleMethodFromCPIndex::setCpIndex(TR_RelocationTarget *reloTarget, int32_t cpIndex)
+   {
+   reloTarget->storeSigned32b(cpIndex, (uint8_t *) &((TR_RelocationRecordValidateHandleMethodFromCPIndexBinaryTemplate *)_record)->_cpIndex);
+   }
+
+int32_t
+TR_RelocationRecordValidateHandleMethodFromCPIndex::cpIndex(TR_RelocationTarget *reloTarget)
+   {
+   return reloTarget->loadSigned32b((uint8_t *) &((TR_RelocationRecordValidateHandleMethodFromCPIndexBinaryTemplate *)_record)->_cpIndex);
+   }
+
+void
+TR_RelocationRecordValidateHandleMethodFromCPIndex::setAppendixObjectNull(TR_RelocationTarget *reloTarget, bool appendixObjectNull)
+   {
+   reloTarget->storeUnsigned8b((uint8_t)appendixObjectNull, (uint8_t *) &((TR_RelocationRecordValidateHandleMethodFromCPIndexBinaryTemplate *)_record)->_appendixObjectNull);
+   }
+
+bool
+TR_RelocationRecordValidateHandleMethodFromCPIndex::appendixObjectNull(TR_RelocationTarget *reloTarget)
+   {
+   return (bool)reloTarget->loadUnsigned8b((uint8_t *) &((TR_RelocationRecordValidateHandleMethodFromCPIndexBinaryTemplate *)_record)->_appendixObjectNull);
+   }
+
+void
+TR_RelocationRecordValidateHandleMethodFromCPIndex::setDefiningClassID(TR_RelocationTarget *reloTarget, uint16_t definingClassID)
+   {
+   reloTarget->storeUnsigned16b(definingClassID, (uint8_t *) &((TR_RelocationRecordValidateHandleMethodFromCPIndexBinaryTemplate *)_record)->_definingClassID);
+   }
+
+uint16_t
+TR_RelocationRecordValidateHandleMethodFromCPIndex::definingClassID(TR_RelocationTarget *reloTarget)
+   {
+   return reloTarget->loadUnsigned16b((uint8_t *) &((TR_RelocationRecordValidateHandleMethodFromCPIndexBinaryTemplate *)_record)->_definingClassID);
+   }
+
+void
+TR_RelocationRecordValidateHandleMethodFromCPIndex::setMethodIndex(TR_RelocationTarget *reloTarget, uint32_t methodIndex)
+   {
+   reloTarget->storeUnsigned32b(methodIndex, (uint8_t *) &((TR_RelocationRecordValidateHandleMethodFromCPIndexBinaryTemplate *)_record)->_methodIndex);
+   }
+
+uint32_t
+TR_RelocationRecordValidateHandleMethodFromCPIndex::methodIndex(TR_RelocationTarget *reloTarget)
+   {
+   return reloTarget->loadUnsigned32b((uint8_t *) &((TR_RelocationRecordValidateHandleMethodFromCPIndexBinaryTemplate *)_record)->_methodIndex);
+   }
+
+TR_RelocationErrorCode
 TR_RelocationRecordValidateStackWalkerMaySkipFrames::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    uint16_t methodID = this->methodID(reloTarget);
@@ -4879,9 +5186,9 @@ TR_RelocationRecordValidateStackWalkerMaySkipFrames::applyRelocation(TR_Relocati
    bool skipFrames = this->skipFrames(reloTarget);
 
    if (reloRuntime->comp()->getSymbolValidationManager()->validateStackWalkerMaySkipFramesRecord(methodID, methodClassID, skipFrames))
-      return 0;
+      return TR_RelocationErrorCode::relocationOK;
    else
-      return compilationAotClassReloFailure;
+      return TR_RelocationErrorCode::stackWalkerMaySkipFramesValidationFailure;
    }
 
 void
@@ -4931,16 +5238,16 @@ TR_RelocationRecordValidateStackWalkerMaySkipFrames::skipFrames(TR_RelocationTar
    return (bool)reloTarget->loadUnsigned8b((uint8_t *) &((TR_RelocationRecordValidateStackWalkerMaySkipFramesBinaryTemplate *)_record)->_skipFrames);
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordValidateClassInfoIsInitialized::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    uint16_t classID = this->classID(reloTarget);
    bool wasInitialized = this->isInitialized(reloTarget);
 
    if (reloRuntime->comp()->getSymbolValidationManager()->validateClassInfoIsInitializedRecord(classID, wasInitialized))
-      return 0;
+      return TR_RelocationErrorCode::relocationOK;
    else
-      return compilationAotClassReloFailure;
+      return TR_RelocationErrorCode::classInfoIsInitializedValidationFailure;
    }
 
 void
@@ -4977,7 +5284,7 @@ TR_RelocationRecordValidateClassInfoIsInitialized::isInitialized(TR_RelocationTa
    return (bool)reloTarget->loadUnsigned8b((uint8_t *) &((TR_RelocationRecordValidateClassInfoIsInitializedBinaryTemplate *)_record)->_isInitialized);
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordValidateMethodFromSingleImpl::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    uint16_t methodID = this->methodID(reloTarget);
@@ -4993,9 +5300,9 @@ TR_RelocationRecordValidateMethodFromSingleImpl::applyRelocation(TR_RelocationRu
                                                                                                     cpIndexOrVftSlot,
                                                                                                     callerMethodID,
                                                                                                     useGetResolvedInterfaceMethod))
-      return 0;
+      return TR_RelocationErrorCode::relocationOK;
    else
-      return compilationAotClassReloFailure;
+      return TR_RelocationErrorCode::methodFromSingleImplValidationFailure;
    }
 
 void
@@ -5096,7 +5403,7 @@ TR_RelocationRecordValidateMethodFromSingleImpl::useGetResolvedInterfaceMethod(T
    return (TR_YesNoMaybe)reloTarget->loadUnsigned16b((uint8_t *) &((TR_RelocationRecordValidateMethodFromSingleImplBinaryTemplate *)_record)->_useGetResolvedInterfaceMethod);
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordValidateMethodFromSingleInterfaceImpl::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    uint16_t methodID = this->methodID(reloTarget);
@@ -5110,9 +5417,9 @@ TR_RelocationRecordValidateMethodFromSingleInterfaceImpl::applyRelocation(TR_Rel
                                                                                                              thisClassID,
                                                                                                              cpIndex,
                                                                                                              callerMethodID))
-      return 0;
+      return TR_RelocationErrorCode::relocationOK;
    else
-      return compilationAotClassReloFailure;
+      return TR_RelocationErrorCode::methodFromSingleInterfaceImplValidationFailure;
    }
 
 void
@@ -5189,7 +5496,7 @@ TR_RelocationRecordValidateMethodFromSingleInterfaceImpl::cpIndex(TR_RelocationT
    return reloTarget->loadUnsigned16b((uint8_t *) &((TR_RelocationRecordValidateMethodFromSingleInterfaceImplBinaryTemplate *)_record)->_cpIndex);
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordValidateMethodFromSingleAbstractImpl::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    uint16_t methodID = this->methodID(reloTarget);
@@ -5203,9 +5510,9 @@ TR_RelocationRecordValidateMethodFromSingleAbstractImpl::applyRelocation(TR_Relo
                                                                                                             thisClassID,
                                                                                                             vftSlot,
                                                                                                             callerMethodID))
-      return 0;
+      return TR_RelocationErrorCode::relocationOK;
    else
-      return compilationAotClassReloFailure;
+      return TR_RelocationErrorCode::methodFromSingleAbstractImplValidationFailure;
    }
 
 void
@@ -5336,11 +5643,11 @@ TR_RelocationRecordSymbolFromManager::preparePrivateData(TR_RelocationRuntime *r
    uint16_t symbolID = this->symbolID(reloTarget);
    TR::SymbolType symbolType = this->symbolType(reloTarget);
 
-   reloPrivateData->_symbol = reloRuntime->comp()->getSymbolValidationManager()->getSymbolFromID(symbolID, symbolType);
+   reloPrivateData->_symbol = reloRuntime->comp()->getSymbolValidationManager()->getValueFromSymbolID(symbolID, symbolType);
    reloPrivateData->_symbolType = symbolType;
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordSymbolFromManager::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    TR_RelocationSymbolFromManagerPrivateData *reloPrivateData = &(privateData()->symbolFromManager);
@@ -5360,10 +5667,10 @@ TR_RelocationRecordSymbolFromManager::applyRelocation(TR_RelocationRuntime *relo
       }
    else
       {
-      return compilationAotClassReloFailure;
+      return TR_RelocationErrorCode::symbolFromManagerRelocationFailure;
       }
 
-   return 0;
+   return TR_RelocationErrorCode::relocationOK;
    }
 
 bool
@@ -5393,7 +5700,7 @@ TR_RelocationRecordSymbolFromManager::needsRedefinitionAssumption(TR_RelocationR
    switch (symbolType)
       {
       case TR::SymbolType::typeClass:
-         needsAssumptions =  TR::CodeGenerator::wantToPatchClassPointer(reloRuntime->comp(), clazz, reloLocation);
+         needsAssumptions = false;
          break;
 
       case TR::SymbolType::typeMethod:
@@ -5438,7 +5745,9 @@ TR_RelocationRecordSymbolFromManager::activatePointer(TR_RelocationRuntime *relo
       clazz = (TR_OpaqueClassBlock *)J9_CLASS_FROM_METHOD((J9Method *)(reloPrivateData->_symbol));
       }
 
-   if (needsUnloadAssumptions(symbolType))
+   TR::Compilation *comp = reloRuntime->comp();
+   if (needsUnloadAssumptions(symbolType) &&
+       comp->fej9()->isUnloadAssumptionRequired(clazz, comp->getCurrentMethod()))
       {
       SVM_ASSERT(clazz != NULL, "clazz must exist to add Unload Assumptions!");
       reloTarget->addPICtoPatchPtrOnClassUnload(clazz, reloLocation);
@@ -5446,8 +5755,8 @@ TR_RelocationRecordSymbolFromManager::activatePointer(TR_RelocationRuntime *relo
    if (needsRedefinitionAssumption(reloRuntime, reloLocation, clazz, symbolType))
       {
       SVM_ASSERT(clazz != NULL, "clazz must exist to add Redefinition Assumptions!");
-      createClassRedefinitionPicSite((void *)reloPrivateData->_symbol, (void *) reloLocation, sizeof(uintptr_t), false, reloRuntime->comp()->getMetadataAssumptionList());
-      reloRuntime->comp()->setHasClassRedefinitionAssumptions();
+      createClassRedefinitionPicSite((void *)reloPrivateData->_symbol, (void *) reloLocation, sizeof(uintptr_t), false, comp->getMetadataAssumptionList());
+      comp->setHasClassRedefinitionAssumptions();
       }
    }
 
@@ -5488,7 +5797,7 @@ TR_RelocationRecordResolvedTrampolines::preparePrivateData(TR_RelocationRuntime 
    reloPrivateData->_method = reloRuntime->comp()->getSymbolValidationManager()->getMethodFromID(symbolID);
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordResolvedTrampolines::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    TR_RelocationRecordResolvedTrampolinesPrivateData *reloPrivateData = &(privateData()->resolvedTrampolines);
@@ -5503,15 +5812,15 @@ TR_RelocationRecordResolvedTrampolines::applyRelocation(TR_RelocationRuntime *re
    if (reloRuntime->codeCache()->reserveResolvedTrampoline(method, true) != OMR::CodeCacheErrorCode::ERRORCODE_SUCCESS)
       {
       RELO_LOG(reloRuntime->reloLogger(), 6, "\t\tapplyRelocation: aborting AOT relocation because trampoline was not reserved. Will be retried.\n");
-      return compilationAotTrampolineReloFailure;
+      return TR_RelocationErrorCode::trampolineRelocationFailure;
       }
 
-   return 0;
+   return TR_RelocationErrorCode::relocationOK;
    }
 
 
 // TR_HCR
-char *
+const char *
 TR_RelocationRecordHCR::name()
    {
    return "TR_HCR";
@@ -5525,7 +5834,7 @@ TR_RelocationRecordHCR::action(TR_RelocationRuntime *reloRuntime)
    return hcrEnabled ? TR_RelocationRecordAction::apply : TR_RelocationRecordAction::ignore;
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordHCR::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    void *methodAddress = (void *)reloRuntime->exceptionTable()->ramMethod;
@@ -5542,7 +5851,7 @@ TR_RelocationRecordHCR::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_Re
       createClassRedefinitionPicSite((void *)-1, (void *)reloLocation, locationSize, true,
                                      getMetadataAssumptionList(reloRuntime->exceptionTable()));
       }
-   return 0;
+   return TR_RelocationErrorCode::relocationOK;
    }
 
 // TR_Pointer
@@ -5587,11 +5896,13 @@ TR_RelocationRecordPointer::classChainIdentifyingLoaderOffsetInSharedCache(TR_Re
 void
 TR_RelocationRecordPointer::setClassChainForInlinedMethod(
    TR_RelocationTarget *reloTarget, uintptr_t classChainForInlinedMethod,
-   TR::AheadOfTimeCompile *aotCompile, const AOTCacheClassChainRecord *classChainRecord
+   TR::AheadOfTimeCompile *aotCompile, const AOTCacheClassChainRecord *classChainRecord,
+   TR_OpaqueClassBlock *classForInlinedMethod
 )
    {
    uintptr_t *addr = &((TR_RelocationRecordPointerBinaryTemplate *)_record)->_classChainForInlinedMethod;
    reloTarget->storeRelocationRecordValue(classChainForInlinedMethod, addr);
+   aotCompile->comp()->addAOTMethodDependency(classForInlinedMethod, classChainForInlinedMethod);
 #if defined(J9VM_OPT_JITSERVER)
    aotCompile->addClassChainSerializationRecord(classChainRecord, addr);
 #endif /* defined(J9VM_OPT_JITSERVER) */
@@ -5611,17 +5922,18 @@ TR_RelocationRecordPointer::preparePrivateData(TR_RelocationRuntime *reloRuntime
    J9Class *classPointer = NULL;
    if (getInlinedSiteMethod(reloRuntime, inlinedSiteIndex(reloTarget)) != (TR_OpaqueMethodBlock *)-1)
       {
+      auto sharedCache = reloRuntime->fej9()->sharedCache();
       J9ClassLoader *classLoader = NULL;
-      void *classChainIdentifyingLoader = reloRuntime->fej9()->sharedCache()->pointerFromOffsetInSharedCache(classChainIdentifyingLoaderOffsetInSharedCache(reloTarget));
+      void *classChainIdentifyingLoader = sharedCache->pointerFromOffsetInSharedCache(classChainIdentifyingLoaderOffsetInSharedCache(reloTarget));
       RELO_LOG(reloRuntime->reloLogger(), 6,"\tpreparePrivateData: classChainIdentifyingLoader %p\n", classChainIdentifyingLoader);
-      classLoader = (J9ClassLoader *) reloRuntime->fej9()->sharedCache()->persistentClassLoaderTable()->lookupClassLoaderAssociatedWithClassChain(classChainIdentifyingLoader);
+      classLoader = (J9ClassLoader *)sharedCache->lookupClassLoaderAssociatedWithClassChain(classChainIdentifyingLoader);
       RELO_LOG(reloRuntime->reloLogger(), 6,"\tpreparePrivateData: classLoader %p\n", classLoader);
 
       if (classLoader != NULL)
          {
-         uintptr_t *classChain = (uintptr_t *) reloRuntime->fej9()->sharedCache()->pointerFromOffsetInSharedCache(classChainForInlinedMethod(reloTarget));
+         uintptr_t *classChain = (uintptr_t *)sharedCache->pointerFromOffsetInSharedCache(classChainForInlinedMethod(reloTarget));
          RELO_LOG(reloRuntime->reloLogger(), 6,"\tpreparePrivateData: classChain %p\n", classChain);
-         classPointer = (J9Class *) reloRuntime->fej9()->sharedCache()->lookupClassFromChainAndLoader(classChain, (void *) classLoader);
+         classPointer = (J9Class *)sharedCache->lookupClassFromChainAndLoader(classChain, (void *) classLoader, reloRuntime->comp());
          RELO_LOG(reloRuntime->reloLogger(), 6,"\tpreparePrivateData: classPointer %p\n", classPointer);
          }
       }
@@ -5664,18 +5976,18 @@ TR_RelocationRecordPointer::registerHCRAssumption(TR_RelocationRuntime *reloRunt
    reloRuntime->comp()->setHasClassRedefinitionAssumptions();
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordPointer::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    TR_RelocationRecordPointerPrivateData *reloPrivateData = &(privateData()->pointer);
    reloTarget->storePointer((uint8_t *)reloPrivateData->_pointer, reloLocation);
    if (reloPrivateData->_activatePointer)
       activatePointer(reloRuntime, reloTarget, reloLocation);
-   return 0;
+   return TR_RelocationErrorCode::relocationOK;
    }
 
 // TR_ClassPointer
-char *
+const char *
 TR_RelocationRecordClassPointer::name()
    {
    return "TR_ClassPointer";
@@ -5693,18 +6005,16 @@ TR_RelocationRecordClassPointer::activatePointer(TR_RelocationRuntime *reloRunti
    TR_RelocationRecordPointer::activatePointer(reloRuntime, reloTarget, reloLocation);
    TR_RelocationRecordPointerPrivateData *reloPrivateData = &(privateData()->pointer);
    TR_ASSERT((void*)reloPrivateData->_pointer == (void*)reloPrivateData->_clazz, "Pointer differs from class pointer");
-   if (TR::CodeGenerator::wantToPatchClassPointer(reloRuntime->comp(), reloPrivateData->_clazz, reloLocation))
-      registerHCRAssumption(reloRuntime, reloLocation);
    }
 
 // TR_ArbitraryClassAddress
-char *
+const char *
 TR_RelocationRecordArbitraryClassAddress::name()
    {
    return "TR_ArbitraryClassAddress";
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordArbitraryClassAddress::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    TR_RelocationRecordPointerPrivateData *reloPrivateData = &(privateData()->pointer);
@@ -5712,10 +6022,10 @@ TR_RelocationRecordArbitraryClassAddress::applyRelocation(TR_RelocationRuntime *
    assertBootstrapLoader(reloRuntime, clazz);
    reloTarget->storeAddressSequence((uint8_t*)clazz, reloLocation, reloFlags(reloTarget));
    // No need to activatePointer(). See its definition below.
-   return 0;
+   return TR_RelocationErrorCode::relocationOK;
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordArbitraryClassAddress::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocationHigh, uint8_t *reloLocationLow)
    {
    TR_RelocationRecordPointerPrivateData *reloPrivateData = &(privateData()->pointer);
@@ -5723,7 +6033,7 @@ TR_RelocationRecordArbitraryClassAddress::applyRelocation(TR_RelocationRuntime *
    assertBootstrapLoader(reloRuntime, clazz);
    reloTarget->storeAddress((uint8_t*)clazz, reloLocationHigh, reloLocationLow, reloFlags(reloTarget));
    // No need to activatePointer(). See its definition below.
-   return 0;
+   return TR_RelocationErrorCode::relocationOK;
    }
 
 void
@@ -5754,7 +6064,7 @@ TR_RelocationRecordArbitraryClassAddress::assertBootstrapLoader(TR_RelocationRun
    }
 
 // TR_MethodPointer
-char *
+const char *
 TR_RelocationRecordMethodPointer::name()
    {
    return "TR_MethodPointer";
@@ -5810,7 +6120,7 @@ TR_RelocationRecordMethodPointer::activatePointer(TR_RelocationRuntime *reloRunt
       registerHCRAssumption(reloRuntime, reloLocation);
    }
 
-char *
+const char *
 TR_RelocationRecordInlinedMethodPointer::name()
    {
    return "TR_InlinedMethodPointer";
@@ -5847,7 +6157,7 @@ TR_RelocationRecordInlinedMethodPointer::preparePrivateData(TR_RelocationRuntime
       }
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordInlinedMethodPointer::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    TR_RelocationRecordPointerPrivateData *reloPrivateData = &(privateData()->pointer);
@@ -5880,7 +6190,7 @@ TR_RelocationRecordInlinedMethodPointer::applyRelocation(TR_RelocationRuntime *r
                       "Not activating pointer but clazz=%p", reloPrivateData->_clazz);
       }
 
-   return 0;
+   return TR_RelocationErrorCode::relocationOK;
    }
 
 void
@@ -5892,13 +6202,13 @@ TR_RelocationRecordEmitClass::preparePrivateData(TR_RelocationRuntime *reloRunti
    reloPrivateData->_method  = getInlinedSiteMethod(reloRuntime);
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordEmitClass::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    TR_RelocationRecordEmitClassPrivateData *reloPrivateData = &(privateData()->emitClass);
 
    reloRuntime->addClazzRecord(reloLocation, reloPrivateData->_bcIndex, reloPrivateData->_method);
-   return 0;
+   return TR_RelocationErrorCode::relocationOK;
    }
 
 void
@@ -5913,7 +6223,7 @@ TR_RelocationRecordEmitClass::bcIndex(TR_RelocationTarget *reloTarget)
    return reloTarget->loadSigned32b((uint8_t *) &((TR_RelocationRecordEmitClassBinaryTemplate *)_record)->_bcIndex);
    }
 
-char *
+const char *
 TR_RelocationRecordDebugCounter::name()
    {
    return "TR_RelocationRecordDebugCounter";
@@ -6016,7 +6326,7 @@ TR_RelocationRecordDebugCounter::preparePrivateData(TR_RelocationRuntime *reloRu
    reloPrivateData->_name        =  reloRuntime->fej9()->sharedCache()->getDebugCounterName(offset);
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordDebugCounter::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    TR::DebugCounterBase *counter = findOrCreateCounter(reloRuntime);
@@ -6028,16 +6338,16 @@ TR_RelocationRecordDebugCounter::applyRelocation(TR_RelocationRuntime *reloRunti
        * to have debug counters run, it's probably better to fail the relocation.
        *
        */
-      return -1;
+      return TR_RelocationErrorCode::debugCounterRelocationFailure;
       }
 
    // Update Counter Location
    reloTarget->storeAddressSequence((uint8_t *)counter->getBumpCountAddress(), reloLocation, reloFlags(reloTarget));
 
-   return 0;
+   return TR_RelocationErrorCode::relocationOK;
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordDebugCounter::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocationHigh, uint8_t *reloLocationLow)
    {
    TR::DebugCounterBase *counter = findOrCreateCounter(reloRuntime);
@@ -6049,13 +6359,13 @@ TR_RelocationRecordDebugCounter::applyRelocation(TR_RelocationRuntime *reloRunti
        * to have debug counters run, it's probably better to fail the relocation.
        *
        */
-      return -1;
+      return TR_RelocationErrorCode::debugCounterRelocationFailure;
       }
 
    // Update Counter Location
    reloTarget->storeAddress((uint8_t *)counter->getBumpCountAddress(), reloLocationHigh, reloLocationLow, reloFlags(reloTarget));
 
-   return 0;
+   return TR_RelocationErrorCode::relocationOK;
    }
 
 TR::DebugCounterBase *
@@ -6106,17 +6416,17 @@ TR_RelocationRecordDebugCounter::findOrCreateCounter(TR_RelocationRuntime *reloR
    }
 
 // ClassUnloadAssumption
-char *
+const char *
 TR_RelocationRecordClassUnloadAssumption::name()
    {
    return "TR_ClassUnloadAssumption";
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordClassUnloadAssumption::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    reloTarget->addPICtoPatchPtrOnClassUnload((TR_OpaqueClassBlock *) -1, reloLocation);
-   return 0;
+   return TR_RelocationErrorCode::relocationOK;
    }
 
 uint8_t *
@@ -6153,7 +6463,8 @@ TR_RelocationRecordMethodCallAddress::setAddress(TR_RelocationTarget *reloTarget
    reloTarget->storeAddress(callTargetAddress, reinterpret_cast<uint8_t *>(&reloData->_methodAddress));
    }
 
-int32_t TR_RelocationRecordMethodCallAddress::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
+TR_RelocationErrorCode
+TR_RelocationRecordMethodCallAddress::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    uint8_t *baseLocation = 0;
    if (eipRelative(reloTarget))
@@ -6173,7 +6484,7 @@ int32_t TR_RelocationRecordMethodCallAddress::applyRelocation(TR_RelocationRunti
    else
       reloTarget->storeAddress(callTargetOffset, reloLocation);
 
-   return 0;
+   return TR_RelocationErrorCode::relocationOK;
    }
 
 void
@@ -6212,7 +6523,7 @@ TR_RelocationRecordBreakpointGuard::destinationAddress(TR_RelocationTarget *relo
    return reloTarget->loadRelocationRecordValue((uintptr_t *) &((TR_RelocationRecordBreapointGuardBinaryTemplate *)_record)->_destinationAddress);
    }
 
-int32_t
+TR_RelocationErrorCode
 TR_RelocationRecordBreakpointGuard::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
    {
    TR_RelocationRecordBreakpointGuardPrivateData *reloPrivateData = &(privateData()->breakpointGuard);
@@ -6229,9 +6540,444 @@ TR_RelocationRecordBreakpointGuard::applyRelocation(TR_RelocationRuntime *reloRu
                 getMetadataAssumptionList(reloRuntime->exceptionTable()));
       }
 
-   return 0;
+   return TR_RelocationErrorCode::relocationOK;
    }
 
+TR_RelocationErrorCode
+TR_RelocationRecordValidateJ2IThunkFromMethod::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
+   {
+   uint16_t thunkID = this->thunkID(reloTarget);
+   uint16_t methodID = this->methodID(reloTarget);
+
+   TR::SymbolValidationManager *svm = reloRuntime->comp()->getSymbolValidationManager();
+   J9Method *method = svm->getJ9MethodFromID(methodID);
+   J9UTF8 *sigUTF8 = J9ROMMETHOD_SIGNATURE(J9_ROM_METHOD_FROM_RAM_METHOD(method));
+   int32_t sigLen = J9UTF8_LENGTH(sigUTF8);
+   char *sig = (char*)J9UTF8_DATA(sigUTF8);
+
+   void *thunkAddress;
+   TR_RelocationErrorCode err = ::relocateAndRegisterThunk(
+      reloRuntime, reloTarget, sigLen, sig, &thunkAddress);
+
+   if (err != TR_RelocationErrorCode::relocationOK)
+      return err;
+
+   if (svm->validateJ2IThunkFromMethodRecord(thunkID, thunkAddress))
+      return TR_RelocationErrorCode::relocationOK;
+   else
+      return TR_RelocationErrorCode::j2iThunkFromMethodValidationFailure;
+   }
+
+void
+TR_RelocationRecordValidateJ2IThunkFromMethod::print(TR_RelocationRuntime *reloRuntime)
+   {
+   TR_RelocationTarget *reloTarget = reloRuntime->reloTarget();
+   TR_RelocationRuntimeLogger *reloLogger = reloRuntime->reloLogger();
+   TR_RelocationRecord::print(reloRuntime);
+   reloLogger->printf("\tmethodID %d\n", methodID(reloTarget));
+   reloLogger->printf("\tthunkID %d\n", thunkID(reloTarget));
+   }
+
+void
+TR_RelocationRecordValidateJ2IThunkFromMethod::setThunkID(TR_RelocationTarget *reloTarget, uint16_t thunkID)
+   {
+   reloTarget->storeUnsigned16b(thunkID, (uint8_t *) &((TR_RelocationRecordValidateJ2IThunkFromMethodBinaryTemplate *)_record)->_thunkID);
+   }
+
+uint16_t
+TR_RelocationRecordValidateJ2IThunkFromMethod::thunkID(TR_RelocationTarget *reloTarget)
+   {
+   return reloTarget->loadUnsigned16b((uint8_t *) &((TR_RelocationRecordValidateJ2IThunkFromMethodBinaryTemplate *)_record)->_thunkID);
+   }
+
+void
+TR_RelocationRecordValidateJ2IThunkFromMethod::setMethodID(TR_RelocationTarget *reloTarget, uint16_t methodID)
+   {
+   reloTarget->storeUnsigned16b(methodID, (uint8_t *) &((TR_RelocationRecordValidateJ2IThunkFromMethodBinaryTemplate *)_record)->_methodID);
+   }
+
+uint16_t
+TR_RelocationRecordValidateJ2IThunkFromMethod::methodID(TR_RelocationTarget *reloTarget)
+   {
+   return reloTarget->loadUnsigned16b((uint8_t *) &((TR_RelocationRecordValidateJ2IThunkFromMethodBinaryTemplate *)_record)->_methodID);
+   }
+
+TR_RelocationErrorCode
+TR_RelocationRecordValidateIsClassVisible::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
+   {
+   uint16_t sourceClassID = this->sourceClassID(reloTarget);
+   uint16_t destClassID = this->destClassID(reloTarget);
+   bool isVisible = this->isVisible(reloTarget);
+
+   if (reloRuntime->comp()->getSymbolValidationManager()->validateIsClassVisibleRecord(sourceClassID, destClassID, isVisible))
+      return TR_RelocationErrorCode::relocationOK;
+   else
+      return TR_RelocationErrorCode::isClassVisibleValidationFailure;
+   }
+
+void
+TR_RelocationRecordValidateIsClassVisible::print(TR_RelocationRuntime *reloRuntime)
+   {
+   TR_RelocationTarget *reloTarget = reloRuntime->reloTarget();
+   TR_RelocationRuntimeLogger *reloLogger = reloRuntime->reloLogger();
+   TR_RelocationRecord::print(reloRuntime);
+   reloLogger->printf("\tsourceClassID %d\n", sourceClassID(reloTarget));
+   reloLogger->printf("\tdestClassID %d\n", destClassID(reloTarget));
+   reloLogger->printf("\tisVisible %s\n", isVisible(reloTarget) ? "true" : "false");
+   }
+
+void
+TR_RelocationRecordValidateIsClassVisible::setSourceClassID(TR_RelocationTarget *reloTarget, uint16_t sourceClassID)
+   {
+   reloTarget->storeUnsigned16b(sourceClassID, (uint8_t *) &((TR_RelocationRecordValidateIsClassVisibleBinaryTemplate *)_record)->_sourceClassID);
+   }
+
+uint16_t
+TR_RelocationRecordValidateIsClassVisible::sourceClassID(TR_RelocationTarget *reloTarget)
+   {
+   return reloTarget->loadUnsigned16b((uint8_t *) &((TR_RelocationRecordValidateIsClassVisibleBinaryTemplate *)_record)->_sourceClassID);
+   }
+
+void
+TR_RelocationRecordValidateIsClassVisible::setDestClassID(TR_RelocationTarget *reloTarget, uint16_t destClassID)
+   {
+   reloTarget->storeUnsigned16b(destClassID, (uint8_t *) &((TR_RelocationRecordValidateIsClassVisibleBinaryTemplate *)_record)->_destClassID);
+   }
+
+uint16_t
+TR_RelocationRecordValidateIsClassVisible::destClassID(TR_RelocationTarget *reloTarget)
+   {
+   return reloTarget->loadUnsigned16b((uint8_t *) &((TR_RelocationRecordValidateIsClassVisibleBinaryTemplate *)_record)->_destClassID);
+   }
+
+void
+TR_RelocationRecordValidateIsClassVisible::setIsVisible(TR_RelocationTarget *reloTarget, bool isVisible)
+   {
+   reloTarget->storeUnsigned8b((uint8_t)isVisible, (uint8_t *) &((TR_RelocationRecordValidateIsClassVisibleBinaryTemplate *)_record)->_isVisible);
+   }
+
+bool
+TR_RelocationRecordValidateIsClassVisible::isVisible(TR_RelocationTarget *reloTarget)
+   {
+   return (bool)reloTarget->loadUnsigned8b((uint8_t *) &((TR_RelocationRecordValidateIsClassVisibleBinaryTemplate *)_record)->_isVisible);
+   }
+
+
+const char *
+TR_RelocationRecordStaticDefaultValueInstance::name()
+   {
+   return "TR_StaticDefaultValueInstance";
+   }
+
+TR_RelocationErrorCode
+TR_RelocationRecordStaticDefaultValueInstance::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
+   {
+   uintptr_t newConstantPool = computeNewConstantPool(reloRuntime, reloTarget, constantPool(reloTarget));
+   TR_OpaqueClassBlock *newClassAddress = computeNewClassAddress(reloRuntime, newConstantPool, inlinedSiteIndex(reloTarget), cpIndex(reloTarget));
+
+   if (!newClassAddress ||
+       !reloRuntime->comp()->fej9()->isClassInitialized(newClassAddress))
+      return TR_RelocationErrorCode::staticDefaultValueInstanceRelocationFailure;
+
+   j9object_t *newDefaultValueSlotAddress = TR::Compiler->cls.getDefaultValueSlotAddress(reloRuntime->comp(), newClassAddress);
+
+   reloTarget->storeAddressSequence((uint8_t *)newDefaultValueSlotAddress, reloLocation, reloFlags(reloTarget));
+
+   RELO_LOG(reloRuntime->reloLogger(), 6, "\tapplyRelocation: newDefaultValueSlotAddress %p\n", newDefaultValueSlotAddress);
+   return TR_RelocationErrorCode::relocationOK;
+   }
+
+TR_RelocationErrorCode
+TR_RelocationRecordStaticDefaultValueInstance::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocationHigh, uint8_t *reloLocationLow)
+   {
+   uintptr_t newConstantPool = computeNewConstantPool(reloRuntime, reloTarget, constantPool(reloTarget));
+
+   TR_OpaqueClassBlock *newClassAddress = computeNewClassAddress(reloRuntime, newConstantPool, inlinedSiteIndex(reloTarget), cpIndex(reloTarget));
+
+   if (!newClassAddress ||
+       !reloRuntime->comp()->fej9()->isClassInitialized(newClassAddress))
+      return TR_RelocationErrorCode::staticDefaultValueInstanceRelocationFailure;
+
+   j9object_t *newDefaultValueSlotAddress = TR::Compiler->cls.getDefaultValueSlotAddress(reloRuntime->comp(), newClassAddress);
+
+   reloTarget->storeAddress((uint8_t *)newDefaultValueSlotAddress, reloLocationHigh, reloLocationLow, reloFlags(reloTarget));
+
+   RELO_LOG(reloRuntime->reloLogger(), 6, "\tapplyRelocation: newDefaultValueSlotAddress %p\n", newDefaultValueSlotAddress);
+   return TR_RelocationErrorCode::relocationOK;
+   }
+
+// TR_CatchBlockCounter
+//
+const char *
+TR_RelocationRecordCatchBlockCounter::name()
+   {
+   return "TR_CatchBlockCounter";
+   }
+
+void
+TR_RelocationRecordCatchBlockCounter::preparePrivateData(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget)
+   {
+   TR_RelocationRecordWithOffsetPrivateData *reloPrivateData = &(privateData()->offset);
+   reloPrivateData->_addressToPatch = NULL;
+
+   TR_PersistentJittedBodyInfo *bodyInfo = reinterpret_cast<TR_PersistentJittedBodyInfo *>(reloRuntime->exceptionTable()->bodyInfo);
+   if (bodyInfo)
+      {
+      TR_PersistentMethodInfo *methodInfo = bodyInfo->getMethodInfo();
+      if (methodInfo)
+         reloPrivateData->_addressToPatch = (uint8_t *)methodInfo->getCatchBlockCounterAddress();
+      }
+   RELO_LOG(reloRuntime->reloLogger(), 6, "\tpreparePrivateData: addressToPatch: %p \n", reloPrivateData->_addressToPatch);
+   }
+
+TR_RelocationErrorCode
+TR_RelocationRecordCatchBlockCounter::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
+   {
+   TR_RelocationRecordWithOffsetPrivateData *reloPrivateData = &(privateData()->offset);
+   if (!reloPrivateData->_addressToPatch)
+      {
+      return TR_RelocationErrorCode::catchBlockCounterRelocationFailure;
+      }
+   reloTarget->storeAddressSequence(reloPrivateData->_addressToPatch, reloLocation, reloFlags(reloTarget));
+   return TR_RelocationErrorCode::relocationOK;
+   }
+
+TR_RelocationErrorCode
+TR_RelocationRecordCatchBlockCounter::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocationHigh, uint8_t *reloLocationLow)
+   {
+   TR_RelocationRecordWithOffsetPrivateData *reloPrivateData = &(privateData()->offset);
+   if (!reloPrivateData->_addressToPatch)
+      {
+      return TR_RelocationErrorCode::catchBlockCounterRelocationFailure;
+      }
+   reloTarget->storeAddress(reloPrivateData->_addressToPatch, reloLocationHigh, reloLocationLow, reloFlags(reloTarget));
+   return TR_RelocationErrorCode::relocationOK;
+   }
+
+// TR_StartPC
+//
+const char *
+TR_RelocationRecordStartPC::name()
+   {
+   return "TR_StartPC";
+   }
+
+void
+TR_RelocationRecordStartPC::preparePrivateData(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget)
+   {
+   TR_RelocationRecordWithOffsetPrivateData *reloPrivateData = &(privateData()->offset);
+   reloPrivateData->_addressToPatch = reinterpret_cast<uint8_t *>(reloRuntime->exceptionTable()->startPC);
+   RELO_LOG(reloRuntime->reloLogger(), 6, "\tpreparePrivateData: addressToPatch: %p \n", reloPrivateData->_addressToPatch);
+   }
+
+TR_RelocationErrorCode
+TR_RelocationRecordStartPC::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
+   {
+   TR_RelocationRecordWithOffsetPrivateData *reloPrivateData = &(privateData()->offset);
+   reloTarget->storeAddressSequence(reloPrivateData->_addressToPatch, reloLocation, reloFlags(reloTarget));
+   return TR_RelocationErrorCode::relocationOK;
+   }
+
+TR_RelocationErrorCode
+TR_RelocationRecordStartPC::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocationHigh, uint8_t *reloLocationLow)
+   {
+   TR_RelocationRecordWithOffsetPrivateData *reloPrivateData = &(privateData()->offset);
+   reloTarget->storeAddress(reloPrivateData->_addressToPatch, reloLocationHigh, reloLocationLow, reloFlags(reloTarget));
+   return TR_RelocationErrorCode::relocationOK;
+   }
+
+// TR_RelocationRecordMethodEnterExitHookAddress
+//
+void
+TR_RelocationRecordMethodEnterExitHookAddress::print(TR_RelocationRuntime *reloRuntime)
+   {
+   TR_RelocationTarget *reloTarget = reloRuntime->reloTarget();
+   TR_RelocationRuntimeLogger *reloLogger = reloRuntime->reloLogger();
+   TR_RelocationRecord::print(reloRuntime);
+   reloLogger->printf("\tisEnterHookAddr %s\n", isEnterHookAddr(reloTarget) ? "true" : "false");
+   }
+
+void
+TR_RelocationRecordMethodEnterExitHookAddress::setIsEnterHookAddr(TR_RelocationTarget *reloTarget, bool isEnterHookAddr)
+   {
+   reloTarget->storeUnsigned8b((uint8_t)isEnterHookAddr, (uint8_t *) &((TR_RelocationRecordMethodEnterExitHookAddressBinaryTemplate *)_record)->_isEnterHookAddr);
+   }
+
+bool
+TR_RelocationRecordMethodEnterExitHookAddress::isEnterHookAddr(TR_RelocationTarget *reloTarget)
+   {
+   return (bool)reloTarget->loadUnsigned8b((uint8_t *) &((TR_RelocationRecordMethodEnterExitHookAddressBinaryTemplate *)_record)->_isEnterHookAddr);
+   }
+
+void
+TR_RelocationRecordMethodEnterExitHookAddress::preparePrivateData(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget)
+   {
+   TR_RelocationRecordMethodEnterExitHookAddressPrivateData *reloPrivateData = &(privateData()->hookAddress);
+
+   reloPrivateData->_isEnterHookAddr = isEnterHookAddr(reloTarget);
+   }
+
+TR_RelocationErrorCode
+TR_RelocationRecordMethodEnterExitHookAddress::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
+   {
+   TR_RelocationRecordMethodEnterExitHookAddressPrivateData *reloPrivateData = &(privateData()->hookAddress);
+   int32_t event = reloPrivateData->_isEnterHookAddr ? J9HOOK_VM_METHOD_ENTER : J9HOOK_VM_METHOD_RETURN;
+   void *hookAddr = reloRuntime->fej9()->getStaticHookAddress(event);
+
+   reloTarget->storeAddressSequence((uint8_t *)hookAddr, reloLocation, reloFlags(reloTarget));
+
+   return TR_RelocationErrorCode::relocationOK;
+   }
+
+TR_RelocationErrorCode
+TR_RelocationRecordMethodEnterExitHookAddress::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocationHigh, uint8_t *reloLocationLow)
+   {
+   TR_RelocationRecordMethodEnterExitHookAddressPrivateData *reloPrivateData = &(privateData()->hookAddress);
+   int32_t event = reloPrivateData->_isEnterHookAddr ? J9HOOK_VM_METHOD_ENTER : J9HOOK_VM_METHOD_RETURN;
+   void *hookAddr = reloRuntime->fej9()->getStaticHookAddress(event);
+
+   reloTarget->storeAddress((uint8_t *)hookAddr, reloLocationHigh, reloLocationLow, reloFlags(reloTarget));
+
+   return TR_RelocationErrorCode::relocationOK;
+   }
+
+// TR_RelocationRecordCallsiteTableEntryAddress
+void
+TR_RelocationRecordCallsiteTableEntryAddress::print(TR_RelocationRuntime *reloRuntime)
+   {
+   TR_RelocationTarget *reloTarget = reloRuntime->reloTarget();
+   TR_RelocationRuntimeLogger *reloLogger = reloRuntime->reloLogger();
+   TR_RelocationRecord::print(reloRuntime);
+   reloLogger->printf("\tmethodID %d\n", methodID(reloTarget));
+   reloLogger->printf("\tcallsiteIndex %d\n", callsiteIndex(reloTarget));
+   }
+
+void
+TR_RelocationRecordCallsiteTableEntryAddress::setMethodID(TR_RelocationTarget *reloTarget, uint16_t methodID)
+   {
+   reloTarget->storeUnsigned16b(methodID, (uint8_t *) &((TR_RelocationRecordCallsiteTableEntryAddressBinaryTemplate *)_record)->_methodID);
+   }
+
+uint16_t
+TR_RelocationRecordCallsiteTableEntryAddress::methodID(TR_RelocationTarget *reloTarget)
+   {
+   return reloTarget->loadUnsigned16b((uint8_t *) &((TR_RelocationRecordCallsiteTableEntryAddressBinaryTemplate *)_record)->_methodID);
+   }
+
+void
+TR_RelocationRecordCallsiteTableEntryAddress::setCallsiteIndex(TR_RelocationTarget *reloTarget, int32_t callsiteIndex)
+   {
+   reloTarget->storeSigned32b(callsiteIndex, (uint8_t *) &((TR_RelocationRecordCallsiteTableEntryAddressBinaryTemplate *)_record)->_callsiteIndex);
+   }
+
+int32_t
+TR_RelocationRecordCallsiteTableEntryAddress::callsiteIndex(TR_RelocationTarget *reloTarget)
+   {
+   return reloTarget->loadSigned32b((uint8_t *) &((TR_RelocationRecordCallsiteTableEntryAddressBinaryTemplate *)_record)->_callsiteIndex);
+   }
+
+void
+TR_RelocationRecordCallsiteTableEntryAddress::preparePrivateData(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget)
+   {
+   TR_RelocationRecordCallsiteTableEntryAddressPrivateData *reloPrivateData = &(privateData()->callsiteTableEntryAddr);
+
+   TR_OpaqueMethodBlock *method = reloRuntime->comp()->getSymbolValidationManager()->getMethodFromID(methodID(reloTarget));
+   TR_ResolvedMethod *resolvedMethod = reloRuntime->fej9()->createResolvedMethod(reloRuntime->trMemory(), method, NULL);
+
+   reloPrivateData->_callsiteTableEntryAddress = resolvedMethod->callSiteTableEntryAddress(callsiteIndex(reloTarget));
+   }
+
+TR_RelocationErrorCode
+TR_RelocationRecordCallsiteTableEntryAddress::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
+   {
+   TR_RelocationRecordCallsiteTableEntryAddressPrivateData *reloPrivateData = &(privateData()->callsiteTableEntryAddr);
+   void *callsiteTableEntryAddr = reloPrivateData->_callsiteTableEntryAddress;
+
+   reloTarget->storeAddressSequence((uint8_t *)callsiteTableEntryAddr, reloLocation, reloFlags(reloTarget));
+
+   return TR_RelocationErrorCode::relocationOK;
+   }
+
+TR_RelocationErrorCode
+TR_RelocationRecordCallsiteTableEntryAddress::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocationHigh, uint8_t *reloLocationLow)
+   {
+   TR_RelocationRecordCallsiteTableEntryAddressPrivateData *reloPrivateData = &(privateData()->callsiteTableEntryAddr);
+   void *callsiteTableEntryAddr = reloPrivateData->_callsiteTableEntryAddress;
+
+   reloTarget->storeAddress((uint8_t *)callsiteTableEntryAddr, reloLocationHigh, reloLocationLow, reloFlags(reloTarget));
+
+   return TR_RelocationErrorCode::relocationOK;
+   }
+
+// TR_RelocationRecordMethodTypeTableEntryAddress
+void
+TR_RelocationRecordMethodTypeTableEntryAddress::print(TR_RelocationRuntime *reloRuntime)
+   {
+   TR_RelocationTarget *reloTarget = reloRuntime->reloTarget();
+   TR_RelocationRuntimeLogger *reloLogger = reloRuntime->reloLogger();
+   TR_RelocationRecord::print(reloRuntime);
+   reloLogger->printf("\tmethodID %d\n", methodID(reloTarget));
+   reloLogger->printf("\tcpIndex %d\n", cpIndex(reloTarget));
+   }
+
+void
+TR_RelocationRecordMethodTypeTableEntryAddress::setMethodID(TR_RelocationTarget *reloTarget, uint16_t methodID)
+   {
+   reloTarget->storeUnsigned16b(methodID, (uint8_t *) &((TR_RelocationRecordMethodTypeTableEntryAddressBinaryTemplate *)_record)->_methodID);
+   }
+
+uint16_t
+TR_RelocationRecordMethodTypeTableEntryAddress::methodID(TR_RelocationTarget *reloTarget)
+   {
+   return reloTarget->loadUnsigned16b((uint8_t *) &((TR_RelocationRecordMethodTypeTableEntryAddressBinaryTemplate *)_record)->_methodID);
+   }
+
+void
+TR_RelocationRecordMethodTypeTableEntryAddress::setCpIndex(TR_RelocationTarget *reloTarget, int32_t cpIndex)
+   {
+   reloTarget->storeSigned32b(cpIndex, (uint8_t *) &((TR_RelocationRecordMethodTypeTableEntryAddressBinaryTemplate *)_record)->_cpIndex);
+   }
+
+int32_t
+TR_RelocationRecordMethodTypeTableEntryAddress::cpIndex(TR_RelocationTarget *reloTarget)
+   {
+   return reloTarget->loadSigned32b((uint8_t *) &((TR_RelocationRecordMethodTypeTableEntryAddressBinaryTemplate *)_record)->_cpIndex);
+   }
+
+void
+TR_RelocationRecordMethodTypeTableEntryAddress::preparePrivateData(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget)
+   {
+   TR_RelocationRecordMethodTypeTableEntryAddressPrivateData *reloPrivateData = &(privateData()->methodTypeTableEntryAddr);
+
+   TR_OpaqueMethodBlock *method = reloRuntime->comp()->getSymbolValidationManager()->getMethodFromID(methodID(reloTarget));
+   TR_ResolvedMethod *resolvedMethod = reloRuntime->fej9()->createResolvedMethod(reloRuntime->trMemory(), method, NULL);
+
+   reloPrivateData->_methodTypeTableEntryAddress = resolvedMethod->methodTypeTableEntryAddress(cpIndex(reloTarget));
+   }
+
+TR_RelocationErrorCode
+TR_RelocationRecordMethodTypeTableEntryAddress::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocation)
+   {
+   TR_RelocationRecordMethodTypeTableEntryAddressPrivateData *reloPrivateData = &(privateData()->methodTypeTableEntryAddr);
+   void *methodTypeTableEntryAddr = reloPrivateData->_methodTypeTableEntryAddress;
+
+   reloTarget->storeAddressSequence((uint8_t *)methodTypeTableEntryAddr, reloLocation, reloFlags(reloTarget));
+
+   return TR_RelocationErrorCode::relocationOK;
+   }
+
+TR_RelocationErrorCode
+TR_RelocationRecordMethodTypeTableEntryAddress::applyRelocation(TR_RelocationRuntime *reloRuntime, TR_RelocationTarget *reloTarget, uint8_t *reloLocationHigh, uint8_t *reloLocationLow)
+   {
+   TR_RelocationRecordMethodTypeTableEntryAddressPrivateData *reloPrivateData = &(privateData()->methodTypeTableEntryAddr);
+   void *methodTypeTableEntryAddr = reloPrivateData->_methodTypeTableEntryAddress;
+
+   reloTarget->storeAddress((uint8_t *)methodTypeTableEntryAddr, reloLocationHigh, reloLocationLow, reloFlags(reloTarget));
+
+   return TR_RelocationErrorCode::relocationOK;
+   }
+
+// The _relocationRecordHeaderSizeTable table should be the last thing in this file
 uint32_t TR_RelocationRecord::_relocationRecordHeaderSizeTable[TR_NumExternalRelocationKinds] =
    {
    sizeof(TR_RelocationRecordConstantPoolBinaryTemplate),                            // TR_ConstantPool                                 = 0
@@ -6243,10 +6989,10 @@ uint32_t TR_RelocationRecord::_relocationRecordHeaderSizeTable[TR_NumExternalRel
    sizeof(TR_RelocationRecordConstantPoolBinaryTemplate),                            // TR_MethodObject                                 = 6
    0,                                                                                // TR_InterfaceObject                              = 7
    sizeof(TR_RelocationRecordHelperAddressBinaryTemplate),                           // TR_AbsoluteHelperAddress                        = 8
-   sizeof(TR_RelocationRecordWithOffsetBinaryTemplate),                              // TR_FixedSeqAddress                              = 9
-   sizeof(TR_RelocationRecordWithOffsetBinaryTemplate),                              // TR_FixedSeq2Address                             = 10
-   sizeof(TR_RelocationRecordConstantPoolWithIndexBinaryTemplate),                   // TR_JNIVirtualTargetAddress                      = 11
-   sizeof(TR_RelocationRecordConstantPoolWithIndexBinaryTemplate),                   // TR_JNIStaticTargetAddress                       = 12
+   sizeof(TR_RelocationRecordWithOffsetBinaryTemplate),                              // TR_FixedSequenceAddress                         = 9
+   sizeof(TR_RelocationRecordWithOffsetBinaryTemplate),                              // TR_FixedSequenceAddress2                        = 10
+   sizeof(TR_RelocationRecordDirectToJNIBinaryTemplate),                             // TR_JNIVirtualTargetAddress                      = 11
+   sizeof(TR_RelocationRecordDirectToJNIBinaryTemplate),                             // TR_JNIStaticTargetAddress                       = 12
    sizeof(TR_RelocationRecordBinaryTemplate),                                        // TR_ArrayCopyHelper                              = 13
    sizeof(TR_RelocationRecordBinaryTemplate),                                        // TR_ArrayCopyToc                                 = 14
    sizeof(TR_RelocationRecordBinaryTemplate),                                        // TR_BodyInfoAddress                              = 15
@@ -6286,7 +7032,7 @@ uint32_t TR_RelocationRecord::_relocationRecordHeaderSizeTable[TR_NumExternalRel
    sizeof(TR_RelocationRecordMethodTracingCheckBinaryTemplate),                      // TR_CheckMethodExit                              = 49
    sizeof(TR_RelocationRecordValidateArbitraryClassBinaryTemplate),                  // TR_ValidateArbitraryClass                       = 50
    sizeof(TR_RelocationRecordEmitClassBinaryTemplate),                               // TR_EmitClass                                    = 51
-   sizeof(TR_RelocationRecordConstantPoolWithIndexBinaryTemplate),                   // TR_JNISpecialTargetAddress                      = 52
+   sizeof(TR_RelocationRecordDirectToJNIBinaryTemplate),                             // TR_JNISpecialTargetAddress                      = 52
    sizeof(TR_RelocationRecordConstantPoolWithIndexBinaryTemplate),                   // TR_VirtualRamMethodConst                        = 53
    sizeof(TR_RelocationRecordInlinedMethodBinaryTemplate),                           // TR_InlinedInterfaceMethod                       = 54
    sizeof(TR_RelocationRecordInlinedMethodBinaryTemplate),                           // TR_InlinedVirtualMethod                         = 55
@@ -6317,8 +7063,8 @@ uint32_t TR_RelocationRecord::_relocationRecordHeaderSizeTable[TR_NumExternalRel
    0,                                                                                // TR_ValidateRomClass                             = 80
    0,                                                                                // TR_ValidatePrimitiveClass                       = 81
    0,                                                                                // TR_ValidateMethodFromInlinedSite                = 82
-   0,                                                                                // TR_ValidatedMethodByName                        = 83
-   sizeof(TR_RelocationRecordValidateMethodFromClassBinaryTemplate),                 // TR_ValidatedMethodFromClass                     = 84
+   0,                                                                                // TR_ValidateMethodByName                         = 83
+   sizeof(TR_RelocationRecordValidateMethodFromClassBinaryTemplate),                 // TR_ValidateMethodFromClass                      = 84
    sizeof(TR_RelocationRecordValidateMethodFromCPBinaryTemplate),                    // TR_ValidateStaticMethodFromCP                   = 85
    sizeof(TR_RelocationRecordValidateMethodFromCPBinaryTemplate),                    // TR_ValidateSpecialMethodFromCP                  = 86
    sizeof(TR_RelocationRecordValidateMethodFromCPBinaryTemplate),                    // TR_ValidateVirtualMethodFromCP                  = 87
@@ -6343,4 +7089,16 @@ uint32_t TR_RelocationRecord::_relocationRecordHeaderSizeTable[TR_NumExternalRel
    sizeof(TR_RelocationRecordInlinedMethodBinaryTemplate),                           // TR_InlinedAbstractMethod                        = 106
    sizeof(TR_RelocationRecordBreapointGuardBinaryTemplate),                          // TR_Breakpoint                                   = 107
    sizeof(TR_RelocationRecordWithInlinedSiteIndexBinaryTemplate),                    // TR_InlinedMethodPointer                         = 108
+   0,                                                                                // TR_VMINLMethod                                  = 109
+   sizeof(TR_RelocationRecordValidateJ2IThunkFromMethodBinaryTemplate),              // TR_ValidateJ2IThunkFromMethod                   = 110
+   sizeof(TR_RelocationRecordConstantPoolWithIndexBinaryTemplate),                   // TR_StaticDefaultValueInstance                   = 111
+   sizeof(TR_RelocationRecordValidateIsClassVisibleBinaryTemplate),                  // TR_ValidateIsClassVisible                       = 112
+   sizeof(TR_RelocationRecordBinaryTemplate),                                        // TR_CatchBlockCounter                            = 113
+   sizeof(TR_RelocationRecordBinaryTemplate),                                        // TR_StartPC                                      = 114
+   sizeof(TR_RelocationRecordMethodEnterExitHookAddressBinaryTemplate),              // TR_MethodEnterExitHookAddress                   = 115
+   sizeof(TR_RelocationRecordValidateDynamicMethodFromCallsiteIndexBinaryTemplate),  // TR_ValidateDynamicMethodFromCallsiteIndex       = 116
+   sizeof(TR_RelocationRecordValidateHandleMethodFromCPIndexBinaryTemplate),         // TR_ValidateHandleMethodFromCPIndex              = 117
+   sizeof(TR_RelocationRecordCallsiteTableEntryAddressBinaryTemplate),               // TR_CallsiteTableEntryAddress                    = 118
+   sizeof(TR_RelocationRecordMethodTypeTableEntryAddressBinaryTemplate),             // TR_MethodTypeTableEntryAddress                  = 119
    };
+// The _relocationRecordHeaderSizeTable table should be the last thing in this file

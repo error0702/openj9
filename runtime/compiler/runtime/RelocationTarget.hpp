@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #ifndef RELOCATION_TARGET_INCL
@@ -32,7 +32,7 @@
 class TR_OpaqueClassBlock;
 class TR_RelocationRecord;
 class TR_RelocationRuntimeLogger;
-class TR_J2IThunk;
+class TR_MHJ2IThunk;
 
 // TR_RelocationTarget defines how a platform target implements the individual steps of processing
 //    relocation records.
@@ -103,8 +103,8 @@ class TR_RelocationTarget
       virtual uint8_t *loadAddressSequence(uint8_t *reloLocation);
       virtual void storeAddressSequence(uint8_t *address, uint8_t *reloLocation, uint32_t seqNumber);
 
-         
-      virtual void storeRelativeAddressSequence(uint8_t *address, uint8_t *reloLocation, uint32_t seqNumber) 
+
+      virtual void storeRelativeAddressSequence(uint8_t *address, uint8_t *reloLocation, uint32_t seqNumber)
          {
          storeAddressSequence(address, reloLocation, seqNumber);
          }
@@ -140,7 +140,7 @@ class TR_RelocationTarget
        *
        * @param thunk Pointer to a thunk to be relocated.
        */
-      virtual void performInvokeExactJ2IThunkRelocation(TR_J2IThunk *thunk);
+      virtual void performInvokeExactJ2IThunkRelocation(TR_MHJ2IThunk *thunk);
 
       virtual uint8_t *arrayCopyHelperAddress(J9JavaVM *javaVM);
 

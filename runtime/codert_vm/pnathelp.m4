@@ -1,4 +1,4 @@
-dnl Copyright (c) 2017, 2021 IBM Corp. and others
+dnl Copyright IBM Corp. and others 2017
 dnl
 dnl This program and the accompanying materials are made available under
 dnl the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,9 +14,9 @@ dnl Exception [1] and GNU General Public License, version 2 with the
 dnl OpenJDK Assembly Exception [2].
 dnl
 dnl [1] https://www.gnu.org/software/classpath/license.html
-dnl [2] http://openjdk.java.net/legal/assembly-exception.html
+dnl [2] https://openjdk.org/legal/assembly-exception.html
 dnl
-dnl SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+dnl SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
 
 include(phelpers.m4)
 
@@ -369,8 +369,10 @@ OLD_DUAL_MODE_HELPER_NO_RETURN_VALUE(jitPutFlattenableStaticField,3)
 OLD_DUAL_MODE_HELPER(jitLoadFlattenableArrayElement,2)
 OLD_DUAL_MODE_HELPER_NO_RETURN_VALUE(jitStoreFlattenableArrayElement,3)
 SLOW_PATH_ONLY_HELPER_NO_RETURN_VALUE(jitResolveFlattenableField,3)
-FAST_PATH_ONLY_HELPER(jitLookupDynamicInterfaceMethod,3)
-OLD_DUAL_MODE_HELPER(jitLookupDynamicPublicInterfaceMethod,3)
+
+ifdef({ASM_J9VM_OPT_OPENJDK_METHODHANDLE},{
+OLD_DUAL_MODE_HELPER(jitLookupDynamicPublicInterfaceMethod,2)
+}) dnl ASM_J9VM_OPT_OPENJDK_METHODHANDLE
 
 dnl Trap handlers
 

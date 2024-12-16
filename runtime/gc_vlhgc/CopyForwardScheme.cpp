@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "j9.h"
@@ -62,6 +62,8 @@
 #include "EnvironmentVLHGC.hpp"
 #include "FinalizableObjectBuffer.hpp"
 #include "FinalizableReferenceBuffer.hpp"
+#include "ContinuationObjectBufferVLHGC.hpp"
+#include "ContinuationObjectList.hpp"
 #include "FinalizeListManager.hpp"
 #include "ForwardedHeader.hpp"
 #include "GlobalAllocationManager.hpp"
@@ -90,6 +92,9 @@
 #include "RegionBasedOverflowVLHGC.hpp"
 #include "RootScanner.hpp"
 #include "SlotObject.hpp"
+#if defined(J9VM_GC_SPARSE_HEAP_ALLOCATION)
+#include "SparseVirtualMemory.hpp"
+#endif /* defined(J9VM_GC_SPARSE_HEAP_ALLOCATION) */
 #include "StackSlotValidator.hpp"
 #include "SublistFragment.hpp"
 #include "SublistIterator.hpp"
@@ -99,6 +104,9 @@
 #include "SurvivorMemoryIterator.hpp"
 #include "WorkPacketsIterator.hpp"
 #include "WorkPacketsVLHGC.hpp"
+#if JAVA_SPEC_VERSION >= 19
+#include "ContinuationHelpers.hpp"
+#endif /* JAVA_SPEC_VERSION >= 19 */
 
 #define INITIAL_FREE_HISTORY_WEIGHT ((float)0.8)
 #define TENURE_BYTES_HISTORY_WEIGHT ((float)0.8)
@@ -228,7 +236,7 @@ MM_CopyForwardScheme::initialize(MM_EnvironmentVLHGC *env)
 			return false;
 		}
 	}
-	if(omrthread_monitor_init_with_name(&_scanCacheMonitor, 0, "MM_CopyForwardScheme::cache")) {
+	if (0 != omrthread_monitor_init_with_name(&_scanCacheMonitor, 0, "MM_CopyForwardScheme::cache")) {
 		return false;
 	}
 	
@@ -256,7 +264,7 @@ MM_CopyForwardScheme::initialize(MM_EnvironmentVLHGC *env)
 	UDATA minCacheCount = threadCount * cachesPerThread;
 	
 	/* Estimate how many caches we might need to describe the entire heap */
-	UDATA heapCaches = extensions->memoryMax / extensions->tlhMaximumSize;
+	UDATA heapCaches = extensions->memoryMax / extensions->scavengerScanCacheMaximumSize;
 
 	/* use whichever value is higher */
 	UDATA totalCacheCount = OMR_MAX(minCacheCount, heapCaches);
@@ -267,12 +275,12 @@ MM_CopyForwardScheme::initialize(MM_EnvironmentVLHGC *env)
 
 	/* Create and initialize the owned region lists to maintain resource for survivor area heap acquisition */
 	_reservedRegionList = (MM_ReservedRegionListHeader *)env->getForge()->allocate(sizeof(MM_ReservedRegionListHeader) * _compactGroupMaxCount, MM_AllocationCategory::FIXED, J9_GET_CALLSITE());
-	if(NULL == _reservedRegionList) {
+	if (NULL == _reservedRegionList) {
 		return false;
 	}
 	
 	memset((void *)_reservedRegionList, 0, sizeof(MM_ReservedRegionListHeader) * _compactGroupMaxCount);
-	for(UDATA index = 0; index < _compactGroupMaxCount; index++) {
+	for (UDATA index = 0; index < _compactGroupMaxCount; index++) {
 		_reservedRegionList[index]._maxSublistCount = 1;
 		_reservedRegionList[index]._sublistCount = 1;
 		_reservedRegionList[index]._evacuateRegionCount = 0;
@@ -280,20 +288,20 @@ MM_CopyForwardScheme::initialize(MM_EnvironmentVLHGC *env)
 			_reservedRegionList[index]._sublists[sublistIndex]._head = NULL;
 			_reservedRegionList[index]._sublists[sublistIndex]._cacheAcquireCount = 0;
 			_reservedRegionList[index]._sublists[sublistIndex]._cacheAcquireBytes = 0;
-			if(!_reservedRegionList[index]._sublists[sublistIndex]._lock.initialize(env, &_extensions->lnrlOptions, "MM_CopyForwardScheme:_reservedRegionList[]._sublists[]._lock")) {
+			if (!_reservedRegionList[index]._sublists[sublistIndex]._lock.initialize(env, &_extensions->lnrlOptions, "MM_CopyForwardScheme:_reservedRegionList[]._sublists[]._lock")) {
 				return false;
 			}
 		}
 		_reservedRegionList[index]._freeMemoryCandidates = NULL;
 		_reservedRegionList[index]._freeMemoryCandidateCount = 0;
-		if(!_reservedRegionList[index]._freeMemoryCandidatesLock.initialize(env, &_extensions->lnrlOptions, "MM_CopyForwardScheme:_reservedRegionList[]._freeMemoryCandidatesLock")) {
+		if (!_reservedRegionList[index]._freeMemoryCandidatesLock.initialize(env, &_extensions->lnrlOptions, "MM_CopyForwardScheme:_reservedRegionList[]._freeMemoryCandidatesLock")) {
 			return false;
 		}
 	}
 
 	/* Set the min/max sizes for copy scan cache allocation when allocating a general purpose area (does not include non-standard sized objects) */
-	_minCacheSize = _extensions->tlhMinimumSize;
-	_maxCacheSize = _extensions->tlhMaximumSize;
+	_minCacheSize = _extensions->scavengerScanCacheMinimumSize;
+	_maxCacheSize = _extensions->scavengerScanCacheMaximumSize;
 
 	/* Cached pointer to the inter region remembered set */
 	_interRegionRememberedSet = MM_GCExtensions::getExtensions(env)->interRegionRememberedSet;
@@ -344,8 +352,8 @@ MM_CopyForwardScheme::tearDown(MM_EnvironmentVLHGC *env)
 		_scanCacheMonitor = NULL;
 	}
 
-	if(NULL != _reservedRegionList) {
-		for(UDATA index = 0; index < _compactGroupMaxCount; index++) {
+	if (NULL != _reservedRegionList) {
+		for (UDATA index = 0; index < _compactGroupMaxCount; index++) {
 			for (UDATA sublistIndex = 0; sublistIndex < MM_ReservedRegionListHeader::MAX_SUBLISTS; sublistIndex++) {
 				_reservedRegionList[index]._sublists[sublistIndex]._lock.tearDown();
 			}
@@ -411,6 +419,7 @@ MM_CopyForwardScheme::clearGCStats(MM_EnvironmentVLHGC *env)
 {
 	static_cast<MM_CycleStateVLHGC*>(env->_cycleState)->_vlhgcIncrementStats._copyForwardStats.clear();
 	static_cast<MM_CycleStateVLHGC*>(env->_cycleState)->_vlhgcIncrementStats._workPacketStats.clear();
+	static_cast<MM_CycleStateVLHGC*>(env->_cycleState)->_vlhgcIncrementStats._continuationStats.clear();
 }
 
 void
@@ -419,13 +428,13 @@ MM_CopyForwardScheme::updateLeafRegions(MM_EnvironmentVLHGC *env)
 	GC_HeapRegionIteratorVLHGC regionIterator(_regionManager);
 	MM_HeapRegionDescriptorVLHGC *region = NULL;
 
-	while(NULL != (region = regionIterator.nextRegion())) {
-		if(region->isArrayletLeaf()) {
+	while (NULL != (region = regionIterator.nextRegion())) {
+		if (region->isArrayletLeaf()) {
 			J9Object *spineObject = (J9Object *)region->_allocateData.getSpine();
 			Assert_MM_true(NULL != spineObject);
 
 			J9Object *updatedSpineObject = updateForwardedPointer(spineObject);
-			if(updatedSpineObject != spineObject) {
+			if (updatedSpineObject != spineObject) {
 				MM_HeapRegionDescriptorVLHGC *spineRegion = (MM_HeapRegionDescriptorVLHGC*)_regionManager->tableDescriptorForAddress(spineObject);
 				MM_HeapRegionDescriptorVLHGC *updatedSpineRegion = (MM_HeapRegionDescriptorVLHGC*)_regionManager->tableDescriptorForAddress(updatedSpineObject);
 
@@ -434,14 +443,14 @@ MM_CopyForwardScheme::updateLeafRegions(MM_EnvironmentVLHGC *env)
 				Assert_MM_true(updatedSpineRegion->containsObjects());
 
 				/* we need to move the leaf to another region's leaf list since its spine has moved */
-				region->_allocateData.removeFromArrayletLeafList();
+				region->_allocateData.removeFromArrayletLeafList(env);
 				region->_allocateData.addToArrayletLeafList(updatedSpineRegion);
 				region->_allocateData.setSpine((J9IndexableObject *)updatedSpineObject);
 			} else if (!isLiveObject(spineObject)) {
 				Assert_MM_true(isObjectInEvacuateMemory(spineObject));
 				/* the spine is in evacuate space so the arraylet is dead => recycle the leaf */
 				/* remove arraylet leaf from list */
-				region->_allocateData.removeFromArrayletLeafList();
+				region->_allocateData.removeFromArrayletLeafList(env);
 				/* recycle */
 				region->_allocateData.setSpine(NULL);
 				region->getSubSpace()->recycleRegion(env, region);
@@ -461,10 +470,10 @@ MM_CopyForwardScheme::preProcessRegions(MM_EnvironmentVLHGC *env)
 
 	_regionCountCannotBeEvacuated = 0;
 
-	while(NULL != (region = regionIterator.nextRegion())) {
+	while (NULL != (region = regionIterator.nextRegion())) {
 		region->_copyForwardData._survivor = false;
 		region->_copyForwardData._freshSurvivor = false;
-		if(region->containsObjects()) {
+		if (region->containsObjects()) {
 			region->_copyForwardData._initialLiveSet = true;
 			region->_copyForwardData._evacuateSet = region->_markData._shouldMark;
 			if (region->_markData._shouldMark) {
@@ -474,6 +483,7 @@ MM_CopyForwardScheme::preProcessRegions(MM_EnvironmentVLHGC *env)
 					ownableSynchronizerCountInEden += region->getOwnableSynchronizerObjectList()->getObjectCount();
 				}
 				region->getOwnableSynchronizerObjectList()->startOwnableSynchronizerProcessing();
+				region->getContinuationObjectList()->startProcessing();
 				Assert_MM_true(region->getRememberedSetCardList()->isAccurate());
 				if ((region->_criticalRegionsInUse > 0) || !env->_cycleState->_shouldRunCopyForward || (100 == _extensions->fvtest_forceCopyForwardHybridRatio) || (randomDecideForceNonEvacuatedRegion(_extensions->fvtest_forceCopyForwardHybridRatio))) {
 					/* set the region is noEvacuation for copyforward collector */
@@ -501,7 +511,7 @@ MM_CopyForwardScheme::preProcessRegions(MM_EnvironmentVLHGC *env)
 	 * in case partial constructing ownableSynchronizerObject has been moved during previous PGC, notification for new allocation would happen after gc,
 	 * so it is counted for new allocation, but not in Eden region. loose assertion for this special case
 	 */
-		Assert_MM_true(_extensions->allocationStats._ownableSynchronizerObjectCount >= ownableSynchronizerCountInEden);
+	Assert_MM_true(_extensions->allocationStats._ownableSynchronizerObjectCount >= ownableSynchronizerCountInEden);
 	static_cast<MM_CycleStateVLHGC*>(env->_cycleState)->_vlhgcIncrementStats._copyForwardStats._ownableSynchronizerCandidates = ownableSynchronizerCandidates;
 }
 
@@ -512,7 +522,7 @@ MM_CopyForwardScheme::postProcessRegions(MM_EnvironmentVLHGC *env)
 	MM_HeapRegionDescriptorVLHGC *region = NULL;
 	UDATA survivorSetRegionCount = 0;
 
-	while(NULL != (region = regionIterator.nextRegion())) {
+	while (NULL != (region = regionIterator.nextRegion())) {
 		MM_MemoryPool *pool = region->getMemoryPool();
 		if (region->_copyForwardData._evacuateSet) {
 			if (region->isEden()) {
@@ -530,7 +540,7 @@ MM_CopyForwardScheme::postProcessRegions(MM_EnvironmentVLHGC *env)
 		}
 
 		/* Any region which is part of the survivor set should be set to "shouldMark" to appear as part of the collection set (and be swept, etc) */
-		if(region->isSurvivorRegion()) {
+		if (region->isSurvivorRegion()) {
 			Assert_MM_true(region->containsObjects());
 			Assert_MM_false(region->_copyForwardData._evacuateSet);
 			Assert_MM_false(region->_markData._shouldMark);
@@ -598,7 +608,7 @@ MM_CopyForwardScheme::isLiveObject(J9Object *objectPtr)
 {
 	bool result = true;
 
-	if(NULL != objectPtr) {
+	if (NULL != objectPtr) {
 		Assert_MM_true(isHeapObject(objectPtr));
 
 		if (!isObjectInSurvivorMemory(objectPtr)) {
@@ -615,7 +625,7 @@ MM_CopyForwardScheme::isObjectInEvacuateMemory(J9Object *objectPtr)
 {
 	bool result = false;
 
-	if(NULL != objectPtr) {
+	if (NULL != objectPtr) {
 		result = isObjectInEvacuateMemoryNoCheck(objectPtr);
 	}
 	return result;
@@ -637,7 +647,7 @@ MM_CopyForwardScheme::isObjectInSurvivorMemory(J9Object *objectPtr)
 {
 	bool result = false;
 
-	if(NULL != objectPtr) {
+	if (NULL != objectPtr) {
 		MM_HeapRegionDescriptorVLHGC *region = NULL;
 		region = (MM_HeapRegionDescriptorVLHGC *)_regionManager->tableDescriptorForAddress(objectPtr);
 		Assert_MM_true(region->_copyForwardData._initialLiveSet || (!region->_markData._shouldMark && !region->_copyForwardData._initialLiveSet));
@@ -654,7 +664,7 @@ MM_CopyForwardScheme::isObjectInNurseryMemory(J9Object *objectPtr)
 {
 	bool result = false;
 
-	if(NULL != objectPtr) {
+	if (NULL != objectPtr) {
 		MM_HeapRegionDescriptorVLHGC *region = NULL;
 		region = (MM_HeapRegionDescriptorVLHGC *)_regionManager->tableDescriptorForAddress(objectPtr);
 		result = region->_markData._shouldMark || isObjectInSurvivorMemory(objectPtr);
@@ -677,7 +687,7 @@ MM_CopyForwardScheme::reinitCache(MM_EnvironmentVLHGC *env, MM_CopyScanCacheVLHG
 	/* Count one slot before the base in order to get the true atomic head location.  Regions who do not start on a partial boundary will never see
 	 * the slot previous.
 	 */
-	if(base == _heapBase) {
+	if (base == _heapBase) {
 		/* Going below heap base would be strange - just use _heapTop which won't collide with anything */
 		compactGroupForMarkData->_markMapAtomicHeadSlotIndex = _markMap->getSlotIndex((J9Object *)_heapTop);
 	} else {
@@ -698,7 +708,7 @@ MM_CopyForwardScheme::reinitCache(MM_EnvironmentVLHGC *env, MM_CopyScanCacheVLHG
 			region->getAllocationAgeSizeProduct() / (1024 * 1024) / (1024 * 1024), (double)((UDATA)cache->cacheAlloc - (UDATA)region->getLowAddress()) / (1024 * 1024));
 
 	/* store back the given flags */
-	cache->flags = J9VM_MODRON_SCAVENGER_CACHE_TYPE_COPY | (cache->flags & J9VM_MODRON_SCAVENGER_CACHE_MASK_PERSISTENT);
+	cache->flags = OMR_COPYSCAN_CACHE_TYPE_COPY | (cache->flags & OMR_COPYSCAN_CACHE_MASK_PERSISTENT);
 }
 
 MMINLINE void
@@ -712,7 +722,7 @@ MM_CopyForwardScheme::reinitArraySplitCache(MM_EnvironmentVLHGC *env, MM_CopySca
 	cache->_arraySplitIndex = nextIndex;
 
 	/* store back the appropriate flags */
-	cache->flags = (J9VM_MODRON_SCAVENGER_CACHE_TYPE_SPLIT_ARRAY | J9VM_MODRON_SCAVENGER_CACHE_TYPE_CLEARED) | (cache->flags & J9VM_MODRON_SCAVENGER_CACHE_MASK_PERSISTENT);
+	cache->flags = (OMR_COPYSCAN_CACHE_TYPE_SPLIT_ARRAY | OMR_COPYSCAN_CACHE_TYPE_CLEARED) | (cache->flags & OMR_COPYSCAN_CACHE_MASK_PERSISTENT);
 }
 
 void
@@ -720,7 +730,7 @@ MM_CopyForwardScheme::clearReservedRegionLists(MM_EnvironmentVLHGC *env)
 {
 	Trc_MM_CopyForwardScheme_clearReservedRegionLists_Entry(env->getLanguageVMThread(), _compactGroupMaxCount);
 	
-	for(UDATA index = 0; index < _compactGroupMaxCount; index++) {
+	for (UDATA index = 0; index < _compactGroupMaxCount; index++) {
 		Trc_MM_CopyForwardScheme_clearReservedRegionLists_compactGroup(env->getLanguageVMThread(), index, _reservedRegionList[index]._evacuateRegionCount, _reservedRegionList[index]._sublistCount, _reservedRegionList[index]._maxSublistCount, _reservedRegionList[index]._freeMemoryCandidateCount);
 		if (0 == _reservedRegionList[index]._freeMemoryCandidateCount) {
 			Assert_MM_true(NULL == _reservedRegionList[index]._freeMemoryCandidates);
@@ -732,7 +742,7 @@ MM_CopyForwardScheme::clearReservedRegionLists(MM_EnvironmentVLHGC *env)
 			MM_ReservedRegionListHeader::Sublist *regionList = &_reservedRegionList[index]._sublists[sublistIndex];
 			MM_HeapRegionDescriptorVLHGC *region = regionList->_head;
 	
-			while(NULL != region) {
+			while (NULL != region) {
 				MM_HeapRegionDescriptorVLHGC *next = region->_copyForwardData._nextRegion;
 
 				releaseRegion(env, regionList, region);
@@ -768,7 +778,7 @@ MM_CopyForwardScheme::acquireEmptyRegion(MM_EnvironmentVLHGC *env, MM_ReservedRe
 
 		newRegion = allocationContext->collectorAcquireRegion(env);
 
-		if(NULL != newRegion) {
+		if (NULL != newRegion) {
 			MM_CycleState *cycleState = env->_cycleState;
 			MM_CycleState *externalCycleState = env->_cycleState->_externalCycleState;
 			
@@ -792,6 +802,7 @@ MM_CopyForwardScheme::acquireEmptyRegion(MM_EnvironmentVLHGC *env, MM_ReservedRe
 
 			Assert_MM_true(NULL == newRegion->getUnfinalizedObjectList()->getHeadOfList());
 			Assert_MM_true(NULL == newRegion->getOwnableSynchronizerObjectList()->getHeadOfList());
+			Assert_MM_true(NULL == newRegion->getContinuationObjectList()->getHeadOfList());
 			Assert_MM_false(newRegion->_markData._shouldMark);
 
 			/*
@@ -822,7 +833,7 @@ MM_CopyForwardScheme::insertRegionIntoLockedList(MM_EnvironmentVLHGC *env, MM_Re
 	newRegion->_copyForwardData._nextRegion = regionList->_head;
 	newRegion->_copyForwardData._previousRegion = NULL;
 
-	if(NULL != regionList->_head) {
+	if (NULL != regionList->_head) {
 		regionList->_head->_copyForwardData._previousRegion = newRegion;
 	}
 
@@ -849,19 +860,19 @@ MM_CopyForwardScheme::releaseRegion(MM_EnvironmentVLHGC *env, MM_ReservedRegionL
 }
 
 void *
-MM_CopyForwardScheme::reserveMemoryForObject(MM_EnvironmentVLHGC *env, UDATA compactGroup, UDATA objectSize, MM_LightweightNonReentrantLock** listLock)
+MM_CopyForwardScheme::reserveMemoryForObject(MM_EnvironmentVLHGC *env, uintptr_t compactGroup, uintptr_t objectSize, MM_LightweightNonReentrantLock** listLock)
 {
 	MM_AllocateDescription allocDescription(objectSize, 0, false, false);
-	UDATA sublistCount = _reservedRegionList[compactGroup]._sublistCount;
+	uintptr_t sublistCount = _reservedRegionList[compactGroup]._sublistCount;
 	Assert_MM_true(sublistCount <= MM_ReservedRegionListHeader::MAX_SUBLISTS);
-	UDATA sublistIndex = env->getWorkerID() % sublistCount;
+	uintptr_t sublistIndex = env->getWorkerID() % sublistCount;
 	MM_ReservedRegionListHeader::Sublist *regionList = &_reservedRegionList[compactGroup]._sublists[sublistIndex];
 	void *result = NULL;
 
 	/* Measure the number of acquires before and after we acquire the lock. If it changed, then there is probably contention on the lock. */
-	UDATA acquireCountBefore = regionList->_cacheAcquireCount;
+	uintptr_t acquireCountBefore = regionList->_cacheAcquireCount;
 	regionList->_lock.acquire();
-	UDATA acquireCountAfter = regionList->_cacheAcquireCount;
+	uintptr_t acquireCountAfter = regionList->_cacheAcquireCount;
 	
 	/* 
 	 * 1. attempt to use an existing region 
@@ -912,7 +923,7 @@ MM_CopyForwardScheme::reserveMemoryForObject(MM_EnvironmentVLHGC *env, UDATA com
 	 */
 	if (NULL == result) {
 		region = acquireEmptyRegion(env, regionList, compactGroup);
-		if(NULL != region) {
+		if (NULL != region) {
 			MM_MemoryPool *memoryPool = region->getMemoryPool();
 			Assert_MM_true(NULL != memoryPool);
 			result = memoryPool->collectorAllocate(env, &allocDescription, false);
@@ -923,7 +934,7 @@ MM_CopyForwardScheme::reserveMemoryForObject(MM_EnvironmentVLHGC *env, UDATA com
 	if (NULL != result) {
 		regionList->_cacheAcquireCount += 1;
 		regionList->_cacheAcquireBytes += allocDescription.getBytesRequested();
-		setCompressedSurvivorCards(env, (void*)result, (void*) ((UDATA)result + allocDescription.getBytesRequested()));
+		setCompressedSurvivorCards(env, (void*)result, (void*) ((uintptr_t)result + allocDescription.getBytesRequested()));
 	}
 
 	regionList->_lock.release();
@@ -931,7 +942,7 @@ MM_CopyForwardScheme::reserveMemoryForObject(MM_EnvironmentVLHGC *env, UDATA com
 	
 	Assert_MM_true(acquireCountBefore <= acquireCountAfter);
 	if ((NULL != result) && (sublistCount < _reservedRegionList[compactGroup]._maxSublistCount)) {
-		UDATA acceptableAcquireCountForContention = acquireCountBefore + _regionSublistContentionThreshold;
+		uintptr_t acceptableAcquireCountForContention = acquireCountBefore + _regionSublistContentionThreshold;
 		if (acceptableAcquireCountForContention < acquireCountAfter) {
 			/* contention detected on lock -- attempt to increase the number of sublists */
 			MM_AtomicOperations::lockCompareExchange(&_reservedRegionList[compactGroup]._sublistCount, sublistCount, sublistCount + 1);
@@ -942,19 +953,19 @@ MM_CopyForwardScheme::reserveMemoryForObject(MM_EnvironmentVLHGC *env, UDATA com
 }
 
 bool
-MM_CopyForwardScheme::reserveMemoryForCache(MM_EnvironmentVLHGC *env, UDATA compactGroup, UDATA maxCacheSize, void **addrBase, void **addrTop, MM_LightweightNonReentrantLock** listLock)
+MM_CopyForwardScheme::reserveMemoryForCache(MM_EnvironmentVLHGC *env, uintptr_t compactGroup, uintptr_t maxCacheSize, void **addrBase, void **addrTop, MM_LightweightNonReentrantLock** listLock)
 {
 	MM_AllocateDescription allocDescription(maxCacheSize, 0, false, false);
 	bool result = false;
-	UDATA sublistCount = _reservedRegionList[compactGroup]._sublistCount;
+	uintptr_t sublistCount = _reservedRegionList[compactGroup]._sublistCount;
 	Assert_MM_true(sublistCount <= MM_ReservedRegionListHeader::MAX_SUBLISTS);
-	UDATA sublistIndex = env->getWorkerID() % sublistCount;
+	uintptr_t sublistIndex = env->getWorkerID() % sublistCount;
 	MM_ReservedRegionListHeader::Sublist *regionList = &_reservedRegionList[compactGroup]._sublists[sublistIndex];
 
 	/* Measure the number of acquires before and after we acquire the lock. If it changed, then there is probably contention on the lock. */
-	UDATA acquireCountBefore = regionList->_cacheAcquireCount;
+	uintptr_t acquireCountBefore = regionList->_cacheAcquireCount;
 	regionList->_lock.acquire();
-	UDATA acquireCountAfter = regionList->_cacheAcquireCount;
+	uintptr_t acquireCountAfter = regionList->_cacheAcquireCount;
 
 	/* 
 	 * 1. attempt to use an existing region 
@@ -1015,9 +1026,9 @@ MM_CopyForwardScheme::reserveMemoryForCache(MM_EnvironmentVLHGC *env, UDATA comp
 	/* 
 	 * 3. attempt to acquire an empty region 
 	 */
-	if(!result) {
+	if (!result) {
 		region = acquireEmptyRegion(env, regionList, compactGroup);
-		if(NULL != region) {
+		if (NULL != region) {
 			MM_MemoryPool *memoryPool = region->getMemoryPool();
 			Assert_MM_true(NULL != memoryPool);
 
@@ -1035,7 +1046,7 @@ MM_CopyForwardScheme::reserveMemoryForCache(MM_EnvironmentVLHGC *env, UDATA comp
 
 	if (result) {
 		regionList->_cacheAcquireCount += 1;
-		regionList->_cacheAcquireBytes += ((UDATA)*addrTop) - ((UDATA)*addrBase);
+		regionList->_cacheAcquireBytes += ((uintptr_t)*addrTop) - ((uintptr_t)*addrBase);
 		setCompressedSurvivorCards(env, *addrBase, *addrTop);
 	}
 
@@ -1044,7 +1055,7 @@ MM_CopyForwardScheme::reserveMemoryForCache(MM_EnvironmentVLHGC *env, UDATA comp
 
 	Assert_MM_true(acquireCountBefore <= acquireCountAfter);
 	if (result && (sublistCount < _reservedRegionList[compactGroup]._maxSublistCount)) {
-		UDATA acceptableAcquireCountForContention = acquireCountBefore + _regionSublistContentionThreshold;
+		uintptr_t acceptableAcquireCountForContention = acquireCountBefore + _regionSublistContentionThreshold;
 		if (acceptableAcquireCountForContention < acquireCountAfter) {
 			/* contention detected on lock -- attempt to increase the number of sublists */
 			MM_AtomicOperations::lockCompareExchange(&_reservedRegionList[compactGroup]._sublistCount, sublistCount, sublistCount + 1);
@@ -1116,26 +1127,29 @@ MM_CopyForwardScheme::getDesiredCopyCacheSize(MM_EnvironmentVLHGC *env, UDATA co
 }
 
 MM_CopyScanCacheVLHGC *
-MM_CopyForwardScheme::reserveMemoryForCopy(MM_EnvironmentVLHGC *env, J9Object *objectToEvacuate, MM_AllocationContextTarok *reservingContext, UDATA objectReserveSizeInBytes)
+MM_CopyForwardScheme::reserveMemoryForCopy(MM_EnvironmentVLHGC *env, J9Object *objectToEvacuate, MM_AllocationContextTarok *reservingContext, uintptr_t objectReserveSizeInBytes)
 {
 	void *addrBase = NULL;
 	void *addrTop = NULL;
 	uintptr_t minimumRequiredCacheSize = objectReserveSizeInBytes;
+	uintptr_t minimumSingleObjectAllocateSize = _extensions->tlhSurvivorDiscardThreshold;
 
 	Assert_MM_objectAligned(env, objectReserveSizeInBytes);
 
 	MM_HeapRegionDescriptorVLHGC *region = (MM_HeapRegionDescriptorVLHGC *)_regionManager->tableDescriptorForAddress(objectToEvacuate);
-	UDATA compactGroup = MM_CompactGroupManager::getCompactGroupNumberInContext(env, region, reservingContext);
+	uintptr_t compactGroup = MM_CompactGroupManager::getCompactGroupNumberInContext(env, region, reservingContext);
 	MM_CopyForwardCompactGroup *copyForwardCompactGroup = &env->_copyForwardCompactGroups[compactGroup];
 	
 	Assert_MM_true(compactGroup < _compactGroupMaxCount);
 
 	MM_CopyScanCacheVLHGC *copyCache = copyForwardCompactGroup->_copyCache;
+
+retry:
 	/* A survivor copy scan cache exists - check if there is room */
 	if ((NULL == copyCache) || (((uintptr_t)copyCache->cacheTop - (uintptr_t)copyCache->cacheAlloc) < minimumRequiredCacheSize)) {
 		/* There is no room for current copy cache */
 		MM_LightweightNonReentrantLock *listLock = NULL;
-		if (objectReserveSizeInBytes < copyForwardCompactGroup->_failedAllocateSize) {
+		if (minimumRequiredCacheSize < copyForwardCompactGroup->_failedAllocateSize) {
 			/* try to use TLH remainder from previous discard */
 			if (((uintptr_t)copyForwardCompactGroup->_TLHRemainderTop - (uintptr_t)copyForwardCompactGroup->_TLHRemainderBase) >= minimumRequiredCacheSize) {
 				addrBase = copyForwardCompactGroup->_TLHRemainderBase;
@@ -1148,17 +1162,18 @@ MM_CopyForwardScheme::reserveMemoryForCopy(MM_EnvironmentVLHGC *env, J9Object *o
 				uintptr_t sublistIndex = env->getWorkerID() % sublistCount;
 				MM_ReservedRegionListHeader::Sublist *regionList = &_reservedRegionList[compactGroup]._sublists[sublistIndex];
 				listLock = &regionList->_lock;
-			} else if (_extensions->tlhSurvivorDiscardThreshold < minimumRequiredCacheSize) {
+			} else if (minimumSingleObjectAllocateSize < minimumRequiredCacheSize) {
 				addrBase = reserveMemoryForObject(env, compactGroup, minimumRequiredCacheSize, &listLock);
 
 				if (NULL != addrBase) {
-					addrTop = (void *)(((U_8 *)addrBase) + minimumRequiredCacheSize);
+					addrTop = (void *)((uintptr_t)addrBase + minimumRequiredCacheSize);
 				} else {
 					/* failed to allocate - set the threshold to short-circuit future alloc attempts */
-					copyForwardCompactGroup->_failedAllocateSize = objectReserveSizeInBytes;
+					copyForwardCompactGroup->_failedAllocateSize = minimumRequiredCacheSize;
 				}
 			}  else {
 				UDATA desiredCacheSize = getDesiredCopyCacheSize(env, compactGroup);
+				desiredCacheSize = OMR_MAX(desiredCacheSize, minimumRequiredCacheSize);
 				if (!reserveMemoryForCache(env, compactGroup, desiredCacheSize, &addrBase, &addrTop, &listLock)) {
 					/* failed to allocate - set the threshold to short-circut future alloc attempts:
 					 * we should never (in this GC) attempt to allocate a cache (TLH) from this compact group
@@ -1229,6 +1244,20 @@ MM_CopyForwardScheme::reserveMemoryForCopy(MM_EnvironmentVLHGC *env, J9Object *o
 			Assert_MM_true(NULL != copyCache->cacheAlloc);
 			Assert_MM_true(NULL != copyCache->cacheTop);
 			Assert_MM_true(NULL != copyCache->cacheBase);
+			if (((uintptr_t)addrTop - (uintptr_t)addrBase) < minimumRequiredCacheSize) {
+				/* In case of increased tlhSurvivorDiscardThreshold, we may prefer TLH rather then single object allocation
+				 * in which case TLH cache may not be large enough to satisfy the allocation.
+				 * We'll try again but force single object allocation.
+				 * We could have detected earlier in the method the failed TLH allocate, but doing this late gives a chance
+				 * for current cache remainder or new cache to be preserved (if sufficiently large) as thread's TLH remainder
+				 */
+				Assert_MM_true(_extensions->tlhSurvivorDiscardThreshold > _minCacheSize);
+				minimumSingleObjectAllocateSize = _minCacheSize;
+				addrBase = NULL;
+				addrTop = NULL;
+
+				goto retry;
+			}
 			if (_extensions->tarokEnableExpensiveAssertions) {
 				/* verify that the mark map for this range is clear */
 				Assert_MM_true(NULL == MM_HeapMapIterator(_extensions, _markMap, (UDATA*)copyCache->cacheAlloc, (UDATA*)copyCache->cacheTop, false).nextObject());
@@ -1246,12 +1275,12 @@ MM_CopyForwardScheme::copyAndForward(MM_EnvironmentVLHGC *env, MM_AllocationCont
 	J9Object *objectPtr = originalObjectPtr;
 	bool success = true;
 
-	if((NULL != objectPtr) && isObjectInEvacuateMemory(objectPtr)) {
+	if ((NULL != objectPtr) && isObjectInEvacuateMemory(objectPtr)) {
 		/* Object needs to be copy and forwarded.  Check if the work has already been done */
 		MM_ForwardedHeader forwardHeader(objectPtr, _extensions->compressObjectReferences());
 		objectPtr = forwardHeader.getForwardedObject();
 		
-		if(NULL != objectPtr) {
+		if (NULL != objectPtr) {
 			/* Object has been copied - update the forwarding information and return */
 			*objectPtrIndirect = objectPtr;
 		} else {
@@ -1321,7 +1350,7 @@ MM_CopyForwardScheme::copyAndForwardPointerArray(MM_EnvironmentVLHGC *env, MM_Al
 	bool success = copyAndForward(env, reservingContext, &value);
 
 	if (success) {
-		if(preservedValue != value) {
+		if (preservedValue != value) {
 			slotObject->writeReferenceToSlot(value);
 		}
 		_interRegionRememberedSet->rememberReferenceForCopyForward(env, (J9Object *)arrayPtr, value);
@@ -1348,7 +1377,7 @@ MM_CopyForwardScheme::copyAndForwardObjectClass(MM_EnvironmentVLHGC *env, MM_All
 
 #if defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING)
 	_extensions->classLoaderRememberedSet->rememberInstance(env, objectPtr);
-	if(isDynamicClassUnloadingEnabled()) {
+	if (isDynamicClassUnloadingEnabled()) {
 		j9object_t classObject = (j9object_t)J9GC_J9OBJECT_CLAZZ(objectPtr, env)->classObject;
 		Assert_MM_true(J9_INVALID_OBJECT != classObject);
 		if (copyAndForward(env, reservingContext, &classObject)) {
@@ -1507,14 +1536,11 @@ MM_CopyForwardScheme::mergeGCStats(MM_EnvironmentVLHGC *env)
 		localStats->_copyDiscardBytesTotal += compactGroup->_discardedBytes;
 		localStats->_TLHRemainderCount += compactGroup->_TLHRemainderCount;
 
-		/* distribute the discard cost proportionately to Eden/non-Eden based on how many bytes were copied from each */
-		UDATA copyDiscardBytesEden = 
-			(totalCopiedBytes > 0) 
-				? (UDATA)((double)compactGroup->_discardedBytes * (double)compactGroup->_edenStats._copiedBytes / (double)totalCopiedBytes)
-				: 0;
-		localStats->_copyDiscardBytesEden += copyDiscardBytesEden;
-		Assert_MM_true(compactGroup->_discardedBytes >= copyDiscardBytesEden);
-		localStats->_copyDiscardBytesNonEden += compactGroup->_discardedBytes - copyDiscardBytesEden;
+		if (0 == MM_CompactGroupManager::getRegionAgeFromGroup(env, compactGroupNumber)) {
+			localStats->_copyDiscardBytesEden += compactGroup->_discardedBytes;
+		} else {
+			localStats->_copyDiscardBytesNonEden += compactGroup->_discardedBytes;
+		}
 		
 		/* use an atomic since other threads may be doing this at the same time */
 		if (0 != totalLiveBytes) {
@@ -1536,6 +1562,7 @@ MM_CopyForwardScheme::mergeGCStats(MM_EnvironmentVLHGC *env)
 	static_cast<MM_CycleStateVLHGC*>(env->_cycleState)->_vlhgcIncrementStats._copyForwardStats.merge(localStats);
 	static_cast<MM_CycleStateVLHGC*>(env->_cycleState)->_vlhgcIncrementStats._workPacketStats.merge(&env->_workPacketStats);
 	static_cast<MM_CycleStateVLHGC*>(env->_cycleState)->_vlhgcIncrementStats._irrsStats.merge(&env->_irrsStats);
+	static_cast<MM_CycleStateVLHGC*>(env->_cycleState)->_vlhgcIncrementStats._continuationStats.merge(&env->_continuationStats);
 	omrthread_monitor_exit(_extensions->gcStatsMutex);
 	
 	/* record the thread-specific parallelism stats in the trace buffer. This partially duplicates info in -Xtgc:parallel */ 
@@ -1615,7 +1642,7 @@ MM_CopyForwardScheme::copyForwardPostProcess(MM_EnvironmentVLHGC *env)
 
 	copyForwardCompletedSuccessfully(env);
 
-	if(_extensions->tarokEnableExpensiveAssertions) {
+	if (_extensions->tarokEnableExpensiveAssertions) {
 		/* Verify the result of the copy forward operation (heap integrity, etc) */
 		verifyCopyForwardResult(MM_EnvironmentVLHGC::getEnvironment(env));
 	}
@@ -1699,7 +1726,7 @@ MM_CopyForwardScheme::getFreeCache(MM_EnvironmentVLHGC *env)
 #endif /* J9MODRON_TGC_PARALLEL_STATISTICS */
 	/* Check the free list */
 	MM_CopyScanCacheVLHGC *cache = _cacheFreeList.popCache(env);
-	if(NULL != cache) {
+	if (NULL != cache) {
 		return cache;
 	}
 
@@ -1718,7 +1745,7 @@ MM_CopyForwardScheme::getFreeCache(MM_EnvironmentVLHGC *env)
 	}
 	/* Overflow or abort was hit so alert other threads that are waiting */
 	omrthread_monitor_enter(*_workQueueMonitorPtr);
-	if(0 != *_workQueueWaitCountPtr) {
+	if (0 != *_workQueueWaitCountPtr) {
 		omrthread_monitor_notify(*_workQueueMonitorPtr);
 	}
 	omrthread_monitor_exit(*_workQueueMonitorPtr);
@@ -1748,8 +1775,8 @@ void
 MM_CopyForwardScheme::flushCache(MM_EnvironmentVLHGC *env, MM_CopyScanCacheVLHGC *cache)
 {
 	Assert_MM_false(cache->isSplitArray());
-	if(0 == (cache->flags & J9VM_MODRON_SCAVENGER_CACHE_TYPE_COPY)) {
-		if(0 == (cache->flags & J9VM_MODRON_SCAVENGER_CACHE_TYPE_CLEARED)) {
+	if (0 == (cache->flags & OMR_COPYSCAN_CACHE_TYPE_COPY)) {
+		if (0 == (cache->flags & OMR_COPYSCAN_CACHE_TYPE_CLEARED)) {
 			clearCache(env, cache); 
 		}	
 #if defined(J9MODRON_TGC_PARALLEL_STATISTICS)
@@ -1763,7 +1790,7 @@ bool
 MM_CopyForwardScheme::clearCache(MM_EnvironmentVLHGC *env, MM_CopyScanCacheVLHGC *cache)
 {
 	uintptr_t discardSize = (uintptr_t)cache->cacheTop - (uintptr_t)cache->cacheAlloc;
-	Assert_MM_true(0 == (cache->flags & J9VM_MODRON_SCAVENGER_CACHE_TYPE_CLEARED));
+	Assert_MM_true(0 == (cache->flags & OMR_COPYSCAN_CACHE_TYPE_CLEARED));
 	Assert_MM_false(cache->isSplitArray());
 	bool remainderCreated = false;
 	
@@ -1775,19 +1802,11 @@ MM_CopyForwardScheme::clearCache(MM_EnvironmentVLHGC *env, MM_CopyScanCacheVLHGC
 		if ((discardSize < env->getExtensions()->tlhSurvivorDiscardThreshold) ||
 			(discardSize <= ((uintptr_t)compactGroupForMarkData->_TLHRemainderTop - (uintptr_t)compactGroupForMarkData->_TLHRemainderBase))) {
 			/* Abandon the current entry in the cache */
-			env->_cycleState->_activeSubSpace->abandonHeapChunk(cache->cacheAlloc, cache->cacheTop);
-			discardHeapChunk(compactGroupForMarkData, cache->cacheAlloc, cache->cacheTop);
+			compactGroupForMarkData->discardTLHRemainder(env, cache->cacheAlloc, cache->cacheTop);
 		} else {
-			if (NULL != compactGroupForMarkData->_TLHRemainderBase) {
-				/* Abandon the current entry in the cache */
-				env->_cycleState->_activeSubSpace->abandonHeapChunk(compactGroupForMarkData->_TLHRemainderBase, compactGroupForMarkData->_TLHRemainderTop);
-				discardHeapChunk(compactGroupForMarkData, compactGroupForMarkData->_TLHRemainderBase, compactGroupForMarkData->_TLHRemainderTop);
-				compactGroupForMarkData->resetTLHRemainder();
-			}
+			/* Abandon the current TLHRemainder if one exists */
+			compactGroupForMarkData->discardTLHRemainder(env);
 			remainderCreated = true;
-			compactGroupForMarkData->_TLHRemainderCount += 1;
-			Assert_MM_true(NULL == compactGroupForMarkData->_TLHRemainderBase);
-			Assert_MM_true(NULL == compactGroupForMarkData->_TLHRemainderTop);
 			compactGroupForMarkData->setTLHRemainder(cache->cacheAlloc, cache->cacheTop);
 		}
 	}
@@ -1796,7 +1815,7 @@ MM_CopyForwardScheme::clearCache(MM_EnvironmentVLHGC *env, MM_CopyScanCacheVLHGC
 	TRIGGER_J9HOOK_MM_PRIVATE_CACHE_CLEARED(_extensions->privateHookInterface, env->getOmrVMThread(), env->_cycleState->_activeSubSpace,
 									cache->cacheBase, cache->cacheAlloc, cache->cacheTop);
 
-	cache->flags |= J9VM_MODRON_SCAVENGER_CACHE_TYPE_CLEARED;
+	cache->flags |= OMR_COPYSCAN_CACHE_TYPE_CLEARED;
 
 	return remainderCreated;
 }
@@ -1837,7 +1856,7 @@ MM_CopyForwardScheme::stopCopyingIntoCache(MM_EnvironmentVLHGC *env, UDATA compa
 		/* Clear the current entry in the cache */
 		clearCache(env, copyCache);
 		/* This is no longer a copy cache */
-		copyCache->flags &= ~J9VM_MODRON_SCAVENGER_CACHE_TYPE_COPY;
+		copyCache->flags &= ~OMR_COPYSCAN_CACHE_TYPE_COPY;
 		/* drop this cache from the env */
 		env->_copyForwardCompactGroups[compactGroup]._copyCache = NULL;
 		env->_copyForwardCompactGroups[compactGroup]._copyCacheLock = NULL;
@@ -1868,7 +1887,7 @@ MM_CopyForwardScheme::discardRemainingCache(MM_EnvironmentVLHGC *env, MM_CopySca
 void
 MM_CopyForwardScheme::addCopyCachesToFreeList(MM_EnvironmentVLHGC *env)
 {
-	for(UDATA index = 0; index < _compactGroupMaxCount; index++) {
+	for (UDATA index = 0; index < _compactGroupMaxCount; index++) {
 		MM_CopyScanCacheVLHGC * copyCache = stopCopyingIntoCache(env, index);
 		if (NULL != copyCache) {
 			addCacheEntryToFreeCacheList(env, copyCache);
@@ -1881,10 +1900,10 @@ MM_CopyForwardScheme::updateForwardedPointer(J9Object *objectPtr)
 {
 	J9Object *forwardPtr;
 
-	if(isObjectInEvacuateMemory(objectPtr)) {
+	if (isObjectInEvacuateMemory(objectPtr)) {
 		MM_ForwardedHeader forwardedHeader(objectPtr, _extensions->compressObjectReferences());
 		forwardPtr = forwardedHeader.getForwardedObject();
-		if(forwardPtr != NULL) {
+		if (forwardPtr != NULL) {
 			return forwardPtr;
 		}
 	}
@@ -1904,8 +1923,8 @@ MM_CopyForwardScheme::copy(MM_EnvironmentVLHGC *env, MM_AllocationContextTarok *
 	bool const compressed = env->compressObjectReferences();
 	J9Object *result = NULL;
 	J9Object *object = forwardedHeader->getObject();
-	UDATA objectCopySizeInBytes = 0;
-	UDATA objectReserveSizeInBytes = 0;
+	uintptr_t objectCopySizeInBytes = 0;
+	uintptr_t objectReserveSizeInBytes = 0;
 
 	bool noEvacuation = false;
 	if (0 != _regionCountCannotBeEvacuated) {
@@ -1925,10 +1944,10 @@ MM_CopyForwardScheme::copy(MM_EnvironmentVLHGC *env, MM_AllocationContextTarok *
 
 		result = object;
 	} else {
-		UDATA hotFieldsDescriptor = 0;
-		UDATA hotFieldsAlignment = 0;
-		UDATA* hotFieldPadBase = NULL;
-		UDATA hotFieldPadSize = 0;
+		uintptr_t hotFieldsDescriptor = 0;
+		uintptr_t hotFieldsAlignment = 0;
+		uintptr_t *hotFieldPadBase = NULL;
+		uintptr_t hotFieldPadSize = 0;
 		MM_CopyScanCacheVLHGC *copyCache = NULL;
 		void *newCacheAlloc = NULL;
 		GC_ObjectModel *objectModel = &_extensions->objectModel;
@@ -1954,28 +1973,28 @@ MM_CopyForwardScheme::copy(MM_EnvironmentVLHGC *env, MM_AllocationContextTarok *
 		copyCache = reserveMemoryForCopy(env, object, reservingContext, objectReserveSizeInBytes);
 
 		/* Check if memory was reserved successfully */
-		if(NULL == copyCache) {
+		if (NULL == copyCache) {
 			raiseAbortFlag(env);
 			Assert_MM_true(NULL == result);
 		} else {
 			Assert_MM_false(copyCache->isSplitArray());
 
 			/* Memory has been reserved */
-			UDATA destinationCompactGroup = copyCache->_compactGroup;
+			uintptr_t destinationCompactGroup = copyCache->_compactGroup;
 			J9Object *destinationObjectPtr = (J9Object *)copyCache->cacheAlloc;
 			Assert_MM_true(NULL != destinationObjectPtr);
 
 			/* now correct for the hot field alignment */
 #if defined(J9VM_INTERP_NATIVE_SUPPORT)
 			if (0 != hotFieldsAlignment) {
-				UDATA remainingInCacheLine = _cacheLineAlignment - ((UDATA)destinationObjectPtr % _cacheLineAlignment);
-				UDATA alignmentBias = HOTFIELD_ALIGNMENT_BIAS(hotFieldsAlignment, _objectAlignmentInBytes);
+				uintptr_t remainingInCacheLine = _cacheLineAlignment - ((uintptr_t)destinationObjectPtr % _cacheLineAlignment);
+				uintptr_t alignmentBias = HOTFIELD_ALIGNMENT_BIAS(hotFieldsAlignment, _objectAlignmentInBytes);
 				/* do alignment only if the object cannot fit in the remaining space in the cache line */
 				if ((remainingInCacheLine < objectCopySizeInBytes) && (alignmentBias < remainingInCacheLine)) {
 					hotFieldPadSize = ((remainingInCacheLine + _cacheLineAlignment) - (alignmentBias % _cacheLineAlignment)) % _cacheLineAlignment;
-					hotFieldPadBase = (UDATA *)destinationObjectPtr;
+					hotFieldPadBase = (uintptr_t *)destinationObjectPtr;
 					/* now fix the object pointer so that the hot field is aligned */
-					destinationObjectPtr = (J9Object *)((UDATA)destinationObjectPtr + hotFieldPadSize);
+					destinationObjectPtr = (J9Object *)((uintptr_t)destinationObjectPtr + hotFieldPadSize);
 				}
 				/* and update the reserved size so that we "un-reserve" the extra memory we said we might need.  This is done by
 				 * removing the excess reserve since we already accounted for the hotFieldPadSize by bumping the destination pointer
@@ -1987,10 +2006,10 @@ MM_CopyForwardScheme::copy(MM_EnvironmentVLHGC *env, MM_AllocationContextTarok *
 #endif /* J9VM_INTERP_NATIVE_SUPPORT */
 
 			/* and correct for the double array alignment */
-			newCacheAlloc = (void *) ( ((U_8 *)destinationObjectPtr) + objectReserveSizeInBytes );
+			newCacheAlloc = (void *)((uintptr_t)destinationObjectPtr + objectReserveSizeInBytes);
 
 			/* Try to swap the forwarding pointer to the destination copy array into the source object */
-			J9Object* originalDestinationObjectPtr = destinationObjectPtr;
+			J9Object *originalDestinationObjectPtr = destinationObjectPtr;
 			destinationObjectPtr = forwardedHeader->setForwardedObject(destinationObjectPtr);
 			Assert_MM_true(NULL != destinationObjectPtr);
 			if (destinationObjectPtr == originalDestinationObjectPtr) {
@@ -2006,16 +2025,20 @@ MM_CopyForwardScheme::copy(MM_EnvironmentVLHGC *env, MM_AllocationContextTarok *
 				memcpy((void *)destinationObjectPtr, forwardedHeader->getObject(), objectCopySizeInBytes);
 
 				forwardedHeader->fixupForwardedObject(destinationObjectPtr);
+				GC_ArrayObjectModel *indexableObjectModel = &_extensions->indexableObjectModel;
 
 				if (objectModel->isIndexable(destinationObjectPtr)) {
-					_extensions->indexableObjectModel.fixupInternalLeafPointersAfterCopy((J9IndexableObject *)destinationObjectPtr, (J9IndexableObject *)forwardedHeader->getObject());
-
-					/* Updates internal data address of indexable objects. Every indexable object have a void *dataAddr
-					 * that always points to the array data. It will always point to the address right after the header,
-					 * in case of contiguous data it will point to the data itself, and in case of discontiguous
-					 * arraylet it will point to the first arrayiod. dataAddr is only updated if dataAddr points to data
-					 * within heap. */
-					_extensions->indexableObjectModel.fixupDataAddr(destinationObjectPtr);
+					indexableObjectModel->fixupInternalLeafPointersAfterCopy((J9IndexableObject *)destinationObjectPtr, (J9IndexableObject *)forwardedHeader->getObject());
+#if defined(J9VM_GC_SPARSE_HEAP_ALLOCATION)
+					/**
+					 * Update the dataAddr internal field of the indexable object. The field being updated
+					 * points to the array data. In the case of contiguous data, it will point to the data
+					 * itself, and in case of discontiguous data, it will be NULL.
+					 */
+					if (_extensions->isVirtualLargeObjectHeapEnabled) {
+						indexableObjectModel->fixupDataAddr(forwardedHeader, (J9IndexableObject *)destinationObjectPtr);
+					}
+#endif /* defined(J9VM_GC_SPARSE_HEAP_ALLOCATION) */
 				}
 
 				objectModel->fixupHashFlagsAndSlot(forwardedHeader, destinationObjectPtr);
@@ -2040,7 +2063,7 @@ MM_CopyForwardScheme::copy(MM_EnvironmentVLHGC *env, MM_AllocationContextTarok *
 					env->_copyForwardCompactGroups[destinationCompactGroup]._freeMemoryMeasured += hotFieldPadSize;
 				}
 				MM_HeapRegionDescriptorVLHGC * sourceRegion = (MM_HeapRegionDescriptorVLHGC *)_regionManager->tableDescriptorForAddress(object);
-				UDATA sourceCompactGroup = MM_CompactGroupManager::getCompactGroupNumber(env, sourceRegion);
+				uintptr_t sourceCompactGroup = MM_CompactGroupManager::getCompactGroupNumber(env, sourceRegion);
 				if (sourceRegion->isEden()) {
 					env->_copyForwardCompactGroups[sourceCompactGroup]._edenStats._liveObjects += 1;
 					env->_copyForwardCompactGroups[sourceCompactGroup]._edenStats._liveBytes += objectCopySizeInBytes;
@@ -2075,7 +2098,7 @@ MM_CopyForwardScheme::copy(MM_EnvironmentVLHGC *env, MM_AllocationContextTarok *
 
 #if defined(J9VM_GC_LEAF_BITS)
 void
-MM_CopyForwardScheme::copyLeafChildren(MM_EnvironmentVLHGC* env, MM_AllocationContextTarok *reservingContext, J9Object* objectPtr)
+MM_CopyForwardScheme::copyLeafChildren(MM_EnvironmentVLHGC* env, MM_AllocationContextTarok *reservingContext, J9Object *objectPtr)
 {
 	J9Class *clazz = J9GC_J9OBJECT_CLAZZ(objectPtr, env);
 	if (GC_ObjectModel::SCAN_MIXED_OBJECT == _extensions->objectModel.getScanType(clazz)) {
@@ -2147,9 +2170,9 @@ MM_CopyForwardScheme::flushCacheMarkMap(MM_EnvironmentVLHGC *env, MM_CopyScanCac
 	Assert_MM_false(UDATA_MAX == compactGroup->_markMapGMPSlotIndex);  /* Safety check from flushing to see if somehow the cache is being resurrected */
 	Assert_MM_false(cache->isSplitArray());
 
-	if(0 != compactGroup->_markMapPGCBitMask) {
+	if (0 != compactGroup->_markMapPGCBitMask) {
 		UDATA pgcFlushSlotIndex = compactGroup->_markMapPGCSlotIndex;
-		if((pgcFlushSlotIndex == compactGroup->_markMapAtomicHeadSlotIndex) || (pgcFlushSlotIndex == compactGroup->_markMapAtomicTailSlotIndex)) {
+		if ((pgcFlushSlotIndex == compactGroup->_markMapAtomicHeadSlotIndex) || (pgcFlushSlotIndex == compactGroup->_markMapAtomicTailSlotIndex)) {
 			_markMap->atomicSetSlot(pgcFlushSlotIndex, compactGroup->_markMapPGCBitMask);
 		} else {
 			_markMap->setSlot(pgcFlushSlotIndex, compactGroup->_markMapPGCBitMask);
@@ -2160,10 +2183,10 @@ MM_CopyForwardScheme::flushCacheMarkMap(MM_EnvironmentVLHGC *env, MM_CopyScanCac
 		compactGroup->_markMapPGCBitMask = 0;
 	}
 
-	if(NULL != env->_cycleState->_externalCycleState) {
-		if(0 != compactGroup->_markMapGMPBitMask) {
+	if (NULL != env->_cycleState->_externalCycleState) {
+		if (0 != compactGroup->_markMapGMPBitMask) {
 			UDATA gmpFlushSlotIndex = compactGroup->_markMapGMPSlotIndex;
-			if((gmpFlushSlotIndex == compactGroup->_markMapAtomicHeadSlotIndex) || (gmpFlushSlotIndex == compactGroup->_markMapAtomicTailSlotIndex)) {
+			if ((gmpFlushSlotIndex == compactGroup->_markMapAtomicHeadSlotIndex) || (gmpFlushSlotIndex == compactGroup->_markMapAtomicTailSlotIndex)) {
 				env->_cycleState->_externalCycleState->_markMap->atomicSetSlot(gmpFlushSlotIndex, compactGroup->_markMapGMPBitMask);
 			} else {
 				env->_cycleState->_externalCycleState->_markMap->setSlot(gmpFlushSlotIndex, compactGroup->_markMapGMPBitMask);
@@ -2188,10 +2211,10 @@ MM_CopyForwardScheme::updateMarkMapCache(MM_EnvironmentVLHGC *env, MM_MarkMap *m
 
 	markMap->getSlotIndexAndMask(object, &slotIndex, &bitMask);
 
-	if(*slotIndexIndirect != slotIndex) {
-		if(0 != *bitMaskIndirect) {
+	if (*slotIndexIndirect != slotIndex) {
+		if (0 != *bitMaskIndirect) {
 			UDATA flushSlotIndex = *slotIndexIndirect;
-			if((flushSlotIndex == atomicHeadSlotIndex) || (flushSlotIndex == atomicTailSlotIndex)) {
+			if ((flushSlotIndex == atomicHeadSlotIndex) || (flushSlotIndex == atomicTailSlotIndex)) {
 				markMap->atomicSetSlot(flushSlotIndex, *bitMaskIndirect);
 			} else {
 				markMap->setSlot(flushSlotIndex, *bitMaskIndirect);
@@ -2216,17 +2239,18 @@ MM_CopyForwardScheme::updateMarkMapAndCardTableOnCopy(MM_EnvironmentVLHGC *env, 
 	updateMarkMapCache(env, _markMap, dstObject, &destinationGroup->_markMapPGCSlotIndex, &destinationGroup->_markMapPGCBitMask, destinationGroup->_markMapAtomicHeadSlotIndex, destinationGroup->_markMapAtomicTailSlotIndex);
 
 	/* If there is an external cycle in progress, see if any information needs to be migrated */
-	if(NULL != env->_cycleState->_externalCycleState) {
+	if (NULL != env->_cycleState->_externalCycleState) {
 		MM_MarkMap *externalMap = env->_cycleState->_externalCycleState->_markMap;
 
-		if(externalMap->isBitSet(srcObject)) {
+		if (externalMap->isBitSet(srcObject)) {
 			/* The external cycle has already visited the live object - move the mark map and card information across */
 			updateMarkMapCache(env, externalMap, dstObject, &destinationGroup->_markMapGMPSlotIndex, &destinationGroup->_markMapGMPBitMask, destinationGroup->_markMapAtomicHeadSlotIndex, destinationGroup->_markMapAtomicTailSlotIndex);
 
 			MM_CardTable *cardTable = _extensions->cardTable;
 			Card *card = cardTable->heapAddrToCardAddr(env, srcObject);
+			Card srcCardState = *card;
 
-			switch(*card) {
+			switch (srcCardState) {
 			case CARD_GMP_MUST_SCAN:
 			case CARD_DIRTY:
 			{
@@ -2240,8 +2264,22 @@ MM_CopyForwardScheme::updateMarkMapAndCardTableOnCopy(MM_EnvironmentVLHGC *env, 
 			case CARD_CLEAN:
 				/* do nothing */
 				break;
+
+			/* Unexpected states */
+			case CARD_REMEMBERED:
+				Assert_GC_true_with_message4(env, false, "Unexpected Card state CARD_REMEMBERED %u for Card %p, srcObject %p, dstObject %p\n", CARD_REMEMBERED, card, srcObject, dstObject);
+				break;
+			case CARD_REMEMBERED_AND_GMP_SCAN:
+				Assert_GC_true_with_message4(env, false, "Unexpected Card state CARD_REMEMBERED_AND_GMP_SCAN %u for Card %p, srcObject %p, dstObject %p\n", CARD_REMEMBERED_AND_GMP_SCAN, card, srcObject, dstObject);
+				break;
+			case CARD_MARK_COMPACT_TRANSITION:
+				Assert_GC_true_with_message4(env, false, "Unexpected Card state CARD_MARK_COMPACT_TRANSITION %u for Card %p, srcObject %p, dstObject %p\n", CARD_MARK_COMPACT_TRANSITION, card, srcObject, dstObject);
+				break;
+			case CARD_INVALID:
+				Assert_GC_true_with_message4(env, false, "Unexpected Card state CARD_INVALID %u for Card %p, srcObject %p, dstObject %p\n", CARD_INVALID, card, srcObject, dstObject);
+				break;
 			default:
-				Assert_MM_unreachable();
+				Assert_GC_true_with_message4(env, false, "Unexpected Card state UNKNOWN %u for Card %p, srcObject %p, dstObject %p\n", srcCardState, card, srcObject, dstObject);
 			}
 		}
 	}
@@ -2254,13 +2292,76 @@ MM_CopyForwardScheme::updateMarkMapAndCardTableOnCopy(MM_EnvironmentVLHGC *env, 
 MMINLINE void
 MM_CopyForwardScheme::scanOwnableSynchronizerObjectSlots(MM_EnvironmentVLHGC *env, MM_AllocationContextTarok *reservingContext, J9Object *objectPtr, ScanReason reason)
 {
-	if (SCAN_REASON_COPYSCANCACHE == reason) {
-		addOwnableSynchronizerObjectInList(env, objectPtr);
-	} else if (SCAN_REASON_PACKET == reason) {
-		if (isObjectInEvacuateMemoryNoCheck(objectPtr)) {
+	if (scanMixedObjectSlots(env, reservingContext, objectPtr, reason)) {
+		/*
+		 * If object has been scanned without triggering abort add it to the list here.
+		 * If object scan triggered abort, it has been added to work packet
+		 * and is going to be rescanned again. It should not be added to the list here
+		 * to prevent duplication during second scan.
+		 */
+		if (SCAN_REASON_COPYSCANCACHE == reason) {
 			addOwnableSynchronizerObjectInList(env, objectPtr);
+		} else if (SCAN_REASON_PACKET == reason) {
+			if (isObjectInEvacuateMemoryNoCheck(objectPtr)) {
+				addOwnableSynchronizerObjectInList(env, objectPtr);
+			}
 		}
 	}
+}
+
+void
+MM_CopyForwardScheme::doStackSlot(MM_EnvironmentVLHGC *env, J9Object *fromObject, J9Object **slotPtr, J9StackWalkState *walkState, const void *stackLocation)
+{
+	if (isHeapObject(*slotPtr)) {
+		/* heap object - validate and copyforward */
+		Assert_MM_validStackSlot(MM_StackSlotValidator(MM_StackSlotValidator::COULD_BE_FORWARDED, *slotPtr, stackLocation, walkState).validate(env));
+		J9VMThread *thread = ((J9StackWalkState *)walkState)->currentThread;
+		MM_AllocationContextTarok *reservingContext = (MM_AllocationContextTarok *)MM_EnvironmentVLHGC::getEnvironment(thread)->getAllocationContext();
+		copyAndForward(MM_EnvironmentVLHGC::getEnvironment(env), reservingContext, fromObject, slotPtr);
+	} else if (NULL != *slotPtr) {
+		/* stack object - just validate */
+		Assert_MM_validStackSlot(MM_StackSlotValidator(MM_StackSlotValidator::NOT_ON_HEAP, *slotPtr, stackLocation, walkState).validate(env));
+	}
+}
+
+/**
+ * @todo Provide function documentation
+ */
+void
+stackSlotIteratorForCopyForwardScheme(J9JavaVM *javaVM, J9Object **slotPtr, void *localData, J9StackWalkState *walkState, const void *stackLocation)
+{
+	StackIteratorData4CopyForward *data = (StackIteratorData4CopyForward *)localData;
+	MM_CopyForwardScheme *copyForwardScheme = data->copyForwardScheme;
+
+	copyForwardScheme->doStackSlot(data->env, data->fromObject, slotPtr, walkState, stackLocation);
+}
+
+MMINLINE void
+MM_CopyForwardScheme::scanContinuationNativeSlots(MM_EnvironmentVLHGC *env, MM_AllocationContextTarok *reservingContext, J9Object *objectPtr, ScanReason reason)
+{
+	J9VMThread *currentThread = (J9VMThread *)env->getLanguageVMThread();
+	const bool isConcurrentGC = false;
+	const bool isGlobalGC = false;
+	const bool beingMounted = false;
+	if (MM_GCExtensions::needScanStacksForContinuationObject(currentThread, objectPtr, isConcurrentGC, isGlobalGC, beingMounted)) {
+		StackIteratorData4CopyForward localData;
+		localData.copyForwardScheme = this;
+		localData.env = env;
+		localData.fromObject = objectPtr;
+		/* check _includeStackFrameClassReferences, _trackVisibleStackFrameDepth  */
+		bool stackFrameClassWalkNeeded = false;
+#if defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING)
+		stackFrameClassWalkNeeded = isDynamicClassUnloadingEnabled();
+#endif /* J9VM_GC_DYNAMIC_CLASS_UNLOADING */
+
+		GC_VMThreadStackSlotIterator::scanContinuationSlots(currentThread, objectPtr, (void *)&localData, stackSlotIteratorForCopyForwardScheme, stackFrameClassWalkNeeded, false);
+	}
+}
+
+MMINLINE void
+MM_CopyForwardScheme::scanContinuationObject(MM_EnvironmentVLHGC *env, MM_AllocationContextTarok *reservingContext, J9Object *objectPtr, ScanReason reason)
+{
+	scanContinuationNativeSlots(env, reservingContext, objectPtr, reason);
 	scanMixedObjectSlots(env, reservingContext, objectPtr, reason);
 }
 
@@ -2329,10 +2430,10 @@ MM_CopyForwardScheme::iterateAndCopyforwardSlotReference(MM_EnvironmentVLHGC *en
 	return success;
 }
 
-void
+bool
 MM_CopyForwardScheme::scanMixedObjectSlots(MM_EnvironmentVLHGC *env, MM_AllocationContextTarok *reservingContext, J9Object *objectPtr, ScanReason reason)
 {
-	if(_tracingEnabled) {
+	if (_tracingEnabled) {
 		PORT_ACCESS_FROM_ENVIRONMENT(env);
 		j9tty_printf(PORTLIB, "@%p\n", objectPtr);
 	}
@@ -2345,6 +2446,7 @@ MM_CopyForwardScheme::scanMixedObjectSlots(MM_EnvironmentVLHGC *env, MM_Allocati
 	}
 
 	updateScanStats(env, objectPtr, reason);
+	return success;
 }
 
 void
@@ -2476,7 +2578,7 @@ MM_CopyForwardScheme::createNextSplitArrayWorkUnit(MM_EnvironmentVLHGC *env, J9I
 UDATA
 MM_CopyForwardScheme::scanPointerArrayObjectSlotsSplit(MM_EnvironmentVLHGC *env, MM_AllocationContextTarok *reservingContext, J9IndexableObject *arrayPtr, UDATA startIndex, bool currentSplitUnitOnly)
 {
-	if(_tracingEnabled) {
+	if (_tracingEnabled) {
 		PORT_ACCESS_FROM_ENVIRONMENT(env);
 		j9tty_printf(PORTLIB, "#");
 	}
@@ -2497,7 +2599,6 @@ MM_CopyForwardScheme::scanPointerArrayObjectSlotsSplit(MM_EnvironmentVLHGC *env,
 				/* this can happen if the array is only partially allocated */
 				break;
 			}
-
 			/* Copy/Forward the slot reference and perform any inter-region remember work that is required */
 			success = copyAndForwardPointerArray(env, reservingContext, arrayPtr, startIndex, slotObject);
 		}
@@ -2536,7 +2637,7 @@ MM_CopyForwardScheme::scanClassObjectSlots(MM_EnvironmentVLHGC *env, MM_Allocati
 			 * Usually we don't care about class to class references because its can be marked as a part of alive classloader or find in Hash Table
 			 * However we need to scan them for case of Anonymous classes. Its are unloaded on individual basis so it is important to reach each one
 			 */
-			if (J9_ARE_ANY_BITS_SET(J9CLASS_EXTENDED_FLAGS(classPtr), J9ClassIsAnonymous)) {
+			if (OMR_ARE_ANY_BITS_SET(J9CLASS_EXTENDED_FLAGS(classPtr), J9ClassIsAnonymous)) {
 				GC_ClassIteratorClassSlots classSlotIterator(_javaVM, classPtr);
 				J9Class *classPtr;
 				while (success && (NULL != (classPtr = classSlotIterator.nextSlot()))) {
@@ -2597,16 +2698,15 @@ MM_CopyForwardScheme::scanClassLoaderObjectSlots(MM_EnvironmentVLHGC *env, MM_Al
 					J9Module * const module = *modulePtr;
 					success = copyAndForward(env, reservingContext, classLoaderObject, (J9Object **)&(module->moduleObject));
 					if (success) {
-						if (NULL != module->moduleName) {
-							success = copyAndForward(env, reservingContext, classLoaderObject, (J9Object **)&(module->moduleName));
-						}
-					}
-					if (success) {
 						if (NULL != module->version) {
 							success = copyAndForward(env, reservingContext, classLoaderObject, (J9Object **)&(module->version));
 						}
 					}
 					modulePtr = (J9Module**)hashTableNextDo(&walkState);
+				}
+
+				if (success && (classLoader == _javaVM->systemClassLoader)) {
+					success = copyAndForward(env, reservingContext, classLoaderObject, (J9Object **)&(_javaVM->unnamedModuleForSystemLoader->moduleObject));
 				}
 			}
 		}
@@ -2645,9 +2745,9 @@ MM_CopyForwardScheme::getSurvivorCacheForScan(MM_EnvironmentVLHGC *env)
 {
 	MM_CopyScanCacheVLHGC *cache = NULL;
 
-	for(UDATA index = 0; index < _compactGroupMaxCount; index++) {
+	for (UDATA index = 0; index < _compactGroupMaxCount; index++) {
 		cache = env->_copyForwardCompactGroups[index]._copyCache;
-		if((NULL != cache) && cache->isScanWorkAvailable()) {
+		if ((NULL != cache) && cache->isScanWorkAvailable()) {
 			return cache;
 		}
 	}
@@ -2663,7 +2763,7 @@ MM_CopyForwardScheme::getNextWorkUnit(MM_EnvironmentVLHGC *env, UDATA preferredN
 
 	MM_CopyScanCacheVLHGC *cache = NULL;
 	/* Preference is to use survivor copy cache */
-	if(NULL != (cache = getSurvivorCacheForScan(env))) {
+	if (NULL != (cache = getSurvivorCacheForScan(env))) {
 		env->_scanCache = cache;
 		ret = SCAN_REASON_COPYSCANCACHE;
 		return ret;
@@ -2690,13 +2790,13 @@ MM_CopyForwardScheme::getNextWorkUnit(MM_EnvironmentVLHGC *env, UDATA preferredN
 			omrthread_monitor_enter(*_workQueueMonitorPtr);
 			*_workQueueWaitCountPtr += 1;
 
-			if(doneIndex == _doneIndex) {
-				if((*_workQueueWaitCountPtr == env->_currentTask->getThreadCount()) && !isAnyScanWorkAvailable(env)) {
+			if (doneIndex == _doneIndex) {
+				if ((*_workQueueWaitCountPtr == env->_currentTask->getThreadCount()) && !isAnyScanWorkAvailable(env)) {
 					*_workQueueWaitCountPtr = 0;
 					_doneIndex += 1;
 					omrthread_monitor_notify_all(*_workQueueMonitorPtr);
 				} else {
-					while(!isAnyScanWorkAvailable(env) && (doneIndex == _doneIndex)) {
+					while (!isAnyScanWorkAvailable(env) && (doneIndex == _doneIndex)) {
 #if defined(J9MODRON_TGC_PARALLEL_STATISTICS)
 						PORT_ACCESS_FROM_ENVIRONMENT(env);
 						U_64 waitEndTime, waitStartTime;
@@ -2733,11 +2833,11 @@ MM_CopyForwardScheme::getNextWorkUnitOnNode(MM_EnvironmentVLHGC *env, UDATA numa
 	ScanReason ret = SCAN_REASON_NONE;
 
 	MM_CopyScanCacheVLHGC *cache = _cacheScanLists[numaNode].popCache(env);
-	if(NULL != cache) {
+	if (NULL != cache) {
 		/* Check if there are threads waiting that should be notified because of pending entries */
-		if((0 != *_workQueueWaitCountPtr) && isScanCacheWorkAvailable(&_cacheScanLists[numaNode])) {
+		if ((0 != *_workQueueWaitCountPtr) && isScanCacheWorkAvailable(&_cacheScanLists[numaNode])) {
 			omrthread_monitor_enter(*_workQueueMonitorPtr);
-			if(0 != *_workQueueWaitCountPtr) {
+			if (0 != *_workQueueWaitCountPtr) {
 				omrthread_monitor_notify(*_workQueueMonitorPtr);
 			}
 			omrthread_monitor_exit(*_workQueueMonitorPtr);
@@ -2820,7 +2920,7 @@ MM_CopyForwardScheme::bestCacheForScanning(MM_CopyScanCacheVLHGC* copyCache, MM_
 	if (!copyCache->isScanWorkAvailable()) {
 		return false;
 	}
-	if (!((*scanCache)->flags & J9VM_MODRON_SCAVENGER_CACHE_TYPE_COPY)) {
+	if (0 == ((*scanCache)->flags & OMR_COPYSCAN_CACHE_TYPE_COPY)) {
 		*scanCache = copyCache;
 		return true;
 	}
@@ -2856,7 +2956,7 @@ MM_CopyForwardScheme::scanObject(MM_EnvironmentVLHGC *env, MM_AllocationContextT
 {
 	J9Class* clazz = J9GC_J9OBJECT_CLAZZ(objectPtr, env);
 	Assert_MM_mustBeClass(clazz);
-	switch(_extensions->objectModel.getScanType(clazz)) {
+	switch (_extensions->objectModel.getScanType(clazz)) {
 	case GC_ObjectModel::SCAN_MIXED_OBJECT_LINKED:
 	case GC_ObjectModel::SCAN_ATOMIC_MARKABLE_REFERENCE_OBJECT:
 	case GC_ObjectModel::SCAN_MIXED_OBJECT:
@@ -2864,6 +2964,9 @@ MM_CopyForwardScheme::scanObject(MM_EnvironmentVLHGC *env, MM_AllocationContextT
 		break;
 	case GC_ObjectModel::SCAN_OWNABLESYNCHRONIZER_OBJECT:
 		scanOwnableSynchronizerObjectSlots(env, reservingContext, objectPtr, reason);
+		break;
+	case GC_ObjectModel::SCAN_CONTINUATION_OBJECT:
+		scanContinuationObject(env, reservingContext, objectPtr, reason);
 		break;
 	case GC_ObjectModel::SCAN_REFERENCE_MIXED_OBJECT:
 		scanReferenceObjectSlots(env, reservingContext, objectPtr, reason);
@@ -2945,9 +3048,8 @@ MM_CopyForwardScheme::scanPointerArrayObjectSlots(MM_EnvironmentVLHGC *env, MM_A
 		/* make sure we only record stats for the object once -- note that this means we might
 		 * attribute the scanning cost to the wrong thread, but that's not really important
 		 */
-		updateScanStats(env, (J9Object*)arrayPtr, reason);
+		updateScanStats(env, (J9Object *)arrayPtr, reason);
 	}
-	
 	scanPointerArrayObjectSlotsSplit(env, reservingContext, arrayPtr, index, currentSplitUnitOnly);
 }
 
@@ -3145,6 +3247,7 @@ MM_CopyForwardScheme::incrementalScanCacheBySlot(MM_EnvironmentVLHGC *env)
 				case GC_ObjectModel::SCAN_ATOMIC_MARKABLE_REFERENCE_OBJECT:
 				case GC_ObjectModel::SCAN_MIXED_OBJECT:
 				case GC_ObjectModel::SCAN_OWNABLESYNCHRONIZER_OBJECT:
+				case GC_ObjectModel::SCAN_CONTINUATION_OBJECT:
 					hasPartiallyScannedObject = incrementalScanMixedObjectSlots(env, reservingContext, scanCache, objectPtr, hasPartiallyScannedObject, &nextScanCache);
 					break;
 				case GC_ObjectModel::SCAN_CLASS_OBJECT:
@@ -3176,7 +3279,7 @@ MM_CopyForwardScheme::incrementalScanCacheBySlot(MM_EnvironmentVLHGC *env)
 					 * if deferred cache is occupied, then queue current scan cache on scan list
 					 */
 					scanCache->clearCurrentlyBeingScanned();	
-					if (!(scanCache->flags & J9VM_MODRON_SCAVENGER_CACHE_TYPE_COPY)) {
+					if (0 == (scanCache->flags & OMR_COPYSCAN_CACHE_TYPE_COPY)) {
 						if (NULL == env->_deferredScanCache) {
 							env->_deferredScanCache = scanCache;
 						} else {
@@ -3346,7 +3449,7 @@ MM_CopyForwardScheme::completeScan(MM_EnvironmentVLHGC *env)
 		env->_currentTask->releaseSynchronizedGCThreads(env);
 	}
 
-	if(_abortInProgress) {
+	if (_abortInProgress) {
 		completeScanForAbort(env);
 	}
 }
@@ -3370,7 +3473,7 @@ MM_CopyForwardScheme::scanUnfinalizedObjects(MM_EnvironmentVLHGC *env)
 	GC_FinalizableObjectBuffer buffer(_extensions);
 	MM_HeapRegionDescriptorVLHGC *region = NULL;
 	GC_HeapRegionIteratorVLHGC regionIterator(_regionManager);
-	while(NULL != (region = regionIterator.nextRegion())) {
+	while (NULL != (region = regionIterator.nextRegion())) {
 		if (region->_copyForwardData._evacuateSet && !region->getUnfinalizedObjectList()->wasEmpty()) {
 			if (J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
 				J9Object *pointer = region->getUnfinalizedObjectList()->getPriorList();
@@ -3385,7 +3488,7 @@ MM_CopyForwardScheme::scanUnfinalizedObjects(MM_EnvironmentVLHGC *env)
 					 * 2. it was copied by this thread.
 					 */
 					MM_ForwardedHeader forwardedHeader(pointer, _extensions->compressObjectReferences());
-					J9Object* forwardedPtr = forwardedHeader.getForwardedObject();
+					J9Object *forwardedPtr = forwardedHeader.getForwardedObject();
 					if (NULL == forwardedPtr) {
 						if (_markMap->isBitSet(pointer)) {
 							forwardedPtr = pointer;
@@ -3405,7 +3508,7 @@ MM_CopyForwardScheme::scanUnfinalizedObjects(MM_EnvironmentVLHGC *env)
 						}
 					}
 
-					J9Object* next = _extensions->accessBarrier->getFinalizeLink(forwardedPtr);
+					J9Object *next = _extensions->accessBarrier->getFinalizeLink(forwardedPtr);
 					if (finalizable) {
 						/* object was not previously marked -- it is now finalizable so push it to the local buffer */
 						env->_copyForwardStats._unfinalizedEnqueued += 1;
@@ -3433,6 +3536,52 @@ MM_CopyForwardScheme::scanUnfinalizedObjects(MM_EnvironmentVLHGC *env)
 #endif /* J9VM_GC_FINALIZATION */
 
 void
+MM_CopyForwardScheme::scanContinuationObjects(MM_EnvironmentVLHGC *env)
+{
+#if JAVA_SPEC_VERSION >= 19
+	MM_HeapRegionDescriptorVLHGC *region = NULL;
+	GC_HeapRegionIteratorVLHGC regionIterator(_regionManager);
+	while (NULL != (region = regionIterator.nextRegion())) {
+		if (region->_copyForwardData._evacuateSet && !region->getContinuationObjectList()->wasEmpty()) {
+			if (J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
+				J9Object *pointer = region->getContinuationObjectList()->getPriorList();
+
+				while (NULL != pointer) {
+					env->_copyForwardStats._continuationCandidates += 1;
+					Assert_MM_true(region->isAddressInRegion(pointer));
+
+					/* NOTE: it is safe to read from the forwarded object since either:
+					 * 1. it was copied before continuation processing began, or
+					 * 2. it was copied by this thread.
+					 */
+					MM_ForwardedHeader forwardedHeader(pointer, _extensions->compressObjectReferences());
+					J9Object *forwardedPtr = forwardedHeader.getForwardedObject();
+					if ((NULL == forwardedPtr) || VM_ContinuationHelpers::isFinished(*VM_ContinuationHelpers::getContinuationStateAddress((J9VMThread *)env->getLanguageVMThread() , forwardedPtr))) {
+						if (_markMap->isBitSet(pointer)) {
+							forwardedPtr = pointer;
+						}
+					}
+
+					J9Object *next = _extensions->accessBarrier->getContinuationLink(pointer);
+					if (NULL == forwardedPtr) {
+						/* object was not previously marked, clean up */
+						env->_copyForwardStats._continuationCleared += 1;
+						_extensions->releaseNativesForContinuationObject(env, pointer);
+					} else {
+						env->getGCEnvironment()->_continuationObjectBuffer->add(env, forwardedPtr);
+					}
+					pointer = next;
+				}
+			}
+		}
+	}
+
+	/* restore everything to a flushed state before exiting */
+	env->getGCEnvironment()->_continuationObjectBuffer->flush(env);
+#endif /* JAVA_SPEC_VERSION >= 19 */
+}
+
+void
 MM_CopyForwardScheme::cleanCardTable(MM_EnvironmentVLHGC *env)
 {
 	Assert_MM_true(MM_CycleState::CT_PARTIAL_GARBAGE_COLLECTION == env->_cycleState->_collectionType);
@@ -3457,10 +3606,10 @@ MM_CopyForwardScheme::cleanCardTableForPartialCollect(MM_EnvironmentVLHGC *env, 
 	MM_CardTable* cardTable = _extensions->cardTable;
 	GC_HeapRegionIteratorVLHGC regionIterator(_regionManager);
 	MM_HeapRegionDescriptorVLHGC *region = NULL;
-	while(NULL != (region = regionIterator.nextRegion())) {
+	while (NULL != (region = regionIterator.nextRegion())) {
 		/* Don't include survivor regions as we scan - they don't need to be processed and this will throw off the work unit indices */
 		if (region->containsObjects() && region->_copyForwardData._initialLiveSet) {
-			if(J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
+			if (J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
 				if (!region->_markData._shouldMark) {
 					/* this region isn't part of the collection set, so it may have dirty or remembered cards in it. */
 					cardTable->cleanCardsInRegion(env, cardCleaner, region);
@@ -3525,14 +3674,14 @@ MM_CopyForwardScheme::updateOrDeleteObjectsFromExternalCycle(MM_EnvironmentVLHGC
 
 	MM_HeapRegionDescriptorVLHGC *region = NULL;
 	GC_HeapRegionIteratorVLHGC regionIterator(_regionManager);
-	while(NULL != (region = regionIterator.nextRegion())) {
-		if(region->_markData._shouldMark) {
-			if(J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
+	while (NULL != (region = regionIterator.nextRegion())) {
+		if (region->_markData._shouldMark) {
+			if (J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
 				Assert_MM_true(region->_copyForwardData._initialLiveSet);
 				Assert_MM_false(region->isSurvivorRegion());
 				Assert_MM_true(region->containsObjects());
 
-				if(abortFlagRaised() || region->_markData._noEvacuation) {
+				if (abortFlagRaised() || region->_markData._noEvacuation) {
 					/* Walk the mark map range for the region and fixing mark bits to be the subset of the current mark map.
 					 * (Those bits that are cleared have been moved and their bits are already set).
 					 */
@@ -3540,7 +3689,7 @@ MM_CopyForwardScheme::updateOrDeleteObjectsFromExternalCycle(MM_EnvironmentVLHGC
 					UDATA topExternalIndex = externalMarkMap->getSlotIndex((J9Object *)region->getHighAddress());
 					UDATA currentIndex = _markMap->getSlotIndex((J9Object *)region->getLowAddress());
 
-					while(currentExternalIndex < topExternalIndex) {
+					while (currentExternalIndex < topExternalIndex) {
 						UDATA slot = externalMarkMap->getSlot(currentExternalIndex);
 						if(0 != slot) {
 							externalMarkMap->setSlot(currentExternalIndex, slot & _markMap->getSlot(currentIndex));
@@ -3576,14 +3725,14 @@ MM_CopyForwardScheme::updateOrDeleteObjectsFromExternalCycle(MM_EnvironmentVLHGC
 					Assert_MM_true(NULL != object);
 					if (PACKET_INVALID_OBJECT != (UDATA)object) {
 						totalCount += 1;
-						if(isLiveObject(object)) {
+						if (isLiveObject(object)) {
 							Assert_MM_true(externalMarkMap->isBitSet(object));
 							Assert_MM_true(_markMap->isBitSet(object));
 							Assert_MM_mustBeClass(J9GC_J9OBJECT_CLAZZ(object, env));
 						} else {
 							Assert_MM_true(isObjectInEvacuateMemory(object));
 							J9Object *forwardedObject = updateForwardedPointer(object);
-							if(externalMarkMap->isBitSet(forwardedObject)) {
+							if (externalMarkMap->isBitSet(forwardedObject)) {
 								Assert_MM_true(_markMap->isBitSet(forwardedObject));
 								Assert_MM_mustBeClass(J9GC_J9OBJECT_CLAZZ(forwardedObject, env));
 								preservedCount += 1;
@@ -3593,7 +3742,7 @@ MM_CopyForwardScheme::updateOrDeleteObjectsFromExternalCycle(MM_EnvironmentVLHGC
 								Assert_MM_true(!_markMap->isBitSet(forwardedObject));
 								deletedCount += 1;
 								slotIterator.resetSplitTagIndexForObject(object, PACKET_INVALID_OBJECT);
-								*slot = (J9Object*)PACKET_INVALID_OBJECT;
+								*slot = (J9Object *)PACKET_INVALID_OBJECT;
 							}
 						}
 					}
@@ -3662,12 +3811,12 @@ private:
 	virtual void doSlot(J9Object **slotPtr) {
 		if (NULL != *slotPtr) {
 			/* we don't have the context of this slot so just relocate the object into the same node where we found it */
-			MM_AllocationContextTarok *reservingContext = _copyForwardScheme->getContextForHeapAddress(*slotPtr);
+			MM_AllocationContextTarok *reservingContext = _copyForwardScheme->getContextForHeapAddress(* slotPtr);
 			_copyForwardScheme->copyAndForward(MM_EnvironmentVLHGC::getEnvironment(_env), reservingContext, slotPtr);
 		}
 	}
 
-	virtual void doStackSlot(J9Object **slotPtr, void *walkState, const void* stackLocation) {
+	virtual void doStackSlot(J9Object **slotPtr, void *walkState, const void *stackLocation) {
 		if (_copyForwardScheme->isHeapObject(*slotPtr)) {
 			/* heap object - validate and mark */
 			Assert_MM_validStackSlot(MM_StackSlotValidator(MM_StackSlotValidator::COULD_BE_FORWARDED, *slotPtr, stackLocation, walkState).validate(_env));
@@ -3682,7 +3831,7 @@ private:
 	}
 
 	virtual void doVMThreadSlot(J9Object **slotPtr, GC_VMThreadIterator *vmThreadIterator) {
-		if (_copyForwardScheme->isHeapObject(*slotPtr)) {
+		if (_copyForwardScheme->isHeapObject(* slotPtr)) {
 			/* we know that threads are bound to nodes so relocalize this object into the node of the thread which directly references it */
 			J9VMThread *thread = vmThreadIterator->getVMThread();
 			MM_AllocationContextTarok *reservingContext = (MM_AllocationContextTarok *)MM_EnvironmentVLHGC::getEnvironment(thread)->getAllocationContext();
@@ -3698,7 +3847,7 @@ private:
 	}
 
 	virtual void doClassLoader(J9ClassLoader *classLoader) {
-		if(0 == (classLoader->gcFlags & J9_GC_CLASS_LOADER_DEAD)) {
+		if (0 == (classLoader->gcFlags & J9_GC_CLASS_LOADER_DEAD)) {
 			/* until we decide if class loaders should be common, just relocate this object back into its existing node */
 			MM_AllocationContextTarok *reservingContext = _copyForwardScheme->getContextForHeapAddress(classLoader->classLoaderObject);
 			_copyForwardScheme->copyAndForward(MM_EnvironmentVLHGC::getEnvironment(_env), reservingContext, &classLoader->classLoaderObject);
@@ -3758,7 +3907,7 @@ public:
 #endif /* J9VM_GC_FINALIZATION */
 		scanJNIGlobalReferences(env);
 
-		if(_stringTableAsRoot){
+		if (_stringTableAsRoot){
 			scanStringTable(env);
 		}
 	}
@@ -3842,6 +3991,19 @@ private:
 		/* empty, move ownable synchronizer processing in copy-continuous phase */
 	}
 
+	virtual void scanContinuationObjects(MM_EnvironmentBase *env) {
+		/* allow the scheme to handle this, since it knows which regions are interesting */
+		reportScanningStarted(RootScannerEntity_ContinuationObjects);
+		_copyForwardScheme->scanContinuationObjects(MM_EnvironmentVLHGC::getEnvironment(env));
+		reportScanningEnded(RootScannerEntity_ContinuationObjects);
+	}
+
+	virtual void iterateAllContinuationObjects(MM_EnvironmentBase *env) {
+		reportScanningStarted(RootScannerEntity_ContinuationObjectsComplete);
+		MM_ContinuationObjectBufferVLHGC::iterateAllContinuationObjects(env);
+		reportScanningEnded(RootScannerEntity_ContinuationObjectsComplete);
+	}
+
 	virtual void scanPhantomReferenceObjects(MM_EnvironmentBase *env) {
 		reportScanningStarted(RootScannerEntity_PhantomReferenceObjects);
 		_copyForwardScheme->scanPhantomReferenceObjects(MM_EnvironmentVLHGC::getEnvironment(env));
@@ -3863,14 +4025,14 @@ private:
 	}
 
 	virtual void doMonitorReference(J9ObjectMonitor *objectMonitor, GC_HashTableIterator *monitorReferenceIterator) {
-		J9ThreadAbstractMonitor * monitor = (J9ThreadAbstractMonitor*)objectMonitor->monitor;
+		J9ThreadAbstractMonitor *monitor = (J9ThreadAbstractMonitor*)objectMonitor->monitor;
 		MM_EnvironmentVLHGC::getEnvironment(_env)->_copyForwardStats._monitorReferenceCandidates += 1;
 		J9Object *objectPtr = (J9Object *)monitor->userData;
-		if(!_copyForwardScheme->isLiveObject(objectPtr)) {
+		if (!_copyForwardScheme->isLiveObject(objectPtr)) {
 			Assert_MM_true(_copyForwardScheme->isObjectInEvacuateMemory(objectPtr));
 			MM_ForwardedHeader forwardedHeader(objectPtr, _extensions->compressObjectReferences());
 			J9Object *forwardPtr = forwardedHeader.getForwardedObject();
-			if(NULL != forwardPtr) {
+			if (NULL != forwardPtr) {
 				monitor->userData = (UDATA)forwardPtr;
 			} else {
 				Assert_MM_mustBeClass(_extensions->objectModel.getPreservedClass(&forwardedHeader));
@@ -3879,22 +4041,22 @@ private:
 				/* We must call objectMonitorDestroy (as opposed to omrthread_monitor_destroy) when the
 				 * monitor is not internal to the GC
 				 */
-				static_cast<J9JavaVM*>(_omrVM->_language_vm)->internalVMFunctions->objectMonitorDestroy(static_cast<J9JavaVM*>(_omrVM->_language_vm), (J9VMThread *)_env->getLanguageVMThread(), (omrthread_monitor_t)monitor);
+				_javaVM->internalVMFunctions->objectMonitorDestroy(_javaVM, (J9VMThread *)_env->getLanguageVMThread(), (omrthread_monitor_t)monitor);
 			}
 		}
 	}
 
 	virtual CompletePhaseCode scanMonitorReferencesComplete(MM_EnvironmentBase *envBase) {
-		MM_EnvironmentVLHGC* env = MM_EnvironmentVLHGC::getEnvironment(envBase);
+		MM_EnvironmentVLHGC *env = MM_EnvironmentVLHGC::getEnvironment(envBase);
 		reportScanningStarted(RootScannerEntity_MonitorReferenceObjectsComplete);
-		((J9JavaVM *)env->getLanguageVM())->internalVMFunctions->objectMonitorDestroyComplete((J9JavaVM *)env->getLanguageVM(), (J9VMThread *)env->getLanguageVMThread());
+		_javaVM->internalVMFunctions->objectMonitorDestroyComplete(_javaVM, (J9VMThread *)env->getLanguageVMThread());
 		reportScanningEnded(RootScannerEntity_MonitorReferenceObjectsComplete);
 		return complete_phase_OK;
 	}
 
 	virtual void doJNIWeakGlobalReference(J9Object **slotPtr) {
 		J9Object *objectPtr = *slotPtr;
-		if(!_copyForwardScheme->isLiveObject(objectPtr)) {
+		if (!_copyForwardScheme->isLiveObject(objectPtr)) {
 			Assert_MM_true(_copyForwardScheme->isObjectInEvacuateMemory(objectPtr));
 			MM_ForwardedHeader forwardedHeader(objectPtr, _extensions->compressObjectReferences());
 			*slotPtr = forwardedHeader.getForwardedObject();
@@ -3904,11 +4066,11 @@ private:
 	virtual void doStringTableSlot(J9Object **slotPtr, GC_StringTableIterator *stringTableIterator) {
 		J9Object *objectPtr = *slotPtr;
 		MM_EnvironmentVLHGC::getEnvironment(_env)->_copyForwardStats._stringConstantsCandidates += 1;
-		if(!_copyForwardScheme->isLiveObject(objectPtr)) {
+		if (!_copyForwardScheme->isLiveObject(objectPtr)) {
 			Assert_MM_true(_copyForwardScheme->isObjectInEvacuateMemory(objectPtr));
 			MM_ForwardedHeader forwardedHeader(objectPtr, _extensions->compressObjectReferences());
 			objectPtr = forwardedHeader.getForwardedObject();
-			if(NULL == objectPtr) {
+			if (NULL == objectPtr) {
 				Assert_MM_mustBeClass(_extensions->objectModel.getPreservedClass(&forwardedHeader));
 				MM_EnvironmentVLHGC::getEnvironment(_env)->_copyForwardStats._stringConstantsCleared += 1;
 				stringTableIterator->removeSlot();
@@ -3918,30 +4080,43 @@ private:
 		}
 	}
 
-#if defined(J9VM_GC_ENABLE_DOUBLE_MAP)
-	virtual void doDoubleMappedObjectSlot(J9Object *objectPtr, struct J9PortVmemIdentifier *identifier) {
+#if defined(J9VM_GC_SPARSE_HEAP_ALLOCATION)
+	virtual void doObjectInVirtualLargeObjectHeap(J9Object *objectPtr, bool *sparseHeapAllocation) {
 		MM_EnvironmentVLHGC *env = MM_EnvironmentVLHGC::getEnvironment(_env);
-		env->_copyForwardStats._doubleMappedArrayletsCandidates += 1;
+		env->_copyForwardStats._offHeapRegionCandidates += 1;
+
 		if (!_copyForwardScheme->isLiveObject(objectPtr)) {
 			Assert_MM_true(_copyForwardScheme->isObjectInEvacuateMemory(objectPtr));
+
 			MM_ForwardedHeader forwardedHeader(objectPtr, _extensions->compressObjectReferences());
-			objectPtr = forwardedHeader.getForwardedObject();
-			if (NULL == objectPtr) {
+			J9Object *fwdOjectPtr = forwardedHeader.getForwardedObject();
+
+			/* If forwarded object is NULL, free the sparse region occupied by the data of the indexable object */
+			if (NULL == fwdOjectPtr) {
 				Assert_MM_mustBeClass(_extensions->objectModel.getPreservedClass(&forwardedHeader));
-				env->_copyForwardStats._doubleMappedArrayletsCleared += 1;
-				OMRPORT_ACCESS_FROM_OMRVM(_omrVM);
-				omrvmem_release_double_mapped_region(identifier->address, identifier->size, identifier);
+				env->_copyForwardStats._offHeapRegionsCleared += 1;
+				void *dataAddr = _extensions->indexableObjectModel.getDataAddrForContiguous((J9IndexableObject *)objectPtr);
+				_extensions->largeObjectVirtualMemory->freeSparseRegionAndUnmapFromHeapObject(_env, dataAddr);
+				*sparseHeapAllocation = false;
+			} else {
+				void *dataAddr = _extensions->indexableObjectModel.getDataAddrForContiguous((J9IndexableObject *)fwdOjectPtr);
+				if (NULL != dataAddr) {
+					/* There might be the case that GC finds a floating arraylet, which was a result of an allocation
+					 * failure (reason why this GC cycle is happening).
+					 */
+					_extensions->largeObjectVirtualMemory->updateSparseDataEntryAfterObjectHasMoved(dataAddr, fwdOjectPtr);
+				}
 			}
 		}
 	}
-#endif /* J9VM_GC_ENABLE_DOUBLE_MAP */
+#endif /* defined(J9VM_GC_SPARSE_HEAP_ALLOCATION) */
 
 	/**
 	 * @Clear the string table cache slot if the object is not marked
 	 */
 	virtual void doStringCacheTableSlot(J9Object **slotPtr) {
 		J9Object *objectPtr = *slotPtr;
-		if(!_copyForwardScheme->isLiveObject(objectPtr)) {
+		if (!_copyForwardScheme->isLiveObject(objectPtr)) {
 			Assert_MM_true(_copyForwardScheme->isObjectInEvacuateMemory(objectPtr));
 			MM_ForwardedHeader forwardedHeader(objectPtr, _extensions->compressObjectReferences());
 			*slotPtr = forwardedHeader.getForwardedObject();
@@ -3952,7 +4127,7 @@ private:
 	virtual void doJVMTIObjectTagSlot(J9Object **slotPtr, GC_JVMTIObjectTagTableIterator *objectTagTableIterator)
 	{
 		J9Object *objectPtr = *slotPtr;
-		if(!_copyForwardScheme->isLiveObject(objectPtr)) {
+		if (!_copyForwardScheme->isLiveObject(objectPtr)) {
 			Assert_MM_true(_copyForwardScheme->isObjectInEvacuateMemory(objectPtr));
 			MM_ForwardedHeader forwardedHeader(objectPtr, _extensions->compressObjectReferences());
 			*slotPtr = forwardedHeader.getForwardedObject();
@@ -3983,7 +4158,7 @@ MM_CopyForwardScheme::clearMarkMapForPartialCollect(MM_EnvironmentVLHGC *env)
 	/* Walk the collection set to determine what ranges of the mark map should be cleared */
 	MM_HeapRegionDescriptorVLHGC *region = NULL;
 	GC_HeapRegionIteratorVLHGC regionIterator(_regionManager);
-	while(NULL != (region = regionIterator.nextRegion())) {
+	while (NULL != (region = regionIterator.nextRegion())) {
 		if (region->_copyForwardData._evacuateSet) {
 			if (J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
 				/* we start with an assumption that abort will occur, so we set _previousMarkMapCleared to false.
@@ -4016,12 +4191,10 @@ MM_CopyForwardScheme::clearCardTableForPartialCollect(MM_EnvironmentVLHGC *env)
 		MM_HeapRegionDescriptorVLHGC *region = NULL;
 		GC_HeapRegionIteratorVLHGC regionIterator(_regionManager);
 		MM_CardTable *cardTable = _extensions->cardTable;
-		while(NULL != (region = regionIterator.nextRegion())) {
+		while (NULL != (region = regionIterator.nextRegion())) {
 			if (region->_copyForwardData._evacuateSet && !region->_markData._noEvacuation) {
-				if(J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
+				if (J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
 					void *low = region->getLowAddress();
-//					void *bumpPointer = ((MM_MemoryPoolBumpPointer *)region->getMemoryPool())->getAllocationPointer();
-//					void *high = (void *)MM_Math::roundToCeiling(CARD_SIZE, (UDATA)bumpPointer);
 					void *high = region->getHighAddress();
 					Card *lowCard = cardTable->heapAddrToCardAddr(env, low);
 					Card *highCard = cardTable->heapAddrToCardAddr(env, high);
@@ -4056,7 +4229,8 @@ MM_CopyForwardScheme::workThreadGarbageCollect(MM_EnvironmentVLHGC *env)
 					MM_MemoryPool *pool = region->getMemoryPool();
 					/* only add regions with pools which could possibly satisfy a TLH allocation */
 					if ((pool->getActualFreeMemorySize() >= pool->getMinimumFreeEntrySize()) &&
-						((pool->getActualFreeMemorySize()/pool->getActualFreeEntryCount()) >= _extensions->freeSizeThresholdForSurvivor)) {
+						((pool->getActualFreeMemorySize()/pool->getActualFreeEntryCount()) >= _extensions->freeSizeThresholdForSurvivor)
+						) {
 						Assert_MM_true(pool->getActualFreeMemorySize() < region->getSize());
 						Assert_MM_false(region->isSurvivorRegion());
 						insertFreeMemoryCandidate(env, &_reservedRegionList[compactGroup], region);
@@ -4066,7 +4240,7 @@ MM_CopyForwardScheme::workThreadGarbageCollect(MM_EnvironmentVLHGC *env)
 		}
 		
 		/* initialize the maximum number of sublists for each compact group; ensure that we try to produce fewer survivor regions than evacuate regions */
-		for(UDATA index = 0; index < _compactGroupMaxCount; index++) {
+		for (UDATA index = 0; index < _compactGroupMaxCount; index++) {
 			UDATA evacuateCount = _reservedRegionList[index]._evacuateRegionCount;
 			/* Arbitrarily set the max to half the evacuate count. This means that, if it's possible, we'll use no more than half as many survivor regions as there were evacuate regions */
 			UDATA maxSublistCount = evacuateCount / 2;
@@ -4083,7 +4257,7 @@ MM_CopyForwardScheme::workThreadGarbageCollect(MM_EnvironmentVLHGC *env)
 			classLoaderRememberedSet->resetRegionsToClear(env);
 			MM_HeapRegionDescriptorVLHGC *region = NULL;
 			GC_HeapRegionIteratorVLHGC regionIterator(_regionManager);
-			while(NULL != (region = regionIterator.nextRegion())) {
+			while (NULL != (region = regionIterator.nextRegion())) {
 				if (region->_markData._shouldMark) {
 					classLoaderRememberedSet->prepareToClearRememberedSetForRegion(env, region);
 				}
@@ -4116,7 +4290,7 @@ MM_CopyForwardScheme::workThreadGarbageCollect(MM_EnvironmentVLHGC *env)
 	completeScan(env);
 
 	/* TODO: check if abort happened during root scanning/cardTable clearing (and optimize in any other way) */
-	if(abortFlagRaised()) {
+	if (abortFlagRaised()) {
 		Assert_MM_true(_abortInProgress);
 		/* rescan to fix up root slots, but also to complete scanning of roots that we miss to mark/push in original root scanning */
 		scanRoots(env);
@@ -4132,7 +4306,7 @@ MM_CopyForwardScheme::workThreadGarbageCollect(MM_EnvironmentVLHGC *env)
 	env->getGCEnvironment()->_referenceObjectBuffer->flush(env);
 	
 	UDATA preservedGcReadBarrierType = 0;
-	if(env->_currentTask->synchronizeGCThreadsAndReleaseSingleThread(env, UNIQUE_ID)) {
+	if (env->_currentTask->synchronizeGCThreadsAndReleaseSingleThread(env, UNIQUE_ID)) {
 		_clearableProcessingStarted = true;
 
 		/* During clearable pass, GC threads can access clearable slots other than the one they are directly processing.
@@ -4159,7 +4333,7 @@ MM_CopyForwardScheme::workThreadGarbageCollect(MM_EnvironmentVLHGC *env)
 		/* (we can't do phantom references yet because unfinalized processing may find more of them) */
 		MM_HeapRegionDescriptorVLHGC *region = NULL;
 		GC_HeapRegionIteratorVLHGC regionIterator(_regionManager);
-		while(NULL != (region = regionIterator.nextRegion())) {
+		while (NULL != (region = regionIterator.nextRegion())) {
 			if (region->isSurvivorRegion() || region->_copyForwardData._evacuateSet) {
 				region->getReferenceObjectList()->startSoftReferenceProcessing();
 				region->getReferenceObjectList()->startWeakReferenceProcessing();
@@ -4175,19 +4349,19 @@ MM_CopyForwardScheme::workThreadGarbageCollect(MM_EnvironmentVLHGC *env)
 	/* Clearable must not uncover any new work */
 	Assert_MM_true(NULL == env->_workStack.popNoWait(env));
 
-	if(env->_currentTask->synchronizeGCThreadsAndReleaseSingleThread(env, UNIQUE_ID)) {
+	if (env->_currentTask->synchronizeGCThreadsAndReleaseSingleThread(env, UNIQUE_ID)) {
 		_javaVM->gcReadBarrierType = preservedGcReadBarrierType;
 		env->_currentTask->releaseSynchronizedGCThreads(env);
 	}
 
-	if(!abortFlagRaised()) {
+	if (!abortFlagRaised()) {
 		clearCardTableForPartialCollect(env);
 	}
 
 	/* make sure that we aren't leaving any stale scan work behind */
 	Assert_MM_false(isAnyScanCacheWorkAvailable());
 
-	if(NULL != env->_cycleState->_externalCycleState) {
+	if (NULL != env->_cycleState->_externalCycleState) {
 		updateOrDeleteObjectsFromExternalCycle(env);
 	}
 
@@ -4196,7 +4370,7 @@ MM_CopyForwardScheme::workThreadGarbageCollect(MM_EnvironmentVLHGC *env)
 	/* flush ownable synchronizer object buffer after rebuild the ownableSynchronizerObjectList during main scan phase */
 	env->getGCEnvironment()->_ownableSynchronizerObjectBuffer->flush(env);
 
-	abandonTLHRemainder(env);
+	abandonTLHRemainders(env);
 
 	/* No matter what happens, always sum up the gc stats */
 	mergeGCStats(env);
@@ -4218,11 +4392,12 @@ MM_CopyForwardScheme::scanRoots(MM_EnvironmentVLHGC* env)
 
 	/* Mark root set classes */
 #if defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING)
-	if(isDynamicClassUnloadingEnabled()) {
+	if (isDynamicClassUnloadingEnabled()) {
 		/* A single thread processes all class loaders, marking any loader which has instances outside of the collection set. */
 		if (J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
 			bool foundSystemClassLoader = false;
 			bool foundApplicationClassLoader = false;
+			bool foundExtensionClassLoader = false;
 			bool foundAnonymousClassLoader = false;
 
 			MM_ClassLoaderRememberedSet *classLoaderRememberedSet = _extensions->classLoaderRememberedSet;
@@ -4231,15 +4406,15 @@ MM_CopyForwardScheme::scanRoots(MM_EnvironmentVLHGC* env)
 
 			while (NULL != (classLoader = classLoaderIterator.nextSlot())) {
 				if (0 == (classLoader->gcFlags & J9_GC_CLASS_LOADER_DEAD)) {
-					if(J9_ARE_ANY_BITS_SET(classLoader->flags, J9CLASSLOADER_ANON_CLASS_LOADER)) {
+					if (OMR_ARE_ANY_BITS_SET(classLoader->flags, J9CLASSLOADER_ANON_CLASS_LOADER)) {
 						foundAnonymousClassLoader = true;
 						/* Anonymous classloader should be scanned on level of classes every time */
 						GC_ClassLoaderSegmentIterator segmentIterator(classLoader, MEMORY_TYPE_RAM_CLASS);
 						J9MemorySegment *segment = NULL;
-						while(NULL != (segment = segmentIterator.nextSegment())) {
+						while (NULL != (segment = segmentIterator.nextSegment())) {
 							GC_ClassHeapIterator classHeapIterator(_javaVM, segment);
 							J9Class *clazz = NULL;
-							while(NULL != (clazz = classHeapIterator.nextClass())) {
+							while (NULL != (clazz = classHeapIterator.nextClass())) {
 								if (classLoaderRememberedSet->isClassRemembered(env, clazz)) {
 									MM_AllocationContextTarok *reservingContext = getContextForHeapAddress(clazz->classObject);
 									copyAndForward(env, reservingContext, &clazz->classObject);
@@ -4250,13 +4425,16 @@ MM_CopyForwardScheme::scanRoots(MM_EnvironmentVLHGC* env)
 						if (classLoaderRememberedSet->isRemembered(env, classLoader)) {
 							foundSystemClassLoader = foundSystemClassLoader || (classLoader == _javaVM->systemClassLoader);
 							foundApplicationClassLoader = foundApplicationClassLoader || (classLoader == _javaVM->applicationClassLoader);
+							foundExtensionClassLoader = foundExtensionClassLoader || (classLoader == _javaVM->extensionClassLoader);
 							if (NULL != classLoader->classLoaderObject) {
 								/* until we decide if class loaders should be common, just relocate this object back into its existing node */
 								MM_AllocationContextTarok *reservingContext = getContextForHeapAddress(classLoader->classLoaderObject);
 								copyAndForward(env, reservingContext, &classLoader->classLoaderObject);
 							} else {
 								/* Only system/app classloaders can have a null classloader object (only during early bootstrap) */
-								Assert_MM_true((classLoader == _javaVM->systemClassLoader) || (classLoader == _javaVM->applicationClassLoader));
+								Assert_MM_true((classLoader == _javaVM->systemClassLoader)
+										|| (classLoader == _javaVM->applicationClassLoader)
+										|| (classLoader == _javaVM->extensionClassLoader));
 
 								/* We will never find the object for this class loader during scanning, so scan its class table immediately */
 								GC_ClassLoaderClassesIterator iterator(_extensions, classLoader);
@@ -4277,16 +4455,15 @@ MM_CopyForwardScheme::scanRoots(MM_EnvironmentVLHGC* env)
 										J9Module * const module = *modulePtr;
 										success = copyAndForward(env, getContextForHeapAddress(module->moduleObject), (J9Object **)&(module->moduleObject));
 										if (success) {
-											if (NULL != module->moduleName) {
-												success = copyAndForward(env, getContextForHeapAddress(module->moduleName), (J9Object **)&(module->moduleName));
-											}
-										}
-										if (success) {
 											if (NULL != module->version) {
 												success = copyAndForward(env, getContextForHeapAddress(module->version), (J9Object **)&(module->version));
 											}
 										}
 										modulePtr = (J9Module**)hashTableNextDo(&walkState);
+									}
+
+									if (success && (classLoader == _javaVM->systemClassLoader)) {
+										success = copyAndForward(env, getContextForHeapAddress(_javaVM->unnamedModuleForSystemLoader->moduleObject), (J9Object **)&(_javaVM->unnamedModuleForSystemLoader->moduleObject));
 									}
 								}
 							}
@@ -4299,6 +4476,7 @@ MM_CopyForwardScheme::scanRoots(MM_EnvironmentVLHGC* env)
 			Assert_MM_true(NULL != _javaVM->systemClassLoader);
 			Assert_MM_true(foundSystemClassLoader);
 			Assert_MM_true( (NULL == _javaVM->applicationClassLoader) || foundApplicationClassLoader );
+			Assert_MM_true( (NULL == _javaVM->extensionClassLoader) || foundExtensionClassLoader );
 			Assert_MM_true(NULL != _javaVM->anonClassLoader);
 			Assert_MM_true(foundAnonymousClassLoader);
 		}
@@ -4313,7 +4491,7 @@ MM_CopyForwardScheme::verifyDumpObjectDetails(MM_EnvironmentVLHGC *env, const ch
 
 	j9tty_printf(PORTLIB, "%s: %p\n", title, object);
 
-	if(NULL != object) {
+	if (NULL != object) {
 		MM_HeapRegionDescriptorVLHGC *region = (MM_HeapRegionDescriptorVLHGC *)_regionManager->tableDescriptorForAddress(object);
 
 		j9tty_printf(PORTLIB, "\tregion:%p base:%p top:%p regionProperties:%u\n",
@@ -4348,7 +4526,7 @@ private:
 		MM_EnvironmentVLHGC *env = MM_EnvironmentVLHGC::getEnvironment(_env);
 
 		J9Object *objectPtr = *slotPtr;
-		if(!_copyForwardScheme->_abortInProgress && !_copyForwardScheme->isObjectInNoEvacuationRegions(env, objectPtr) && _copyForwardScheme->verifyIsPointerInEvacute(env, objectPtr)) {
+		if (!_copyForwardScheme->_abortInProgress && !_copyForwardScheme->isObjectInNoEvacuationRegions(env, objectPtr) && _copyForwardScheme->verifyIsPointerInEvacute(env, objectPtr)) {
 			PORT_ACCESS_FROM_ENVIRONMENT(env);
 			j9tty_printf(PORTLIB, "Root slot points into evacuate!  Slot %p dstObj %p. RootScannerEntity=%zu\n", slotPtr, objectPtr, (UDATA)_scanningEntity);
 			Assert_MM_unreachable();
@@ -4383,7 +4561,7 @@ private:
 
 	virtual void doClass(J9Class *clazz) {
 		J9Object *classObject = (J9Object *)clazz->classObject;
-		if(NULL != classObject) {
+		if (NULL != classObject) {
 			if (_copyForwardScheme->isDynamicClassUnloadingEnabled() && !_copyForwardScheme->isLiveObject(classObject)) {
 				/* don't verify garbage collected classes */
 			} else {
@@ -4394,7 +4572,7 @@ private:
 	
 	virtual void doClassLoader(J9ClassLoader *classLoader) {
 		J9Object *classLoaderObject = J9GC_J9CLASSLOADER_CLASSLOADEROBJECT(classLoader);
-		if(NULL != classLoaderObject) {
+		if (NULL != classLoaderObject) {
 			if (_copyForwardScheme->isDynamicClassUnloadingEnabled() && !_copyForwardScheme->isLiveObject(classLoaderObject)) {
 				/* don't verify garbage collected class loaders */
 			} else {
@@ -4407,7 +4585,7 @@ private:
 	virtual void doUnfinalizedObject(J9Object *objectPtr, MM_UnfinalizedObjectList *list) {
 		MM_EnvironmentVLHGC *env = MM_EnvironmentVLHGC::getEnvironment(_env);
 
-		if(!_copyForwardScheme->_abortInProgress && !_copyForwardScheme->isObjectInNoEvacuationRegions(env, objectPtr) && _copyForwardScheme->verifyIsPointerInEvacute(env, objectPtr)) {
+		if (!_copyForwardScheme->_abortInProgress && !_copyForwardScheme->isObjectInNoEvacuationRegions(env, objectPtr) && _copyForwardScheme->verifyIsPointerInEvacute(env, objectPtr)) {
 			PORT_ACCESS_FROM_ENVIRONMENT(env);
 			j9tty_printf(PORTLIB, "Unfinalized object list points into evacuate!  list %p object %p\n", list, objectPtr);
 			Assert_MM_unreachable();
@@ -4419,7 +4597,7 @@ private:
 	virtual void doFinalizableObject(j9object_t objectPtr) {
 		MM_EnvironmentVLHGC *env = MM_EnvironmentVLHGC::getEnvironment(_env);
 
-		if(!_copyForwardScheme->_abortInProgress && !_copyForwardScheme->isObjectInNoEvacuationRegions(env, objectPtr) && _copyForwardScheme->verifyIsPointerInEvacute(env, objectPtr)) {
+		if (!_copyForwardScheme->_abortInProgress && !_copyForwardScheme->isObjectInNoEvacuationRegions(env, objectPtr) && _copyForwardScheme->verifyIsPointerInEvacute(env, objectPtr)) {
 			PORT_ACCESS_FROM_ENVIRONMENT(env);
 			j9tty_printf(PORTLIB, "Finalizable object in evacuate!  object %p\n", objectPtr);
 			Assert_MM_unreachable();
@@ -4430,9 +4608,19 @@ private:
 	virtual void doOwnableSynchronizerObject(J9Object *objectPtr, MM_OwnableSynchronizerObjectList *list) {
 		MM_EnvironmentVLHGC *env = MM_EnvironmentVLHGC::getEnvironment(_env);
 
-		if(!_copyForwardScheme->_abortInProgress && !_copyForwardScheme->isObjectInNoEvacuationRegions(env, objectPtr) && _copyForwardScheme->verifyIsPointerInEvacute(env, objectPtr)) {
+		if (!_copyForwardScheme->_abortInProgress && !_copyForwardScheme->isObjectInNoEvacuationRegions(env, objectPtr) && _copyForwardScheme->verifyIsPointerInEvacute(env, objectPtr)) {
 			PORT_ACCESS_FROM_ENVIRONMENT(env);
 			j9tty_printf(PORTLIB, "OwnableSynchronizer object list points into evacuate!  list %p object %p\n", list, objectPtr);
+			Assert_MM_unreachable();
+		}
+	}
+
+	virtual void doContinuationObject(J9Object *objectPtr, MM_ContinuationObjectList *list) {
+		MM_EnvironmentVLHGC *env = MM_EnvironmentVLHGC::getEnvironment(_env);
+
+		if (!_copyForwardScheme->_abortInProgress && !_copyForwardScheme->isObjectInNoEvacuationRegions(env, objectPtr) && _copyForwardScheme->verifyIsPointerInEvacute(env, objectPtr)) {
+			PORT_ACCESS_FROM_ENVIRONMENT(env);
+			j9tty_printf(PORTLIB, "Continuation object list points into evacuate!  list %p object %p\n", list, objectPtr);
 			Assert_MM_unreachable();
 		}
 	}
@@ -4457,13 +4645,13 @@ MM_CopyForwardScheme::verifyCopyForwardResult(MM_EnvironmentVLHGC *env)
 	GC_HeapRegionIteratorVLHGC regionIterator(_regionManager);
 	MM_HeapRegionDescriptorVLHGC *region = NULL;
 
-	while(NULL != (region = regionIterator.nextRegion())) {
-		if(region->isArrayletLeaf()) {
+	while (NULL != (region = regionIterator.nextRegion())) {
+		if (region->isArrayletLeaf()) {
 			J9Object *spineObject = (J9Object *)region->_allocateData.getSpine();
 			Assert_MM_true(NULL != spineObject);
 			/* the spine must be marked if it was copied as a live object or if we aborted the copy-forward */
 			/* otherwise, it must not be forwarded (since that would imply that the spine survived but the pointer wasn't updated) */
-			if(!_markMap->isBitSet(spineObject)) {
+			if (!_markMap->isBitSet(spineObject)) {
 				MM_ForwardedHeader forwardedSpine(spineObject, _extensions->compressObjectReferences());
 				if (forwardedSpine.isForwardedPointer()) {
 					PORT_ACCESS_FROM_ENVIRONMENT(env);
@@ -4473,8 +4661,8 @@ MM_CopyForwardScheme::verifyCopyForwardResult(MM_EnvironmentVLHGC *env)
 				}
 			}
 		} else {
-			if(region->containsObjects()) {
-				if(region->isSurvivorRegion()) {
+			if (region->containsObjects()) {
+				if (region->isSurvivorRegion()) {
 					if (region->isFreshSurvivorRegion()) {
 						verifyChunkSlotsAndMapSlotsInRange(env, (UDATA *)region->getLowAddress(), (UDATA *)region->getHighAddress());
 					} else {
@@ -4486,7 +4674,7 @@ MM_CopyForwardScheme::verifyCopyForwardResult(MM_EnvironmentVLHGC *env)
 					}
 				}
 
-				if(region->_copyForwardData._initialLiveSet) {
+				if (region->_copyForwardData._initialLiveSet) {
 					/* iterating from isNotCompressedSurvivor */
 					GC_SurvivorMemoryIterator survivorIterator(env, region, _compressedSurvivorTable, false);
 					while (survivorIterator.next()) {
@@ -4500,7 +4688,7 @@ MM_CopyForwardScheme::verifyCopyForwardResult(MM_EnvironmentVLHGC *env)
 	MM_CopyForwardVerifyScanner scanner(env, this);
 	scanner.scanAllSlots(env);
 
-	if(NULL != env->_cycleState->_externalCycleState) {
+	if (NULL != env->_cycleState->_externalCycleState) {
 		verifyExternalState(env);
 	}
 }
@@ -4510,11 +4698,12 @@ MM_CopyForwardScheme::verifyObject(MM_EnvironmentVLHGC *env, J9Object *objectPtr
 {
 	J9Class* clazz = J9GC_J9OBJECT_CLAZZ(objectPtr, env);
 	Assert_MM_mustBeClass(clazz);
-	switch(_extensions->objectModel.getScanType(clazz)) {
+	switch (_extensions->objectModel.getScanType(clazz)) {
 	case GC_ObjectModel::SCAN_MIXED_OBJECT_LINKED:
 	case GC_ObjectModel::SCAN_ATOMIC_MARKABLE_REFERENCE_OBJECT:
 	case GC_ObjectModel::SCAN_MIXED_OBJECT:
 	case GC_ObjectModel::SCAN_OWNABLESYNCHRONIZER_OBJECT:
+	case GC_ObjectModel::SCAN_CONTINUATION_OBJECT:
 		verifyMixedObjectSlots(env, objectPtr);
 		break;
 	case GC_ObjectModel::SCAN_CLASS_OBJECT:
@@ -4545,14 +4734,14 @@ MM_CopyForwardScheme::verifyMixedObjectSlots(MM_EnvironmentVLHGC *env, J9Object 
 
 	while (NULL != (slotObject = mixedObjectIterator.nextSlot())) {
 		J9Object *dstObject = slotObject->readReferenceFromSlot();
-		if(!_abortInProgress && !isObjectInNoEvacuationRegions(env, dstObject) && verifyIsPointerInEvacute(env, dstObject)) {
+		if (!_abortInProgress && !isObjectInNoEvacuationRegions(env, dstObject) && verifyIsPointerInEvacute(env, dstObject)) {
 			PORT_ACCESS_FROM_ENVIRONMENT(env);
 			j9tty_printf(PORTLIB, "Mixed object slot points to evacuate!  srcObj %p slot %p dstObj %p\n", objectPtr, slotObject->readAddressFromSlot(), dstObject);
 			verifyDumpObjectDetails(env, "srcObj", objectPtr);
 			verifyDumpObjectDetails(env, "dstObj", dstObject);
 			Assert_MM_unreachable();
 		}
-		if((NULL != dstObject) && !_markMap->isBitSet(dstObject)) {
+		if ((NULL != dstObject) && !_markMap->isBitSet(dstObject)) {
 			PORT_ACCESS_FROM_ENVIRONMENT(env);
 			j9tty_printf(PORTLIB, "Mixed object slot points to unmarked object!  srcObj %p slot %p dstObj %p\n", objectPtr, slotObject->readAddressFromSlot(), dstObject);
 			verifyDumpObjectDetails(env, "srcObj", objectPtr);
@@ -4566,13 +4755,13 @@ void
 MM_CopyForwardScheme::verifyReferenceObjectSlots(MM_EnvironmentVLHGC *env, J9Object *objectPtr)
 {
 	fj9object_t referentToken = J9GC_J9VMJAVALANGREFERENCE_REFERENT(env, objectPtr);
-	J9Object* referentPtr = _extensions->accessBarrier->convertPointerFromToken(referentToken);
-	if(!_abortInProgress && !isObjectInNoEvacuationRegions(env, referentPtr) && verifyIsPointerInEvacute(env, referentPtr)) {
+	J9Object *referentPtr = _extensions->accessBarrier->convertPointerFromToken(referentToken);
+	if (!_abortInProgress && !isObjectInNoEvacuationRegions(env, referentPtr) && verifyIsPointerInEvacute(env, referentPtr)) {
 		PORT_ACCESS_FROM_ENVIRONMENT(env);
 		j9tty_printf(PORTLIB, "RefMixed referent slot points to evacuate!  srcObj %p dstObj %p\n", objectPtr, referentPtr);
 		Assert_MM_unreachable();
 	}
-	if((NULL != referentPtr) && !_markMap->isBitSet(referentPtr)) {
+	if ((NULL != referentPtr) && !_markMap->isBitSet(referentPtr)) {
 		PORT_ACCESS_FROM_ENVIRONMENT(env);
 		j9tty_printf(PORTLIB, "RefMixed referent slot points to unmarked object!  srcObj %p dstObj %p\n", objectPtr, referentPtr);
 		verifyDumpObjectDetails(env, "srcObj", objectPtr);
@@ -4585,12 +4774,12 @@ MM_CopyForwardScheme::verifyReferenceObjectSlots(MM_EnvironmentVLHGC *env, J9Obj
 
 	while (NULL != (slotObject = mixedObjectIterator.nextSlot())) {
 		J9Object *dstObject = slotObject->readReferenceFromSlot();
-		if(!_abortInProgress && !isObjectInNoEvacuationRegions(env, dstObject) && verifyIsPointerInEvacute(env, dstObject)) {
+		if (!_abortInProgress && !isObjectInNoEvacuationRegions(env, dstObject) && verifyIsPointerInEvacute(env, dstObject)) {
 			PORT_ACCESS_FROM_ENVIRONMENT(env);
 			j9tty_printf(PORTLIB, "RefMixed object slot points to evacuate!  srcObj %p slot %p dstObj %p\n", objectPtr, slotObject->readAddressFromSlot(), dstObject);
 			Assert_MM_unreachable();
 		}
-		if((NULL != dstObject) && !_markMap->isBitSet(dstObject)) {
+		if ((NULL != dstObject) && !_markMap->isBitSet(dstObject)) {
 			PORT_ACCESS_FROM_ENVIRONMENT(env);
 			j9tty_printf(PORTLIB, "RefMixed object slot points to unmarked object!  srcObj %p slot %p dstObj %p\n", objectPtr, slotObject->readAddressFromSlot(), dstObject);
 			verifyDumpObjectDetails(env, "srcObj", objectPtr);
@@ -4606,14 +4795,14 @@ MM_CopyForwardScheme::verifyPointerArrayObjectSlots(MM_EnvironmentVLHGC *env, J9
 	GC_PointerArrayIterator pointerArrayIterator(_javaVM, objectPtr);
 	GC_SlotObject *slotObject = NULL;
 
-	while((slotObject = pointerArrayIterator.nextSlot()) != NULL) {
+	while ((slotObject = pointerArrayIterator.nextSlot()) != NULL) {
 		J9Object *dstObject = slotObject->readReferenceFromSlot();
 		if(!_abortInProgress && !isObjectInNoEvacuationRegions(env, dstObject) && verifyIsPointerInEvacute(env, dstObject)) {
 			PORT_ACCESS_FROM_ENVIRONMENT(env);
 			j9tty_printf(PORTLIB, "Pointer array slot points to evacuate!  srcObj %p slot %p dstObj %p\n", objectPtr, slotObject->readAddressFromSlot(), dstObject);
 			Assert_MM_unreachable();
 		}
-		if((NULL != dstObject) && !_markMap->isBitSet(dstObject)) {
+		if ((NULL != dstObject) && !_markMap->isBitSet(dstObject)) {
 			PORT_ACCESS_FROM_ENVIRONMENT(env);
 			j9tty_printf(PORTLIB, "Pointer array slot points to unmarked object!  srcObj %p slot %p dstObj %p\n", objectPtr, slotObject->readAddressFromSlot(), dstObject);
 			verifyDumpObjectDetails(env, "srcObj", objectPtr);
@@ -4638,14 +4827,14 @@ MM_CopyForwardScheme::verifyClassObjectSlots(MM_EnvironmentVLHGC *env, J9Object 
 			 * scan static fields
 			 */
 			GC_ClassStaticsIterator classStaticsIterator(env, classPtr);
-			while(NULL != (slotPtr = classStaticsIterator.nextSlot())) {
+			while (NULL != (slotPtr = classStaticsIterator.nextSlot())) {
 				J9Object *dstObject = *slotPtr;
-				if(!_abortInProgress && !isObjectInNoEvacuationRegions(env, dstObject) && verifyIsPointerInEvacute(env, dstObject)) {
+				if (!_abortInProgress && !isObjectInNoEvacuationRegions(env, dstObject) && verifyIsPointerInEvacute(env, dstObject)) {
 					PORT_ACCESS_FROM_ENVIRONMENT(env);
 					j9tty_printf(PORTLIB, "Class static slot points to evacuate!  srcObj %p J9Class %p slot %p dstObj %p\n", classObject, classPtr, slotPtr, dstObject);
 					Assert_MM_unreachable();
 				}
-				if((NULL != dstObject) && !_markMap->isBitSet(dstObject)) {
+				if ((NULL != dstObject) && !_markMap->isBitSet(dstObject)) {
 					PORT_ACCESS_FROM_ENVIRONMENT(env);
 					j9tty_printf(PORTLIB, "Class static slot points to unmarked object!  srcObj %p J9Class %p slot %p dstObj %p\n", classObject, classPtr, slotPtr, dstObject);
 					verifyDumpObjectDetails(env, "classObject", classObject);
@@ -4658,14 +4847,14 @@ MM_CopyForwardScheme::verifyClassObjectSlots(MM_EnvironmentVLHGC *env, J9Object 
 			 * scan call sites
 			 */
 			GC_CallSitesIterator callSitesIterator(classPtr);
-			while(NULL != (slotPtr = callSitesIterator.nextSlot())) {
+			while (NULL != (slotPtr = callSitesIterator.nextSlot())) {
 				J9Object *dstObject = *slotPtr;
-				if(!_abortInProgress && !isObjectInNoEvacuationRegions(env, dstObject) && verifyIsPointerInEvacute(env, dstObject)) {
+				if (!_abortInProgress && !isObjectInNoEvacuationRegions(env, dstObject) && verifyIsPointerInEvacute(env, dstObject)) {
 					PORT_ACCESS_FROM_ENVIRONMENT(env);
 					j9tty_printf(PORTLIB, "Class call site slot points to evacuate!  srcObj %p J9Class %p slot %p dstObj %p\n", classObject, classPtr, slotPtr, dstObject);
 					Assert_MM_unreachable();
 				}
-				if((NULL != dstObject) && !_markMap->isBitSet(dstObject)) {
+				if ((NULL != dstObject) && !_markMap->isBitSet(dstObject)) {
 					PORT_ACCESS_FROM_ENVIRONMENT(env);
 					j9tty_printf(PORTLIB, "Class call site slot points to unmarked object!  srcObj %p J9Class %p slot %p dstObj %p\n", classObject, classPtr, slotPtr, dstObject);
 					verifyDumpObjectDetails(env, "classObject", classObject);
@@ -4683,14 +4872,14 @@ MM_CopyForwardScheme::verifyClassObjectSlots(MM_EnvironmentVLHGC *env, J9Object 
 			GC_MethodTypesIterator methodTypesIterator(classPtr->romClass->methodTypeCount, classPtr->methodTypes);
 #endif /* defined(J9VM_OPT_OPENJDK_METHODHANDLE) */
 
-			while(NULL != (slotPtr = methodTypesIterator.nextSlot())) {
+			while (NULL != (slotPtr = methodTypesIterator.nextSlot())) {
 				J9Object *dstObject = *slotPtr;
-				if(!_abortInProgress && !isObjectInNoEvacuationRegions(env, dstObject) && verifyIsPointerInEvacute(env, dstObject)) {
+				if (!_abortInProgress && !isObjectInNoEvacuationRegions(env, dstObject) && verifyIsPointerInEvacute(env, dstObject)) {
 					PORT_ACCESS_FROM_ENVIRONMENT(env);
 					j9tty_printf(PORTLIB, "Class MethodType slot points to evacuate!  srcObj %p J9Class %p slot %p dstObj %p\n", classObject, classPtr, slotPtr, dstObject);
 					Assert_MM_unreachable();
 				}
-				if((NULL != dstObject) && !_markMap->isBitSet(dstObject)) {
+				if ((NULL != dstObject) && !_markMap->isBitSet(dstObject)) {
 					PORT_ACCESS_FROM_ENVIRONMENT(env);
 					j9tty_printf(PORTLIB, "Class MethodType slot points to unmarked object!  srcObj %p J9Class %p slot %p dstObj %p\n", classObject, classPtr, slotPtr, dstObject);
 					verifyDumpObjectDetails(env, "classObject", classObject);
@@ -4704,14 +4893,14 @@ MM_CopyForwardScheme::verifyClassObjectSlots(MM_EnvironmentVLHGC *env, J9Object 
 			 */
 #if defined(J9VM_OPT_METHOD_HANDLE)
 			GC_MethodTypesIterator varHandleMethodTypesIterator(classPtr->romClass->varHandleMethodTypeCount, classPtr->varHandleMethodTypes);
-			while(NULL != (slotPtr = varHandleMethodTypesIterator.nextSlot())) {
+			while (NULL != (slotPtr = varHandleMethodTypesIterator.nextSlot())) {
 				J9Object *dstObject = *slotPtr;
-				if(!_abortInProgress && !isObjectInNoEvacuationRegions(env, dstObject) && verifyIsPointerInEvacute(env, dstObject)) {
+				if (!_abortInProgress && !isObjectInNoEvacuationRegions(env, dstObject) && verifyIsPointerInEvacute(env, dstObject)) {
 					PORT_ACCESS_FROM_ENVIRONMENT(env);
 					j9tty_printf(PORTLIB, "Class MethodType slot points to evacuate!  srcObj %p J9Class %p slot %p dstObj %p\n", classObject, classPtr, slotPtr, dstObject);
 					Assert_MM_unreachable();
 				}
-				if((NULL != dstObject) && !_markMap->isBitSet(dstObject)) {
+				if ((NULL != dstObject) && !_markMap->isBitSet(dstObject)) {
 					PORT_ACCESS_FROM_ENVIRONMENT(env);
 					j9tty_printf(PORTLIB, "Class MethodType slot points to unmarked object!  srcObj %p J9Class %p slot %p dstObj %p\n", classObject, classPtr, slotPtr, dstObject);
 					verifyDumpObjectDetails(env, "classObject", classObject);
@@ -4728,14 +4917,14 @@ MM_CopyForwardScheme::verifyClassObjectSlots(MM_EnvironmentVLHGC *env, J9Object 
 			 * these are guaranteed to be referenced by our class loader
 			 */
 			GC_ConstantPoolObjectSlotIterator constantPoolIterator(_javaVM, classPtr);
-			while(NULL != (slotPtr = constantPoolIterator.nextSlot())) {
+			while (NULL != (slotPtr = constantPoolIterator.nextSlot())) {
 				J9Object *dstObject = *slotPtr;
-				if(!_abortInProgress && !isObjectInNoEvacuationRegions(env, dstObject) && verifyIsPointerInEvacute(env, dstObject)) {
+				if (!_abortInProgress && !isObjectInNoEvacuationRegions(env, dstObject) && verifyIsPointerInEvacute(env, dstObject)) {
 					PORT_ACCESS_FROM_ENVIRONMENT(env);
 					j9tty_printf(PORTLIB, "Class CP slot points to evacuate!  srcObj %p J9Class %p slot %p dstObj %p\n", classObject, classPtr, slotPtr, dstObject);
 					Assert_MM_unreachable();
 				}
-				if((NULL != dstObject) && !_markMap->isBitSet(dstObject)) {
+				if ((NULL != dstObject) && !_markMap->isBitSet(dstObject)) {
 					PORT_ACCESS_FROM_ENVIRONMENT(env);
 					j9tty_printf(PORTLIB, "Class CP slot points to unmarked object!  srcObj %p J9Class %p slot %p dstObj %p\n", classObject, classPtr, slotPtr, dstObject);
 					verifyDumpObjectDetails(env, "classObject", classObject);
@@ -4788,16 +4977,16 @@ MM_CopyForwardScheme::verifyExternalState(MM_EnvironmentVLHGC *env)
 
 	MM_HeapRegionDescriptorVLHGC *region = NULL;
 	GC_HeapRegionIteratorVLHGC regionIterator(_regionManager);
-	while(NULL != (region = regionIterator.nextRegion())) {
-		if(region->containsObjects()) {
-			if(region->_markData._shouldMark) {
+	while (NULL != (region = regionIterator.nextRegion())) {
+		if (region->containsObjects()) {
+			if (region->_markData._shouldMark) {
 				Assert_MM_true(region->_copyForwardData._initialLiveSet);
 
-				if(_abortInProgress || region->_markData._noEvacuation) {
+				if (_abortInProgress || region->_markData._noEvacuation) {
 					MM_HeapMapIterator mapIterator(_extensions, externalMarkMap, (UDATA *)region->getLowAddress(), (UDATA *)region->getHighAddress(), false);
 					J9Object *objectPtr = NULL;
 
-					while(NULL != (objectPtr = mapIterator.nextObject())) {
+					while (NULL != (objectPtr = mapIterator.nextObject())) {
 						Assert_MM_true(_markMap->isBitSet(objectPtr));
 					}
 				} else {
@@ -4805,7 +4994,7 @@ MM_CopyForwardScheme::verifyExternalState(MM_EnvironmentVLHGC *env)
 					UDATA lowIndex = externalMarkMap->getSlotIndex((J9Object *)region->getLowAddress());
 					UDATA highIndex = externalMarkMap->getSlotIndex((J9Object *)region->getHighAddress());
 
-					for(UDATA slotIndex = lowIndex; slotIndex < highIndex; slotIndex++) {
+					for (UDATA slotIndex = lowIndex; slotIndex < highIndex; slotIndex++) {
 						Assert_MM_true(0 == externalMarkMap->getSlot(slotIndex));
 					}
 				}
@@ -4849,7 +5038,7 @@ MM_CopyForwardScheme::verifyExternalState(MM_EnvironmentVLHGC *env)
 bool
 MM_CopyForwardScheme::verifyIsPointerInSurvivor(MM_EnvironmentVLHGC *env, J9Object *object)
 {
-	if(NULL == object) {
+	if (NULL == object) {
 		return false;
 	}
 	MM_HeapRegionDescriptorVLHGC *region = (MM_HeapRegionDescriptorVLHGC *)_regionManager->physicalTableDescriptorForAddress(object);
@@ -4863,7 +5052,7 @@ MM_CopyForwardScheme::verifyIsPointerInSurvivor(MM_EnvironmentVLHGC *env, J9Obje
 bool
 MM_CopyForwardScheme::verifyIsPointerInEvacute(MM_EnvironmentVLHGC *env, J9Object *object)
 {
-	if(NULL == object) {
+	if (NULL == object) {
 		return false;
 	}
 
@@ -4889,10 +5078,10 @@ MM_CopyForwardScheme::verifyChunkSlotsAndMapSlotsInRange(MM_EnvironmentVLHGC *en
 	GC_ObjectHeapIteratorAddressOrderedList heapChunkIterator(_extensions, (J9Object *)lowAddress, (J9Object *)highAddress, false);
 	J9Object *objectPtr = NULL;
 
-	while(NULL != (objectPtr = heapChunkIterator.nextObject())) {
+	while (NULL != (objectPtr = heapChunkIterator.nextObject())) {
 		J9Object *mapObjectPtr = mapIterator.nextObject();
 
-		if(objectPtr != mapObjectPtr) {
+		if (objectPtr != mapObjectPtr) {
 			PORT_ACCESS_FROM_ENVIRONMENT(env);
 			j9tty_printf(PORTLIB, "ChunkIterator and mapIterator did not match up during walk of survivor space! ChunkSlot %p MapSlot %p\n", objectPtr, mapObjectPtr);
 			Assert_MM_unreachable();
@@ -4900,7 +5089,7 @@ MM_CopyForwardScheme::verifyChunkSlotsAndMapSlotsInRange(MM_EnvironmentVLHGC *en
 		}
 		verifyObject(env, objectPtr);
 	}
-	if(NULL != mapIterator.nextObject()) {
+	if (NULL != mapIterator.nextObject()) {
 		PORT_ACCESS_FROM_ENVIRONMENT(env);
 		j9tty_printf(PORTLIB, "Survivor space mapIterator did not end when the chunkIterator did!\n");
 		Assert_MM_unreachable();
@@ -4927,7 +5116,7 @@ MM_CopyForwardScheme::checkConsistencyGMPMapAndPGCMap(MM_EnvironmentVLHGC *env, 
 	MM_HeapMapIterator mapIterator(_extensions, externalMarkMap, lowAddress, highAddress, false);
 	J9Object *objectPtr = NULL;
 
-	while(NULL != (objectPtr = mapIterator.nextObject())) {
+	while (NULL != (objectPtr = mapIterator.nextObject())) {
 		Assert_MM_true(_markMap->isBitSet(objectPtr));
 		Assert_MM_true(objectPtr >= region->getLowAddress());
 		Assert_MM_true(objectPtr < region->getHighAddress());
@@ -4941,9 +5130,9 @@ MM_CopyForwardScheme::scanWeakReferenceObjects(MM_EnvironmentVLHGC *env)
 	
 	MM_HeapRegionDescriptorVLHGC *region = NULL;
 	GC_HeapRegionIteratorVLHGC regionIterator(_regionManager);
-	while(NULL != (region = regionIterator.nextRegion())) {
+	while (NULL != (region = regionIterator.nextRegion())) {
 		if ((region->isSurvivorRegion() || region->_copyForwardData._evacuateSet) && !region->getReferenceObjectList()->wasWeakListEmpty()) {
-			if(J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
+			if (J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
 				processReferenceList(env, region, region->getReferenceObjectList()->getPriorWeakList(), &env->_copyForwardStats._weakReferenceStats);
 			}
 		}
@@ -4960,9 +5149,9 @@ MM_CopyForwardScheme::scanSoftReferenceObjects(MM_EnvironmentVLHGC *env)
 
 	MM_HeapRegionDescriptorVLHGC *region = NULL;
 	GC_HeapRegionIteratorVLHGC regionIterator(_regionManager);
-	while(NULL != (region = regionIterator.nextRegion())) {
+	while (NULL != (region = regionIterator.nextRegion())) {
 		if ((region->isSurvivorRegion() || region->_copyForwardData._evacuateSet) && !region->getReferenceObjectList()->wasSoftListEmpty()) {
-			if(J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
+			if (J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
 				processReferenceList(env, region, region->getReferenceObjectList()->getPriorSoftList(), &env->_copyForwardStats._softReferenceStats);
 			}
 		}
@@ -4983,7 +5172,7 @@ MM_CopyForwardScheme::scanPhantomReferenceObjects(MM_EnvironmentVLHGC *env)
 		env->_cycleState->_referenceObjectOptions |= MM_CycleState::references_clear_phantom;
 		MM_HeapRegionDescriptorVLHGC *region = NULL;
 		GC_HeapRegionIteratorVLHGC regionIterator(_regionManager);
-		while(NULL != (region = regionIterator.nextRegion())) {
+		while (NULL != (region = regionIterator.nextRegion())) {
 			Assert_MM_true(region->getReferenceObjectList()->wasPhantomListEmpty());
 			Assert_MM_false(region->_copyForwardData._requiresPhantomReferenceProcessing);
 			if (region->isSurvivorRegion() || region->_copyForwardData._evacuateSet) {
@@ -5000,12 +5189,12 @@ MM_CopyForwardScheme::scanPhantomReferenceObjects(MM_EnvironmentVLHGC *env)
 	UDATA phantomReferenceRegionsProcessed = 0;
 	MM_HeapRegionDescriptorVLHGC *region = NULL;
 	GC_HeapRegionIteratorVLHGC regionIterator(_regionManager);
-	while(NULL != (region = regionIterator.nextRegion())) {
+	while (NULL != (region = regionIterator.nextRegion())) {
 		if (region->_copyForwardData._requiresPhantomReferenceProcessing) {
 			Assert_MM_true(region->isSurvivorRegion() || region->_copyForwardData._evacuateSet);
 			Assert_MM_false(region->getReferenceObjectList()->wasPhantomListEmpty());
 			phantomReferenceRegionsProcessed += 1;
-			if(J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
+			if (J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
 				processReferenceList(env, region, region->getReferenceObjectList()->getPriorPhantomList(), &env->_copyForwardStats._phantomReferenceStats);
 			}
 		}
@@ -5018,7 +5207,7 @@ MM_CopyForwardScheme::scanPhantomReferenceObjects(MM_EnvironmentVLHGC *env)
 }
 
 void
-MM_CopyForwardScheme::processReferenceList(MM_EnvironmentVLHGC *env, MM_HeapRegionDescriptorVLHGC* region, J9Object* headOfList, MM_ReferenceStats *referenceStats)
+MM_CopyForwardScheme::processReferenceList(MM_EnvironmentVLHGC *env, MM_HeapRegionDescriptorVLHGC *region, J9Object *headOfList, MM_ReferenceStats *referenceStats)
 {
 	/* no list can possibly contain more reference objects than there are bytes in a region. */
 	const UDATA maxObjects = _regionManager->getRegionSize();
@@ -5026,7 +5215,7 @@ MM_CopyForwardScheme::processReferenceList(MM_EnvironmentVLHGC *env, MM_HeapRegi
 	GC_FinalizableReferenceBuffer buffer(_extensions);
 	bool const compressed = env->compressObjectReferences();
 
-	J9Object* referenceObj = headOfList;
+	J9Object *referenceObj = headOfList;
 	while (NULL != referenceObj) {
 		Assert_MM_true(isLiveObject(referenceObj));
 
@@ -5036,7 +5225,7 @@ MM_CopyForwardScheme::processReferenceList(MM_EnvironmentVLHGC *env, MM_HeapRegi
 		Assert_MM_true(region->isAddressInRegion(referenceObj));
 		Assert_MM_true(objectsVisited < maxObjects);
 
-		J9Object* nextReferenceObj = _extensions->accessBarrier->getReferenceLink(referenceObj);
+		J9Object *nextReferenceObj = _extensions->accessBarrier->getReferenceLink(referenceObj);
 
 		GC_SlotObject referentSlotObject(_extensions->getOmrVM(), J9GC_J9VMJAVALANGREFERENCE_REFERENT_ADDRESS(env, referenceObj));
 		J9Object *referent = referentSlotObject.readReferenceFromSlot();
@@ -5069,21 +5258,7 @@ MM_CopyForwardScheme::processReferenceList(MM_EnvironmentVLHGC *env, MM_HeapRegi
 
 				referenceStats->_cleared += 1;
 				J9GC_J9VMJAVALANGREFERENCE_STATE(env, referenceObj) = GC_ObjectModel::REF_STATE_CLEARED;
-				
-				/* Phantom references keep it's referent alive in Java 8 and doesn't in Java 9 and later */
-				if ((J9AccClassReferencePhantom == referenceObjectType) && ((J2SE_VERSION(_javaVM) & J2SE_VERSION_MASK) <= J2SE_18)) {
-					/* Scanning will be done after the enqueuing */
-					copyAndForward(env, region->_allocateData._owningContext, referenceObj, &referentSlotObject);
-					if (GC_ObjectModel::REF_STATE_REMEMBERED == previousState) {
-						Assert_MM_true(NULL != env->_cycleState->_externalCycleState);
-						/* We changed the state from REMEMBERED to CLEARED, so this will not be enqueued back to region's reference queue.
-						 * However, GMP has to revisit this reference to mark the referent in its own mark map.
-						 */
-						_extensions->cardTable->dirtyCardWithValue(env, referenceObj, CARD_GMP_MUST_SCAN);
-					}
-				} else {
-					referentSlotObject.writeReferenceToSlot(NULL);
-				}
+				referentSlotObject.writeReferenceToSlot(NULL);
 
 				/* Check if the reference has a queue */
 				if (0 != J9GC_J9VMJAVALANGREFERENCE_QUEUE(env, referenceObj)) {
@@ -5123,15 +5298,15 @@ MM_CopyForwardScheme::processReferenceList(MM_EnvironmentVLHGC *env, MM_HeapRegi
 }
 
 void
-MM_CopyForwardScheme::rememberReferenceList(MM_EnvironmentVLHGC *env, J9Object* headOfList)
+MM_CopyForwardScheme::rememberReferenceList(MM_EnvironmentVLHGC *env, J9Object *headOfList)
 {
 	Assert_MM_true((NULL == headOfList) || (NULL != env->_cycleState->_externalCycleState));
 	/* If phantom reference processing has already started this list will never be processed */
 	Assert_MM_true(0 == _phantomReferenceRegionsToProcess);
 
-	J9Object* referenceObj = headOfList;
+	J9Object *referenceObj = headOfList;
 	while (NULL != referenceObj) {
-		J9Object* next = _extensions->accessBarrier->getReferenceLink(referenceObj);
+		J9Object *next = _extensions->accessBarrier->getReferenceLink(referenceObj);
 		I_32 referenceState = J9GC_J9VMJAVALANGREFERENCE_STATE(env, referenceObj);
 		switch (referenceState) {
 		case  GC_ObjectModel::REF_STATE_INITIAL:
@@ -5173,7 +5348,7 @@ MM_CopyForwardScheme::rememberReferenceListsFromExternalCycle(MM_EnvironmentVLHG
 {
 	GC_HeapRegionIteratorVLHGC regionIterator(_regionManager);
 	MM_HeapRegionDescriptorVLHGC *region = NULL;
-	while(NULL != (region = regionIterator.nextRegion())) {
+	while (NULL != (region = regionIterator.nextRegion())) {
 		if (region->_markData._shouldMark) {
 			if (J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
 				rememberAndResetReferenceLists(env, region);
@@ -5190,7 +5365,7 @@ MM_CopyForwardScheme::rememberAndResetReferenceLists(MM_EnvironmentVLHGC *env, M
 
 	if (0 == (referenceObjectOptions & MM_CycleState::references_clear_weak)) {
 		referenceObjectList->startWeakReferenceProcessing();
-		J9Object* headOfList = referenceObjectList->getPriorWeakList();
+		J9Object *headOfList = referenceObjectList->getPriorWeakList();
 		if (NULL != headOfList) {
 			Trc_MM_CopyForwardScheme_rememberAndResetReferenceLists_rememberWeak(env->getLanguageVMThread(), region, headOfList);
 			rememberReferenceList(env, headOfList);
@@ -5199,7 +5374,7 @@ MM_CopyForwardScheme::rememberAndResetReferenceLists(MM_EnvironmentVLHGC *env, M
 
 	if (0 == (referenceObjectOptions & MM_CycleState::references_clear_soft)) {
 		referenceObjectList->startSoftReferenceProcessing();
-		J9Object* headOfList = referenceObjectList->getPriorSoftList();
+		J9Object *headOfList = referenceObjectList->getPriorSoftList();
 		if (NULL != headOfList) {
 			Trc_MM_CopyForwardScheme_rememberAndResetReferenceLists_rememberSoft(env->getLanguageVMThread(), region, headOfList);
 			rememberReferenceList(env, headOfList);
@@ -5208,7 +5383,7 @@ MM_CopyForwardScheme::rememberAndResetReferenceLists(MM_EnvironmentVLHGC *env, M
 
 	if (0 == (referenceObjectOptions & MM_CycleState::references_clear_phantom)) {
 		referenceObjectList->startPhantomReferenceProcessing();
-		J9Object* headOfList = referenceObjectList->getPriorPhantomList();
+		J9Object *headOfList = referenceObjectList->getPriorPhantomList();
 		if (NULL != headOfList) {
 			Trc_MM_CopyForwardScheme_rememberAndResetReferenceLists_rememberPhantom(env->getLanguageVMThread(), region, headOfList);
 			rememberReferenceList(env, headOfList);
@@ -5250,7 +5425,7 @@ MM_CopyForwardScheme::scanFinalizableObjects(MM_EnvironmentVLHGC *env)
 		j9object_t referenceObject = finalizeListManager->resetReferenceObjects();
 		while (NULL != referenceObject) {
 			j9object_t next = NULL;
-			if(!isLiveObject(referenceObject)) {
+			if (!isLiveObject(referenceObject)) {
 				Assert_MM_true(isObjectInEvacuateMemory(referenceObject));
 				MM_ForwardedHeader forwardedHeader(referenceObject, _extensions->compressObjectReferences());
 				if (!forwardedHeader.isForwardedPointer()) {
@@ -5258,7 +5433,7 @@ MM_CopyForwardScheme::scanFinalizableObjects(MM_EnvironmentVLHGC *env)
 					next = _extensions->accessBarrier->getReferenceLink(referenceObject);
 
 					MM_AllocationContextTarok *reservingContext = getContextForHeapAddress(referenceObject);
-					J9Object* copyObject = copy(env, reservingContext, &forwardedHeader);
+					J9Object *copyObject = copy(env, reservingContext, &forwardedHeader);
 					if ( (NULL == copyObject) || (referenceObject == copyObject) ) {
 						referenceBuffer.add(env, referenceObject);
 					} else {
@@ -5291,7 +5466,7 @@ MM_CopyForwardScheme::scanFinalizableList(MM_EnvironmentVLHGC *env, j9object_t h
 	while (NULL != headObject) {
 		j9object_t next = NULL;
 
-		if(!isLiveObject(headObject)) {
+		if (!isLiveObject(headObject)) {
 			Assert_MM_true(isObjectInEvacuateMemory(headObject));
 			MM_ForwardedHeader forwardedHeader(headObject, _extensions->compressObjectReferences());
 			if (!forwardedHeader.isForwardedPointer()) {
@@ -5299,7 +5474,7 @@ MM_CopyForwardScheme::scanFinalizableList(MM_EnvironmentVLHGC *env, j9object_t h
 				next = _extensions->accessBarrier->getFinalizeLink(headObject);
 
 				MM_AllocationContextTarok *reservingContext = getContextForHeapAddress(headObject);
-				J9Object* copyObject = copy(env, reservingContext, &forwardedHeader);
+				J9Object *copyObject = copy(env, reservingContext, &forwardedHeader);
 				if ( (NULL == copyObject) || (headObject == copyObject) ) {
 					objectBuffer.add(env, headObject);
 				} else {
@@ -5352,7 +5527,7 @@ MM_CopyForwardScheme::insertFreeMemoryCandidate(MM_EnvironmentVLHGC* env, MM_Res
 {
 	region->_copyForwardData._nextRegion = regionList->_freeMemoryCandidates;
 	region->_copyForwardData._previousRegion = NULL;
-	if(NULL != regionList->_freeMemoryCandidates) {
+	if (NULL != regionList->_freeMemoryCandidates) {
 		regionList->_freeMemoryCandidates->_copyForwardData._previousRegion = region;
 	}
 	regionList->_freeMemoryCandidates = region;
@@ -5468,6 +5643,10 @@ MM_CopyForwardScheme::isCompressedSurvivor(void *heapAddr)
 	return isSurvivor;
 }
 
+/**
+ * compressedSurvivorTable bit to Card Table, it is for identifying if live object is in survivor memory in current PGC
+ *  setCompressedSurvivorCards() are called for requiring free memory from region and preparing preserved TLHRemainders.
+ */
 MMINLINE void
 MM_CopyForwardScheme::setCompressedSurvivorCards(MM_EnvironmentVLHGC *env, void *startHeapAddress, void *endHeapAddress)
 {
@@ -5531,42 +5710,19 @@ MM_CopyForwardScheme::cleanCompressedSurvivorCardTable(MM_EnvironmentVLHGC *env)
 }
 
 void
-MM_CopyForwardScheme::abandonTLHRemainder(MM_EnvironmentVLHGC *env, bool preserveRemainders)
+MM_CopyForwardScheme::abandonTLHRemainders(MM_EnvironmentVLHGC *env)
 {
-	for (uintptr_t compactGroup = 0; compactGroup < _compactGroupMaxCount; compactGroup++) {
-		MM_CopyForwardCompactGroup *compactGroupForMarkData = &(env->_copyForwardCompactGroups[compactGroup]);
-		if (NULL != compactGroupForMarkData->_TLHRemainderBase) {
-			Assert_MM_true(NULL != compactGroupForMarkData->_TLHRemainderTop);
-			env->_cycleState->_activeSubSpace->abandonHeapChunk(compactGroupForMarkData->_TLHRemainderBase, compactGroupForMarkData->_TLHRemainderTop);
-			if (!preserveRemainders) {
-				/* discard the remainder for nursery regions */
-				discardHeapChunk(compactGroupForMarkData, compactGroupForMarkData->_TLHRemainderBase, compactGroupForMarkData->_TLHRemainderTop);
-				compactGroupForMarkData->resetTLHRemainder();
+	for (UDATA compactGroup = 0; compactGroup < _compactGroupMaxCount; compactGroup++) {
+		MM_CopyForwardCompactGroup *copyForwardCompactGroup = &env->_copyForwardCompactGroups[compactGroup];
+		if (_extensions->recycleRemainders) {
+			if ((MM_CompactGroupManager::getRegionAgeFromGroup(env, compactGroup) >= _extensions->tarokNurseryMaxAge._valueSpecified) &&
+				(copyForwardCompactGroup->getTLHRemainderSize() >= _extensions->minimumFreeSizeForSurvivor)) {
+				copyForwardCompactGroup->recycleTLHRemainder(env);
+			} else {
+				copyForwardCompactGroup->discardTLHRemainder(env);
 			}
 		} else {
-			Assert_MM_true(NULL == compactGroupForMarkData->_TLHRemainderTop);
+			copyForwardCompactGroup->discardTLHRemainder(env);
 		}
 	}
-}
-
-void
-MM_CopyForwardScheme::resetAllTLHRemainders(MM_EnvironmentVLHGC *env)
-{
-	MM_CopyForwardCompactGroup *copyForwardCompactGroups = NULL;
-	for (uintptr_t id = 0; id < _extensions->gcThreadCount; id++) {
-		copyForwardCompactGroups = &_compactGroupBlock[id * _compactGroupMaxCount];
-
-		for (uintptr_t compactGroup = 0; compactGroup < _compactGroupMaxCount; compactGroup++) {
-			copyForwardCompactGroups[compactGroup].resetTLHRemainder();
-		}
-	}
-}
-
-void
-MM_CopyForwardScheme::discardHeapChunk(MM_CopyForwardCompactGroup *compactGroupForMarkData, void *base, void *top)
-{
-	uintptr_t discardSize = ((uintptr_t)top - (uintptr_t)base);
-	compactGroupForMarkData->_discardedBytes += discardSize;
-	MM_HeapRegionDescriptorVLHGC *region = (MM_HeapRegionDescriptorVLHGC*)_regionManager->tableDescriptorForAddress(base);
-	region->getMemoryPool()->incrementDarkMatterBytes(discardSize);
 }

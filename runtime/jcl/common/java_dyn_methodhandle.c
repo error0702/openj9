@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2001
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include <string.h>
@@ -345,7 +345,7 @@ accessCheckFieldSignature(J9VMThread *currentThread, J9Class* lookupClass, UDATA
 			sigOffset += 1;
 		}
 	
-		if ('L' == lookupSigData[sigOffset]) {
+		if (IS_CLASS_SIGNATURE(lookupSigData[sigOffset])) {
 			BOOLEAN isVirtual = (0 == (((J9ROMFieldShape*)romField)->modifiers & J9AccStatic));
 			j9object_t argsArray = J9VMJAVALANGINVOKEMETHODTYPE_PTYPES(currentThread, methodType);
 			U_32 numParameters = J9INDEXABLEOBJECT_SIZE(currentThread, argsArray);
@@ -375,7 +375,16 @@ accessCheckFieldSignature(J9VMThread *currentThread, J9Class* lookupClass, UDATA
 				U_32 sigLength = J9UTF8_LENGTH(lookupSig) - sigOffset - 1;
 				
 				omrthread_monitor_enter(vm->classTableMutex);
-				if(verifyData->checkClassLoadingConstraintForNameFunction(currentThread, targetClassloader, ramClass->classLoader, &lookupSigData[sigOffset], &lookupSigData[sigOffset], sigLength, TRUE) != 0) {
+				if (0 != verifyData->checkClassLoadingConstraintForNameFunction(
+						currentThread,
+						targetClassloader,
+						ramClass->classLoader,
+						&lookupSigData[sigOffset],
+						&lookupSigData[sigOffset],
+						sigLength,
+						TRUE,
+						TRUE)
+				) {
 					result = FALSE;
 				}
 				omrthread_monitor_exit(vm->classTableMutex);
@@ -433,7 +442,7 @@ accessCheckMethodSignature(J9VMThread *currentThread, J9Method *method, j9object
 			endIndex = index;
 
 			/* If this entry is a class type, we need to do a classloader check on it */
-			if ('L' == lookupSigData[index]) {
+			if (IS_CLASS_SIGNATURE(lookupSigData[index])) {
 				index += 1;
 
 				clazz = J9JAVAARRAYOFOBJECT_LOAD(currentThread, argsArray, i);
@@ -445,7 +454,16 @@ accessCheckMethodSignature(J9VMThread *currentThread, J9Method *method, j9object
 
 				/* Check if we really need to check this classloader constraint */
 				if (argumentRamClass->classLoader != targetClassloader) {
-					if(verifyData->checkClassLoadingConstraintForNameFunction(currentThread, targetClassloader, argumentRamClass->classLoader, &J9UTF8_DATA(targetSig)[index], &lookupSigData[index], endIndex - index, TRUE) != 0) {
+					if(0 != verifyData->checkClassLoadingConstraintForNameFunction(
+						currentThread,
+						targetClassloader,
+						argumentRamClass->classLoader,
+						&J9UTF8_DATA(targetSig)[index],
+						&lookupSigData[index],
+						endIndex - index,
+						TRUE,
+						TRUE)
+					) {
 						result = FALSE;
 						goto releaseMutexAndReturn;
 					}
@@ -462,7 +480,7 @@ accessCheckMethodSignature(J9VMThread *currentThread, J9Method *method, j9object
 		while ('[' == lookupSigData[index]) {
 			index += 1;
 		}
-		if('L' == lookupSigData[index]) {
+		if(IS_CLASS_SIGNATURE(lookupSigData[index])) {
 			J9Class *returnRamClass = NULL;
 			/* Grab the MethodType returnType */
 			clazz = J9VMJAVALANGINVOKEMETHODTYPE_RTYPE(currentThread, methodType);
@@ -477,7 +495,16 @@ accessCheckMethodSignature(J9VMThread *currentThread, J9Method *method, j9object
 					endIndex++;
 				}
 
-				if(verifyData->checkClassLoadingConstraintForNameFunction(currentThread, targetClassloader, returnRamClass->classLoader, &J9UTF8_DATA(targetSig)[index], &lookupSigData[index], endIndex - index, TRUE) != 0) {
+				if(0 != verifyData->checkClassLoadingConstraintForNameFunction(
+						currentThread,
+						targetClassloader,
+						returnRamClass->classLoader,
+						&J9UTF8_DATA(targetSig)[index],
+						&lookupSigData[index],
+						endIndex - index,
+						TRUE,
+						TRUE)
+				) {
 					result = FALSE;
 					goto releaseMutexAndReturn;
 				}
@@ -788,27 +815,6 @@ Java_java_lang_invoke_MethodHandle_vmRefFieldOffset(JNIEnv *env, jclass clazz, j
 	return (jint) J9VMJAVALANGCLASS_VMREF_OFFSET(((J9VMThread *) env));
 }
 
-#ifdef J9VM_OPT_PANAMA
-jlong JNICALL
-Java_java_lang_invoke_MethodHandles_findNativeAddress(JNIEnv *env, jclass jlClass, jstring methodName)
-{
-	const char *nativeMethodName = NULL;
-	UDATA handle = 0;
-	jlong func = 0;
-	PORT_ACCESS_FROM_ENV(env);
-
-	nativeMethodName = (*env)->GetStringUTFChars(env, methodName, NULL);
-
-	if(0 == j9sl_open_shared_library(NULL, &handle, FALSE)) {
-		if(0 != j9sl_lookup_name(handle, (char *)nativeMethodName, (UDATA *)&func, "")){
-			func = 0;
-		}
-	}
-
-	return func;
-}
-#endif
-
 void JNICALL
 Java_java_lang_invoke_MutableCallSite_freeGlobalRef(JNIEnv *env, jclass mutableCallSite, jlong bypassOffset)
 {
@@ -1000,38 +1006,6 @@ setClassLoadingConstraintLinkageError(J9VMThread *vmThread, J9Class *methodOrFie
 	vmFuncs->setCurrentExceptionUTF(vmThread, J9VMCONSTANTPOOL_JAVALANGLINKAGEERROR, msg);
 	j9mem_free_memory(msg);
 }
-
-#if defined(J9VM_OPT_JAVA_OFFLOAD_SUPPORT)
-/**
- * Clear the non-ZAAP eligible bit for JCL natives to allow them to run on zAAP.
- *
- * @param[in] env                 The JNI interface pointer
- * @param[in] nativeClass         The class containing the native method
- * @param[in] nativeMethods       The JNI native method pointer
- * @param[in] nativeMethodCount  The count of native methods
- */
-void
-clearNonZAAPEligibleBit(JNIEnv *env, jclass nativeClass, const JNINativeMethod *nativeMethods, jint nativeMethodCount)
-{
-	J9VMThread *vmThread = (J9VMThread *) env;
-	J9JavaVM *vm = vmThread->javaVM;
-	J9InternalVMFunctions* vmFuncs = vm->internalVMFunctions;
-	const JNINativeMethod *nativeMethod = nativeMethods;
-	jint count = nativeMethodCount;
-	J9Class *j9clazz = NULL;
-
-	vmFuncs->internalEnterVMFromJNI(vmThread);
-	j9clazz = J9VM_J9CLASS_FROM_HEAPCLASS(vmThread, J9_JNI_UNWRAP_REFERENCE(nativeClass));
-
-	while (0 < count) {
-		J9Method *jniMethod = vmFuncs->findJNIMethod(vmThread, j9clazz, nativeMethod->name, nativeMethod->signature);
-		vmFuncs->atomicAndIntoConstantPool(vm, jniMethod, ~(UDATA)J9_STARTPC_NATIVE_REQUIRES_SWITCHING);
-		count -= 1;
-		nativeMethod +=1;
-	}
-	vmFuncs->internalExitVMToJNI(vmThread);
-}
-#endif /* J9VM_OPT_JAVA_OFFLOAD_SUPPORT */
 
 #if JAVA_SPEC_VERSION >= 15
 void JNICALL

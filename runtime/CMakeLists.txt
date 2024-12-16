@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2017, 2021 IBM Corp. and others
+# Copyright IBM Corp. and others 2017
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
 # OpenJDK Assembly Exception [2].
 #
 # [1] https://www.gnu.org/software/classpath/license.html
-# [2] http://openjdk.java.net/legal/assembly-exception.html
+# [2] https://openjdk.org/legal/assembly-exception.html
 #
-# SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+# SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
 ################################################################################
 
 ###
@@ -28,6 +28,11 @@
 include(cmake/version.cmake)
 
 project(j9vm VERSION ${J9VM_VERSION} LANGUAGES CXX C)
+
+# Tell newer versions of CMake that we expect the old behavior of CMP0079
+if(POLICY CMP0079)
+	cmake_policy(SET CMP0079 OLD)
+endif()
 
 set(J9VM_OMR_DIR "${CMAKE_CURRENT_SOURCE_DIR}/omr" CACHE PATH "Path to the OMR directory")
 set(CMAKE_MODULE_PATH "${j9vm_SOURCE_DIR}/cmake/modules" "${J9VM_OMR_DIR}/cmake/modules" ${CMAKE_MODULE_PATH})
@@ -53,13 +58,19 @@ include(cmake/J9vmTargetSupport.cmake)
 include(OmrTracegen)
 include(OmrDDRSupport)
 include(cmake/build_tags.cmake)
-include(cmake/compiler_config.cmake)
 include(cmake/J9vmGenAsm.cmake)
 
 ###
 ### Various configuration
 ### all configuration that does not need to proceed J9vmPlatform
 ###
+
+# Set up an interface library to keep track of the various compiler defines
+# used by the jit components.
+# TODO should probably rename to j9vm_jit_defines for less ambiguity
+
+j9vm_add_library(j9vm_compiler_defines INTERFACE)
+target_compile_definitions(j9vm_compiler_defines INTERFACE ${TR_COMPILE_DEFINITIONS})
 
 # Build everything with -fPIC (or equivalent).
 # We do this to ensure that our static libraries get built with -fPIC
@@ -310,7 +321,7 @@ target_link_libraries(j9vm_main_wrapper
 ###
 
 # set up glue library target names
-# See https://github.com/eclipse/omr/blob/master/doc/BuildingWithCMake.md
+# See https://github.com/eclipse-omr/omr/blob/master/doc/BuildingWithCMake.md
 set(OMR_GC_GLUE_TARGET "j9vm_gc_glue" CACHE INTERNAL "")
 set(OMR_GC_GLUE_FULL_TARGET "j9vm_gc_glue_full" CACHE INTERNAL "")
 set(OMR_RAS_GLUE_TARGET "j9vm_ras_glue" CACHE INTERNAL "")
@@ -424,19 +435,12 @@ endif()
 if(J9VM_MODULE_CODERT_VM)
 	add_subdirectory(codert_vm)
 endif()
-if(J9VM_OPT_CRIU_SUPPORT)
-	add_subdirectory(criusupport)
-endif()
 add_subdirectory(cuda)
 if(J9VM_MODULE_DBGEXT)
 	add_subdirectory(dbgext)
 endif()
 if(OMR_DDR)
 	add_subdirectory(ddr)
-endif()
-if(OMR_OS_WINDOWS)
-	# TODO: need to add windows support
-	# add_subdirectory(dfix)
 endif()
 if(J9VM_MODULE_EXELIB)
 	add_subdirectory(exelib)
@@ -567,7 +571,7 @@ endif()
 if(J9VM_MODULE_THREAD)
 	add_subdirectory(thread)
 endif()
-if(J9VM_INTERP_NATIVE_SUPPORT AND NOT (OMR_ARCH_AARCH64 AND OMR_OS_OSX))
+if(J9VM_INTERP_NATIVE_SUPPORT AND NOT OMR_ARCH_RISCV)
 	add_subdirectory(compiler)
 endif()
 if(J9VM_MODULE_UTIL)

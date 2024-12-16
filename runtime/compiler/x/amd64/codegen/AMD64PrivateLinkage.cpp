@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #ifdef TR_TARGET_64BIT
@@ -273,7 +273,7 @@ static uint8_t *flushArgument(
       TR::CodeGenerator *cg)
    {
    /* TODO:AMD64: Share code with the other flushArgument */
-   cursor = TR::InstOpCode(op).binary(cursor);
+   cursor = TR::InstOpCode(op).binary(cursor, OMR::X86::Default);
 
    // Mod | Reg | R/M
    //
@@ -307,7 +307,7 @@ static int32_t flushArgumentSize(
       TR::InstOpCode::Mnemonic op,
       int32_t offset)
    {
-   int32_t size = TR::InstOpCode(op).length() + 1;   // length including ModRM + 1 SIB
+   int32_t size = TR::InstOpCode(op).length(OMR::X86::Default) + 1;   // length including ModRM + 1 SIB
    return size + (((offset >= -128 && offset <= 127)) ? 1 : 4);
    }
 
@@ -324,9 +324,8 @@ uint8_t *J9::X86::AMD64::PrivateLinkage::flushArguments(
 
    int32_t numGPArgs = 0;
    int32_t numFPArgs = 0;
-   int32_t argSize   = argAreaSize(callNode);
-   int32_t offset    = argSize;
-   bool    needFlush = false;
+   int32_t offset = argAreaSize(callNode);
+   bool needFlush = false;
 
    // account for the return address in thunks and snippets.
    if (isReturnAddressOnStack)
@@ -341,7 +340,11 @@ uint8_t *J9::X86::AMD64::PrivateLinkage::flushArguments(
 
    const uint8_t slotSize = DOUBLE_SIZED_ARGS? 8 : 4;
 
-   for (int i = callNode->getFirstArgumentIndex(); i < callNode->getNumChildren(); i++)
+   int firstArgIndex = callNode->getFirstArgumentIndex();
+   if (callNode->isJitDispatchJ9MethodCall(cg()->comp()))
+      firstArgIndex++; // skip the J9Method
+
+   for (int i = firstArgIndex; i < callNode->getNumChildren(); i++)
       {
       TR::DataType type = callNode->getChild(i)->getType();
       dt = type.getDataType();
@@ -551,7 +554,9 @@ uint8_t *J9::X86::AMD64::PrivateLinkage::generateVirtualIndirectThunk(TR::Node *
       }
    else
       {
-      thunk = (uint8_t *)cg()->allocateCodeMemory(codeSize, true);
+      // if disclaim enabled, put into warm
+      bool disclaim = TR::Options::getCmdLineOptions()->getOption(TR_EnableCodeCacheDisclaiming);
+      thunk = (uint8_t *)cg()->allocateCodeMemory(codeSize, !disclaim);
       cursor = thunkEntry = thunk;
       }
 
@@ -608,7 +613,7 @@ uint8_t *J9::X86::AMD64::PrivateLinkage::generateVirtualIndirectThunk(TR::Node *
    return thunkEntry;
    }
 
-TR_J2IThunk *J9::X86::AMD64::PrivateLinkage::generateInvokeExactJ2IThunk(TR::Node *callNode, char *signature)
+TR_MHJ2IThunk *J9::X86::AMD64::PrivateLinkage::generateInvokeExactJ2IThunk(TR::Node *callNode, char *signature)
    {
    TR::Compilation *comp = cg()->comp();
 
@@ -624,8 +629,8 @@ TR_J2IThunk *J9::X86::AMD64::PrivateLinkage::generateInvokeExactJ2IThunk(TR::Nod
    else
       codeSize += 2; // TR::InstOpCode::JMPReg
 
-   TR_J2IThunkTable *thunkTable = comp->getPersistentInfo()->getInvokeExactJ2IThunkTable();
-   TR_J2IThunk      *thunk      = TR_J2IThunk::allocate(codeSize, signature, cg(), thunkTable);
+   TR_MHJ2IThunkTable *thunkTable = comp->getPersistentInfo()->getInvokeExactJ2IThunkTable();
+   TR_MHJ2IThunk      *thunk      = TR_MHJ2IThunk::allocate(codeSize, signature, cg(), thunkTable);
    uint8_t          *cursor     = thunk->entryPoint();
 
    TR::SymbolReference  *glueSymRef;
@@ -673,10 +678,10 @@ TR_J2IThunk *J9::X86::AMD64::PrivateLinkage::generateInvokeExactJ2IThunk(TR::Nod
       {
       // JMPImm4 helper
       //
-      *(uint8_t *)cursor++ = 0xe9;
+      *(uint8_t *)cursor = 0xe9;
       TR::SymbolReference *helper = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_methodHandleJ2IGlue);
-      int32_t disp32 = cg()->branchDisplacementToHelperOrTrampoline(cursor+4, helper);
-      *(int32_t *)cursor = disp32;
+      int32_t disp32 = cg()->branchDisplacementToHelperOrTrampoline(cursor, helper);
+      *(int32_t *)(++cursor) = disp32;
       cursor += 4;
       }
    else
@@ -793,6 +798,10 @@ int32_t J9::X86::AMD64::PrivateLinkage::argAreaSize(TR::Node *callNode)
    int32_t  i;
    int32_t  result  = 0;
    int32_t  firstArgument   = callNode->getFirstArgumentIndex();
+
+   if (callNode->isJitDispatchJ9MethodCall(comp()))
+      firstArgument++; // skip the J9Method
+
    int32_t  lastArgument    = callNode->getNumChildren() - 1;
    for (i=firstArgument; i <= lastArgument; i++)
       {
@@ -809,7 +818,10 @@ int32_t J9::X86::AMD64::PrivateLinkage::buildArgs(TR::Node                      
    TR::SymbolReference *methodSymRef = callNode->getSymbolReference();
    bool passArgsOnStack;
    bool rightToLeft = methodSymbol && methodSymbol->isHelper()
-      && !methodSymRef->isOSRInductionHelper(); //we want the arguments for induceOSR to be passed from left to right as in any other non-helper call
+      && !methodSymRef->isOSRInductionHelper()  //we want the arguments for induceOSR to be passed from left to right as in any other non-helper call
+      // <jitDispatchJ9Method> receives arguments in the same order as the actual callee
+      && !callNode->isJitDispatchJ9MethodCall(comp());
+
    if (callNode->getOpCode().isIndirect())
       {
       if (methodSymbol->isVirtual() &&
@@ -884,6 +896,8 @@ int32_t J9::X86::AMD64::PrivateLinkage::buildPrivateLinkageArgs(TR::Node        
    int                        numDupedArgRegs = 0;
    TR::Register               *dupedArgRegs[NUM_INTEGER_LINKAGE_REGS + NUM_FLOAT_LINKAGE_REGS];
 
+   bool isJitDispatchJ9Method = callNode->isJitDispatchJ9MethodCall(comp());
+
    // Even though the parameters will be passed on the stack, create dummy linkage registers
    // to ensure that if the call were to be made using the linkage registers (e.g., in a guarded
    // devirtual snippet if it was overridden) then the registers would be available at this
@@ -943,6 +957,7 @@ int32_t J9::X86::AMD64::PrivateLinkage::buildPrivateLinkageArgs(TR::Node        
       TR::DataType             type      = child->getType();
       TR::RealRegister::RegNum  rregIndex = noReg;
       TR::DataType            dt        = type.getDataType();
+      bool reserveStackSlotForArg = true;
 
       switch (dt)
          {
@@ -977,6 +992,14 @@ int32_t J9::X86::AMD64::PrivateLinkage::buildPrivateLinkageArgs(TR::Node        
                   	break;
                   }
                }
+
+            if (rregIndex == noReg && isJitDispatchJ9Method && i == firstArgument)
+               {
+               rregIndex = getProperties().getJ9MethodArgumentRegister();
+               numSpecialArgs++;
+               reserveStackSlotForArg = false;
+               }
+
             if (rregIndex == noReg)
                {
                rregIndex =
@@ -1035,28 +1058,31 @@ int32_t J9::X86::AMD64::PrivateLinkage::buildPrivateLinkageArgs(TR::Node        
          dependencies->addPreCondition(preCondReg, rregIndex, cg());
          }
 
-      offset += child->getRoundedSize() * ((DOUBLE_SIZED_ARGS && dt != TR::Address) ? 2 : 1);
-
-      if ((rregIndex == noReg) || (rregIndex != noReg && createDummyLinkageRegisters))
+      if (reserveStackSlotForArg)
          {
-         if (vreg)
-            generateMemRegInstruction(
-               TR::Linkage::movOpcodes(MemReg, fullRegisterMovType(vreg)),
-               child,
-               generateX86MemoryReference(stackPointer, parmAreaSize-offset, cg()),
-               vreg,
-               cg()
-               );
-         else
+         offset += child->getRoundedSize() * ((DOUBLE_SIZED_ARGS && dt != TR::Address) ? 2 : 1);
+
+         if ((rregIndex == noReg) || (rregIndex != noReg && createDummyLinkageRegisters))
             {
-            int32_t konst = child->getInt();
-            generateMemImmInstruction(
-               TR::InstOpCode::S8MemImm4,
-               child,
-               generateX86MemoryReference(stackPointer, parmAreaSize-offset, cg()),
-               konst,
-               cg()
-               );
+            if (vreg)
+               generateMemRegInstruction(
+                  TR::Linkage::movOpcodes(MemReg, fullRegisterMovType(vreg)),
+                  child,
+                  generateX86MemoryReference(stackPointer, parmAreaSize-offset, cg()),
+                  vreg,
+                  cg()
+                  );
+            else
+               {
+               int32_t konst = child->getInt();
+               generateMemImmInstruction(
+                  TR::InstOpCode::S8MemImm4,
+                  child,
+                  generateX86MemoryReference(stackPointer, parmAreaSize-offset, cg()),
+                  konst,
+                  cg()
+                  );
+               }
             }
          }
 
@@ -1258,7 +1284,7 @@ void J9::X86::AMD64::PrivateLinkage::buildIPIC(TR::X86CallSite &site, TR::LabelS
          // let's just lay it down.  It's likely not worth the effort to get
          // this exactly right in all cases.
          //
-         generateInstruction(TR::InstOpCode::bad, site.getCallNode(), cg());
+         generateInstruction(TR::InstOpCode::INT3, site.getCallNode(), cg());
          }
       }
 
@@ -1343,7 +1369,9 @@ void J9::X86::AMD64::PrivateLinkage::buildVirtualOrComputedCall(TR::X86CallSite 
       {
       traceMsg(comp(), "buildVirtualOrComputedCall(%p), isComputed=%d\n", site.getCallNode(), methodSymRef->getSymbol()->castToMethodSymbol()->isComputed());
       }
-   bool evaluateVftEarly = methodSymRef->isUnresolved() || fej9->forceUnresolvedDispatch();
+
+   bool evaluateVftEarly = methodSymRef->isUnresolved()
+      || !fej9->isResolvedVirtualDispatchGuaranteed(comp());
 
    if (methodSymRef->getSymbol()->castToMethodSymbol()->isComputed())
       {
@@ -1358,6 +1386,26 @@ void J9::X86::AMD64::PrivateLinkage::buildVirtualOrComputedCall(TR::X86CallSite 
       {
       // Call through VFT
       //
+      if (comp()->compileRelocatableCode())
+         {
+         // Non-SVM AOT still has to force unresolved virtual dispatch, which
+         // works there because it won't transform other things into virtual
+         // calls, e.g. invokeinterface of an Object method.
+         TR_ASSERT_FATAL(
+            comp()->getOption(TR_UseSymbolValidationManager),
+            "resolved virtual dispatch in AOT requires SVM");
+
+         void *thunk = site.getThunkAddress();
+         TR_OpaqueMethodBlock *method = methodSymRef
+            ->getSymbol()
+            ->castToResolvedMethodSymbol()
+            ->getResolvedMethod()
+            ->getPersistentIdentifier();
+
+         comp()->getSymbolValidationManager()
+            ->addJ2IThunkFromMethodRecord(thunk, method);
+         }
+
       buildVFTCall(site, TR::InstOpCode::CALLMem, NULL, generateX86MemoryReference(site.evaluateVFT(), methodSymRef->getOffset(), cg()));
       }
    else

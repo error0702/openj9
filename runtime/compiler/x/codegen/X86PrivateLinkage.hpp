@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #ifndef X86PRIVATELINKAGE_INCL
@@ -29,7 +29,7 @@
 #include "codegen/RegisterDependency.hpp"
 #include "x/codegen/X86Register.hpp"
 
-class TR_J2IThunk;
+class TR_MHJ2IThunk;
 class TR_ResolvedMethod;
 namespace TR { class Instruction; }
 
@@ -253,7 +253,11 @@ class PrivateLinkage : public J9::PrivateLinkage
    //
    // doneLabel (always provided) is placed at the end of the call sequence by the caller of these functions.
    //
-   virtual void buildDirectCall(TR::SymbolReference *methodSymRef, TR::X86CallSite &site); // NOTE: the methodSymRef being called is not necessarily site.getSymbolReference()
+   virtual void buildDirectCall(
+      TR::SymbolReference *methodSymRef, // NOTE: the methodSymRef being called is not necessarily site.getSymbolReference()
+      TR::X86CallSite &site,
+      TR::LabelSymbol *doneLabel = NULL); // doneLabel is used only for jitDispatchJ9Method
+
    virtual void buildVirtualOrComputedCall(TR::X86CallSite &site, TR::LabelSymbol *entryLabel, TR::LabelSymbol *doneLabel, uint8_t *thunk)=0;
    virtual void buildInterfaceCall(TR::X86CallSite &site, TR::LabelSymbol *entryLabel, TR::LabelSymbol *doneLabel, uint8_t *thunk);
 
@@ -276,7 +280,7 @@ class PrivateLinkage : public J9::PrivateLinkage
    // the vTable slot for the called method.
    //
    virtual uint8_t *generateVirtualIndirectThunk(TR::Node *callNode){ TR_ASSERT(0, "Thunks not implemented in X86Linkage"); return NULL; }
-   virtual TR_J2IThunk *generateInvokeExactJ2IThunk(TR::Node *callNode, char *signature){ TR_ASSERT(0, "Thunks not implemented in X86Linkage"); return NULL; }
+   virtual TR_MHJ2IThunk *generateInvokeExactJ2IThunk(TR::Node *callNode, char *signature){ TR_ASSERT(0, "Thunks not implemented in X86Linkage"); return NULL; }
 
    struct TR::PicParameters IPicParameters;
    struct TR::PicParameters VPicParameters;

@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <!--
-Copyright (c) 2018, 2021 IBM Corp. and others
+Copyright IBM Corp. and others 2018
 
 This program and the accompanying materials are made available under
 the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,9 +16,9 @@ Exception [1] and GNU General Public License, version 2 with the
 OpenJDK Assembly Exception [2].
 
 [1] https://www.gnu.org/software/classpath/license.html
-[2] http://openjdk.java.net/legal/assembly-exception.html
+[2] https://openjdk.org/legal/assembly-exception.html
 
-SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
 -->
 <project name="DDR_Test" default="build" basedir=".">
 	<taskdef resource="net/sf/antcontrib/antlib.xml" />
@@ -31,6 +31,7 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 
 	<!--Properties for this particular build-->
 	<property name="src" location="./src" />
+	<property name="TestUtilities" location="../TestUtilities/src"/>
 	<property name="build" location="./bin" />
 	<property name="transformerListener" location="${TEST_ROOT}/Utils/src" />
 	<property name="LIB" value="junit4,asm_all,testng" />
@@ -54,6 +55,7 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 				<javac srcdir="${src}" destdir="${build}" debug="true" fork="true" executable="${compiler.javac}" includeAntRuntime="false" encoding="ISO-8859-1">
 					<src path="${src}" />
 					<src path="${transformerListener}" />
+					<src path="${TestUtilities}" />
 					<classpath>
 						<pathelement location="${LIB_DIR}/junit4.jar" />
 						<pathelement location="${LIB_DIR}/testng.jar" />
@@ -66,6 +68,7 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 				<javac srcdir="${src}" destdir="${build}" debug="true" fork="true" executable="${compiler.javac}" includeAntRuntime="false" encoding="ISO-8859-1">
 					<src path="${src}" />
 					<src path="${transformerListener}" />
+					<src path="${TestUtilities}" />
 					<classpath>
 						<pathelement location="${LIB_DIR}/junit4.jar" />
 						<pathelement location="${LIB_DIR}/testng.jar" />
@@ -132,7 +135,7 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 						<antcall target="clean" inheritall="true" />
 					</then>
 					<else>
-						<fail message="File 'j9ddr.dat' not found; assuming JDK '${TEST_JDK_HOME}' does not support DDR." />
+						<echo>File 'j9ddr.dat' not found; assuming JDK '${TEST_JDK_HOME}' does not support DDR.</echo>
 					</else>
 				</if>
 			</then>

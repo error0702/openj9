@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #if !defined(REFERENCECHAINWALKER_HPP_)
@@ -42,6 +42,7 @@ class GC_VMThreadIterator;
 class MM_EnvironmentBase;
 class MM_Heap;
 class MM_OwnableSynchronizerObjectList;
+class MM_ContinuationObjectList;
 class MM_UnfinalizedObjectList;
 
 /**
@@ -66,17 +67,22 @@ private:
 	J9Object **_queue; /**< Main queue used for queuing objects */
 	J9Object **_queueEnd; /**< End of the queue used for queuing objects */
 	J9Object **_queueCurrent; /**< Current position of the queue used for queuing objects */
-	UDATA _queueSlots; /**< Size of the queue before overflow occurs */
+	uintptr_t _queueSlots; /**< Size of the queue before overflow occurs */
 	J9MODRON_REFERENCE_CHAIN_WALKER_CALLBACK *_userCallback; /**< User callback function to be called on every reachable slot */
 	void *_userData; /**< User data to be passed to the user callback function */
 	bool _hasOverflowed; /**< Set when the queue has overflowed */
 	bool _isProcessingOverflow; /**< Set when the queue is currently processing the overflow */
 	bool _isTerminating; /**< Set when no more callbacks should be queued */
 	bool _shouldPreindexInterfaceFields; /**< if true, indexes interface fields of the class being visited before class and superclass fields, otherwise, returns them in the order they appear in an object instance (CMVC 142897) */
+#if JAVA_SPEC_VERSION >= 19
+	bool _includeVThreadObject; /**< Set when VirtualThread object is needed by callback function */
+	J9Object *_vThreadObject; /**< Cached object ref of VirtualThread object */
+#endif /* JAVA_SPEC_VERSION >= 19 */
 	MM_ReferenceChainWalkerMarkMap *_markMap;	/**< Mark Map created for Reference Chain Walker */
 	MM_Heap *_heap; /**< Cached pointer to the heap */
 	void *_heapBase; /**< Cached value of the heap base */
 	void *_heapTop; /**< Cached value of the heap top */
+
 
 	void clearQueue();
 	void pushObject(J9Object *obj);
@@ -89,6 +95,9 @@ private:
 	virtual void scanMixedObject(J9Object *objectPtr);
 	virtual void scanPointerArrayObject(J9IndexableObject *objectPtr);
 	virtual void scanReferenceMixedObject(J9Object *objectPtr);
+
+	MMINLINE void scanContinuationNativeSlots(J9Object *objectPtr);
+	MMINLINE void scanContinuationObject(J9Object *objectPtr);
 	
 	virtual void doClassLoader(J9ClassLoader *classLoader);
 
@@ -101,6 +110,7 @@ private:
 	 * @todo Provide function documentation
 	 */
 	virtual void doOwnableSynchronizerObject(J9Object *objectPtr, MM_OwnableSynchronizerObjectList *list);
+	virtual void doContinuationObject(J9Object *objectPtr, MM_ContinuationObjectList *list);
 
 	virtual void doJNIWeakGlobalReference(J9Object **slotPtr);
 	virtual void doJNIGlobalReferenceSlot(J9Object **slotPtr, GC_JNIGlobalReferenceIterator *jniGlobalReferenceIterator);
@@ -187,19 +197,19 @@ private:
 	MMINLINE void setOverflow(J9Object *object)
 	{
 		if (isHeapObject(object)) {
-			UDATA referenceSize = _env->compressObjectReferences() ? sizeof(uint32_t) : sizeof(uintptr_t);
+			uintptr_t referenceSize = _env->compressObjectReferences() ? sizeof(uint32_t) : sizeof(uintptr_t);
 			/* set both mark bits - set 11 */
 			_markMap->setBit(object);
-			_markMap->setBit((J9Object *)((UDATA)object + referenceSize));
+			_markMap->setBit((J9Object *)((uintptr_t)object + referenceSize));
 		}
 	}
 
 	MMINLINE bool isOverflow(J9Object * object)
 	{
 		if (isHeapObject(object)) {
-			UDATA referenceSize = _env->compressObjectReferences() ? sizeof(uint32_t) : sizeof(uintptr_t);
+			uintptr_t referenceSize = _env->compressObjectReferences() ? sizeof(uint32_t) : sizeof(uintptr_t);
 			/* check both bits in mark map - return true if 11 */
-			return (_markMap->isBitSet(object) && _markMap->isBitSet((J9Object *)((UDATA)object + referenceSize)));
+			return (_markMap->isBitSet(object) && _markMap->isBitSet((J9Object *)((uintptr_t)object + referenceSize)));
 		} else {
 			return false;
 		}
@@ -208,17 +218,17 @@ private:
 	MMINLINE void clearOverflow(J9Object * object)
 	{
 		if (isHeapObject(object)) {
-			UDATA referenceSize = _env->compressObjectReferences() ? sizeof(uint32_t) : sizeof(uintptr_t);
+			uintptr_t referenceSize = _env->compressObjectReferences() ? sizeof(uint32_t) : sizeof(uintptr_t);
 			/* clear both mark bits - set 00 */
 			_markMap->clearBit(object);
-			_markMap->clearBit((J9Object *)((UDATA)object + referenceSize));
+			_markMap->clearBit((J9Object *)((uintptr_t)object + referenceSize));
 		}
 	}
 
 protected:
 
 public:
-	MM_ReferenceChainWalker(MM_EnvironmentBase *env, UDATA queueSlots, J9MODRON_REFERENCE_CHAIN_WALKER_CALLBACK *userCallback, void *userData) :
+	MM_ReferenceChainWalker(MM_EnvironmentBase *env, uintptr_t queueSlots, J9MODRON_REFERENCE_CHAIN_WALKER_CALLBACK *userCallback, void *userData) :
 		MM_RootScanner(env, true),
 		_queue(NULL),
 		_queueEnd(NULL),
@@ -230,6 +240,10 @@ public:
 		_isProcessingOverflow(false),
 		_isTerminating(false),
 		_shouldPreindexInterfaceFields(true),	/* default to behaviour required for Java6/heap11 */
+#if JAVA_SPEC_VERSION >= 19
+		_includeVThreadObject(false),
+		_vThreadObject(NULL),
+#endif /* JAVA_SPEC_VERSION >= 19 */
 		_markMap(NULL),
 		_heap(NULL),
 		_heapBase(NULL),
@@ -254,6 +268,10 @@ public:
 		completeScan();
 	}
 	
+#if JAVA_SPEC_VERSION >= 19
+	void includeVThreadObject() { _includeVThreadObject = true; }
+#endif /* JAVA_SPEC_VERSION >= 19 */
+
 	/**
 	 * Added to support bi-modal interface indexing in JVMTI (CMVC 142897).
 	 * Detail:  heap10 requires no pre-indexing in order to preserve Java5 behaviour but heap11 requires pre-indexing to pass a Java6 JCK

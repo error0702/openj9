@@ -1,6 +1,6 @@
 /*[INCLUDE-IF JAVA_SPEC_VERSION >= 8]*/
-/*******************************************************************************
- * Copyright (c) 2018, 2021 IBM Corp. and others
+/*
+ * Copyright IBM Corp. and others 2018
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,25 +16,24 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
 package openj9.lang.management.internal;
 
 import javax.management.MalformedObjectNameException;
 import javax.management.ObjectName;
-/*[IF Sidecar19-SE]*/
+/*[IF JAVA_SPEC_VERSION >= 9]*/
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
-import java.security.AccessController;
 import java.security.PrivilegedAction;
 import java.util.Optional;
-/*[ELSE]*/
+/*[ELSE] JAVA_SPEC_VERSION >= 9 */
 import com.ibm.jvm.Dump;
 import com.ibm.jvm.DumpConfigurationUnavailableException;
 import com.ibm.jvm.InvalidDumpOptionException;
-/*[ENDIF]*/
+/*[ENDIF] JAVA_SPEC_VERSION >= 9 */
 import com.ibm.java.lang.management.internal.ManagementPermissionHelper;
 
 import openj9.lang.management.ConfigurationUnavailableException;
@@ -51,7 +50,7 @@ public final class OpenJ9DiagnosticsMXBeanImpl implements OpenJ9DiagnosticsMXBea
 
 	private static final OpenJ9DiagnosticsMXBean instance = createInstance();
 
-	/*[IF Sidecar19-SE]*/
+	/*[IF JAVA_SPEC_VERSION >= 9]*/
 	private final Class<?> dumpConfigurationUnavailableExClass;
 	private final Class<?> invalidDumpOptionExClass;
 	private final Method dump_HeapDump;
@@ -66,10 +65,13 @@ public final class OpenJ9DiagnosticsMXBeanImpl implements OpenJ9DiagnosticsMXBea
 	private final Method dump_SystemDump;
 	private final Method dump_systemDumpToFile;
 	private final Method dump_triggerDump;
-	/*[ENDIF]*/
+	/*[ENDIF] JAVA_SPEC_VERSION >= 9 */
 
+	/*[IF JAVA_SPEC_VERSION >= 17]*/
+	@SuppressWarnings("removal")
+	/*[ENDIF] JAVA_SPEC_VERSION >= 17 */
 	private static OpenJ9DiagnosticsMXBean createInstance() {
-		/*[IF Sidecar19-SE]*/
+		/*[IF JAVA_SPEC_VERSION > 8]*/
 		// TODO remove the dependency on the openj9.jvm module
 		final Optional<Module> openj9_jvm = ModuleLayer.boot().findModule("openj9.jvm"); //$NON-NLS-1$
 
@@ -88,10 +90,10 @@ public final class OpenJ9DiagnosticsMXBeanImpl implements OpenJ9DiagnosticsMXBea
 			}
 		};
 
-		return AccessController.doPrivileged(action);
-		/*[ELSE]
+		return java.security.AccessController.doPrivileged(action);
+		/*[ELSE] JAVA_SPEC_VERSION > 8
 		return new OpenJ9DiagnosticsMXBeanImpl();
-		/*[ENDIF]*/
+		/*[ENDIF] JAVA_SPEC_VERSION > 8 */
 	}
 
 	/**
@@ -101,11 +103,11 @@ public final class OpenJ9DiagnosticsMXBeanImpl implements OpenJ9DiagnosticsMXBea
 	public void resetDumpOptions() throws ConfigurationUnavailableException {
 		checkManagementSecurityPermission();
 		try {
-			/*[IF Sidecar19-SE]*/
+			/*[IF JAVA_SPEC_VERSION >= 9]*/
 			dump_resetDumpOptions.invoke(null);
-			/*[ELSE]*/
+			/*[ELSE] JAVA_SPEC_VERSION >= 9 */
 			Dump.resetDumpOptions();
-			/*[ENDIF]*/
+			/*[ENDIF] JAVA_SPEC_VERSION >= 9 */
 		} catch (Exception e) {
 			handleDumpConfigurationUnavailableException(e);
 			throw handleError(e);
@@ -119,11 +121,11 @@ public final class OpenJ9DiagnosticsMXBeanImpl implements OpenJ9DiagnosticsMXBea
 	public String[] queryDumpOptions() {
 		checkManagementSecurityPermission();
 		try {
-			/*[IF Sidecar19-SE]*/ if (2 > 1) {
+			/*[IF JAVA_SPEC_VERSION >= 9]*/
 			return (String[])dump_queryDumpOptions.invoke(null);
-			/*[ELSE]*/ }
+			/*[ELSE] JAVA_SPEC_VERSION >= 9 */
 			return Dump.queryDumpOptions();
-			/*[ENDIF]*/
+			/*[ENDIF] JAVA_SPEC_VERSION >= 9 */
 		} catch (Exception e) {
 			throw handleError(e);
 		}
@@ -133,14 +135,30 @@ public final class OpenJ9DiagnosticsMXBeanImpl implements OpenJ9DiagnosticsMXBea
 	 * {@inheritDoc}
 	 */
 	@Override
+	public String getDumpOptions() {
+		String[] options = queryDumpOptions();
+		StringBuilder builder = new StringBuilder();
+		for (int i = 0; i < options.length; i++) {
+			if (i != 0) {
+				builder.append('|');
+			}
+			builder.append(options[i]);
+		}
+		return builder.toString();
+	}
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
 	public void setDumpOptions(String dumpOptions) throws InvalidOptionException, ConfigurationUnavailableException {
 		checkManagementSecurityPermission();
 		try {
-			/*[IF Sidecar19-SE]*/
+			/*[IF JAVA_SPEC_VERSION >= 9]*/
 			dump_setDumpOptions.invoke(null, dumpOptions);
-			/*[ELSE]*/
+			/*[ELSE] JAVA_SPEC_VERSION >= 9 */
 			Dump.setDumpOptions(dumpOptions);
-			/*[ENDIF]*/
+			/*[ENDIF] JAVA_SPEC_VERSION >= 9 */
 		} catch (Exception e) {
 			handleInvalidDumpOptionException(e);
 			handleDumpConfigurationUnavailableException(e);
@@ -155,7 +173,7 @@ public final class OpenJ9DiagnosticsMXBeanImpl implements OpenJ9DiagnosticsMXBea
 	public void triggerDump(String dumpAgent) throws IllegalArgumentException {
 		checkManagementSecurityPermission();
 		switch (dumpAgent) {
-		/*[IF Sidecar19-SE]*/
+		/*[IF JAVA_SPEC_VERSION >= 9]*/
 		case "java": //$NON-NLS-1$
 			try {
 				dump_JavaDump.invoke(null);
@@ -184,7 +202,7 @@ public final class OpenJ9DiagnosticsMXBeanImpl implements OpenJ9DiagnosticsMXBea
 				throw handleError(e);
 			}
 			break;
-		/*[ELSE]
+		/*[ELSE] JAVA_SPEC_VERSION >= 9 */
 		case "java": //$NON-NLS-1$
 			Dump.JavaDump();
 			break;
@@ -197,7 +215,7 @@ public final class OpenJ9DiagnosticsMXBeanImpl implements OpenJ9DiagnosticsMXBea
 		case "snap": //$NON-NLS-1$
 			Dump.SnapDump();
 			break;
-		/*[ENDIF]*/
+		/*[ENDIF] JAVA_SPEC_VERSION >= 9 */
 		default:
 			/*[MSG "K0663", "Invalid or Unsupported Dump Agent cannot be triggered"]*/
 			throw new IllegalArgumentException(com.ibm.oti.util.Msg.getString("K0663")); //$NON-NLS-1$
@@ -212,7 +230,7 @@ public final class OpenJ9DiagnosticsMXBeanImpl implements OpenJ9DiagnosticsMXBea
 		String fileName = null;
 		checkManagementSecurityPermission();
 		switch (dumpAgent) {
-		/*[IF Sidecar19-SE]*/
+		/*[IF JAVA_SPEC_VERSION >= 9]*/
 		case "java": //$NON-NLS-1$
 			try {
 				fileName = (String) dump_javaDumpToFile.invoke(null, fileNamePattern);
@@ -245,7 +263,7 @@ public final class OpenJ9DiagnosticsMXBeanImpl implements OpenJ9DiagnosticsMXBea
 				throw handleError(e);
 			}
 			break;
-		/*[ELSE]
+		/*[ELSE] JAVA_SPEC_VERSION >= 9 */
 		case "java": //$NON-NLS-1$
 			try {
 				fileName = Dump.javaDumpToFile(fileNamePattern);
@@ -278,7 +296,7 @@ public final class OpenJ9DiagnosticsMXBeanImpl implements OpenJ9DiagnosticsMXBea
 				throw handleError(e);
 			}
 			break;
-		/*[ENDIF]*/
+		/*[ENDIF] JAVA_SPEC_VERSION >= 9 */
 		default:
 			/*[MSG "K0663", "Invalid or Unsupported Dump Agent cannot be triggered"]*/
 			throw new IllegalArgumentException(com.ibm.oti.util.Msg.getString("K0663")); //$NON-NLS-1$
@@ -294,11 +312,11 @@ public final class OpenJ9DiagnosticsMXBeanImpl implements OpenJ9DiagnosticsMXBea
 		String dumpOptions = "heap:opts=CLASSIC"; //$NON-NLS-1$
 		checkManagementSecurityPermission();
 		try {
-			/*[IF Sidecar19-SE]*/
+			/*[IF JAVA_SPEC_VERSION >= 9]*/
 			String fileName = (String) dump_triggerDump.invoke(null, dumpOptions);
-			/*[ELSE]
+			/*[ELSE] JAVA_SPEC_VERSION >= 9 */
 			String fileName = Dump.triggerDump(dumpOptions);
-			/*[ENDIF]*/
+			/*[ENDIF] JAVA_SPEC_VERSION >= 9 */
 			return fileName;
 		} catch (Exception e) {
 			handleInvalidDumpOptionException(e);
@@ -327,7 +345,7 @@ public final class OpenJ9DiagnosticsMXBeanImpl implements OpenJ9DiagnosticsMXBea
 	/**
 	 * Private constructor to prevent instantiation by others.
 	 */
-	/*[IF Sidecar19-SE]*/
+	/*[IF JAVA_SPEC_VERSION >= 9]*/
 	private OpenJ9DiagnosticsMXBeanImpl(Module openj9_jvm) throws Exception {
 		super();
 		dumpConfigurationUnavailableExClass = Class.forName(openj9_jvm, "com.ibm.jvm.DumpConfigurationUnavailableException"); //$NON-NLS-1$
@@ -348,11 +366,11 @@ public final class OpenJ9DiagnosticsMXBeanImpl implements OpenJ9DiagnosticsMXBea
 		dump_systemDumpToFile = dumpClass.getMethod("systemDumpToFile", String.class); //$NON-NLS-1$
 		dump_triggerDump = dumpClass.getMethod("triggerDump", String.class); //$NON-NLS-1$
 	}
-	/*[ELSE]*/
+	/*[ELSE] JAVA_SPEC_VERSION >= 9 */
 	private OpenJ9DiagnosticsMXBeanImpl() {
 		super();
 	}
-	/*[ENDIF]*/
+	/*[ENDIF] JAVA_SPEC_VERSION >= 9 */
 
 	/**
 	 * Returns the object name of the MXBean.
@@ -370,7 +388,7 @@ public final class OpenJ9DiagnosticsMXBeanImpl implements OpenJ9DiagnosticsMXBea
 
 	/* Handle error thrown by method invoke as internal error */
 	private static InternalError handleError(Exception error) {
-		/*[IF Sidecar19-SE]*/
+		/*[IF JAVA_SPEC_VERSION >= 9]*/
 		// invoke throws InvocationTargetException if the method it is invoking throws an error.
 		// Unwrap that error for this class to maintain its specification.
 		if (error instanceof InvocationTargetException) {
@@ -383,32 +401,32 @@ public final class OpenJ9DiagnosticsMXBeanImpl implements OpenJ9DiagnosticsMXBea
 			}
 		}
 
-		/*[ENDIF]*/
+		/*[ENDIF] JAVA_SPEC_VERSION >= 9 */
 		throw new InternalError(error.toString(), error);
 	}
 
 	private void handleInvalidDumpOptionException(Exception cause) throws InvalidOptionException {
-		/*[IF Sidecar19-SE]*/
+		/*[IF JAVA_SPEC_VERSION >= 9]*/
 		if (invalidDumpOptionExClass.isInstance(cause.getCause())) {
 			throw new InvalidOptionException("Error in dump options specified", cause.getCause()); //$NON-NLS-1$
 		}
-		/*[ELSE]*/
+		/*[ELSE] JAVA_SPEC_VERSION >= 9 */
 		if (cause instanceof InvalidDumpOptionException) {
 			throw new InvalidOptionException("Error in dump options specified", cause); //$NON-NLS-1$
 		}
-		/*[ENDIF]*/
+		/*[ENDIF] JAVA_SPEC_VERSION >= 9 */
 	}
 
 	private void handleDumpConfigurationUnavailableException(Exception cause) throws ConfigurationUnavailableException {
-		/*[IF Sidecar19-SE]*/
+		/*[IF JAVA_SPEC_VERSION >= 9]*/
 		if (dumpConfigurationUnavailableExClass.isInstance(cause.getCause())) {
 			throw new ConfigurationUnavailableException("Dump configuration cannot be changed while a dump is in progress", cause.getCause()); //$NON-NLS-1$
 		}
-		/*[ELSE]*/
+		/*[ELSE] JAVA_SPEC_VERSION >= 9 */
 		if (cause instanceof DumpConfigurationUnavailableException) {
 			throw new ConfigurationUnavailableException("Dump configuration cannot be changed while a dump is in progress", cause); //$NON-NLS-1$
 		}
-		/*[ENDIF]*/
+		/*[ENDIF] JAVA_SPEC_VERSION >= 9 */
 	}
 
 }

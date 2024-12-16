@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 
@@ -326,8 +326,13 @@ MM_AllocationContextBalanced::allocateArrayletLeaf(MM_EnvironmentBase *env, MM_A
 		result = _subspace->replenishAllocationContextFailed(env, _subspace, this, NULL, allocateDescription, MM_MemorySubSpace::ALLOCATION_TYPE_LEAF);
 	}
 	if (NULL != result) {
-		/* zero the leaf here since we are not under any of the context or exclusive locks */
-		OMRZeroMemory(result, _heapRegionManager->getRegionSize());
+		/* for off-heap case zeroing leaf is unecessary */
+		MM_GCExtensions *extensions = MM_GCExtensions::getExtensions(env);
+		GC_ArrayObjectModel *indexableObjectModel = &extensions->indexableObjectModel;
+		if (!indexableObjectModel->isVirtualLargeObjectHeapEnabled()) {
+			/* zero the leaf here since we are not under any of the context or exclusive locks */
+			OMRZeroMemory(result, _heapRegionManager->getRegionSize());
+		}
 	}
 	return result;
 }

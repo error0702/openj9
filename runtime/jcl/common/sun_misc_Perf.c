@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2009, 2020 IBM Corp. and others
+ * Copyright IBM Corp. and others 2009
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,13 +15,15 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
+#include <assert.h>
 #include "jcl.h"
 #include "jcl_internal.h"
+#include "jclprots.h"
 
 /*
  * This is the minimum implementation of sun.misc.Perf natives to
@@ -39,6 +41,7 @@ Java_sun_misc_Perf_registerNatives(JNIEnv *env, jclass klass)
 jobject JNICALL
 Java_sun_misc_Perf_attach(JNIEnv *env, jobject perf, jstring user, jint lvmid, jint mode)
 {
+	throwNewUnsupportedOperationException(env);
 	return NULL;
 }
 
@@ -91,6 +94,16 @@ Java_sun_misc_Perf_highResFrequency(JNIEnv *env, jobject perf)
 	return j9time_hires_frequency();
 }
 
+#if JAVA_SPEC_VERSION >= 19
+/* private native ByteBuffer attach0(int lvmid) throws IOException; */
+jobject JNICALL
+Java_jdk_internal_perf_Perf_attach0(JNIEnv *env, jobject perf, jint lvmid)
+{
+	throwNewUnsupportedOperationException(env);
+	return NULL;
+}
+#endif /* JAVA_SPEC_VERSION >= 19 */
+
 void
 registerJdkInternalPerfPerfNatives(JNIEnv *env, jclass clazz) {
 	/* clazz can't be null */
@@ -106,9 +119,15 @@ registerJdkInternalPerfPerfNatives(JNIEnv *env, jclass clazz) {
 			(void *)&Java_sun_misc_Perf_createByteArray
 		},
 		{
+#if JAVA_SPEC_VERSION >= 19
+			(char*)"attach0",
+			(char*)"(I)Ljava/nio/ByteBuffer;",
+			(void *)&Java_jdk_internal_perf_Perf_attach0
+#else /* JAVA_SPEC_VERSION >= 19 */
 			(char*)"attach",
 			(char*)"(Ljava/lang/String;II)Ljava/nio/ByteBuffer;",
 			(void *)&Java_sun_misc_Perf_attach
+#endif /* JAVA_SPEC_VERSION >= 19 */
 		},
 		{
 			(char*)"detach",

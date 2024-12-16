@@ -1,6 +1,6 @@
 /*[INCLUDE-IF JAVA_SPEC_VERSION >= 8]*/
-/*******************************************************************************
- * Copyright (c) 2008, 2021 IBM Corp. and others
+/*
+ * Copyright IBM Corp. and others 2008
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,10 +16,10 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
 package com.ibm.java.lang.management.internal;
 
 import java.io.IOException;
@@ -37,7 +37,7 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Properties;
 import java.util.Set;
-/*[IF !Sidecar19-SE]*/
+/*[IF JAVA_SPEC_VERSION == 8]*/
 import java.lang.management.ManagementFactory;
 import java.lang.management.PlatformManagedObject;
 import java.util.Collections;
@@ -46,7 +46,7 @@ import java.util.LinkedList;
 import java.util.Objects;
 import java.util.logging.LogManager;
 import com.ibm.lang.management.internal.ExtendedMemoryMXBeanImpl;
-/*[ENDIF] !Sidecar19-SE*/
+/*[ENDIF] JAVA_SPEC_VERSION == 8*/
 
 import javax.management.InstanceNotFoundException;
 import javax.management.MBeanServerConnection;
@@ -88,7 +88,7 @@ public final class ManagementUtils {
 	public static final boolean VERBOSE_MODE;
 
 	static {
-		Properties properties = com.ibm.oti.vm.VM.getVMLangAccess().internalGetProperties();
+		Properties properties = com.ibm.oti.vm.VM.internalGetProperties();
 		String thisOs = properties.getProperty("os.name"); //$NON-NLS-1$
 
 		isUnix = "aix".equalsIgnoreCase(thisOs) //$NON-NLS-1$
@@ -242,7 +242,12 @@ public final class ManagementUtils {
 
 		@SuppressWarnings("unchecked")
 		Collection<CompositeData> rows = (Collection<CompositeData>) data.values();
-		Map<Object, Object> result = new HashMap<>(rows.size());
+		/*[IF JAVA_SPEC_VERSION >= 19]
+		Map<Object, Object> result = HashMap.newHashMap(rows.size());
+		/*[ELSE] JAVA_SPEC_VERSION >= 19 */
+		// HashMap.DEFAULT_LOAD_FACTOR is 0.75
+		Map<Object, Object> result = new HashMap<>(rows.size() * 4 / 3);
+		/*[ENDIF] JAVA_SPEC_VERSION >= 19 */
 
 		for (CompositeData rowCD : rows) {
 			result.put(rowCD.get(keys[0]), rowCD.get(keys[1]));
@@ -596,7 +601,7 @@ public final class ManagementUtils {
 	 */
 	public static final String BUFFERPOOL_MXBEAN_DOMAIN_TYPE = "java.nio:type=BufferPool"; //$NON-NLS-1$
 
-	/*[IF !Sidecar19-SE]*/
+	/*[IF JAVA_SPEC_VERSION == 8]*/
 
 	/**
 	 * @param mxbeanName
@@ -719,7 +724,7 @@ public final class ManagementUtils {
 		private static final String OPENJ9_DIAGNOSTICS_MXBEAN_NAME = "openj9.lang.management:type=OpenJ9Diagnostics"; //$NON-NLS-1$
 
 		static void registerAll() {
-			// register standard singleton beans
+			// Register standard singleton beans for JDK8.
 			create(ManagementFactory.CLASS_LOADING_MXBEAN_NAME, ClassLoadingMXBeanImpl.getInstance())
 				.addInterface(java.lang.management.ClassLoadingMXBean.class)
 				.validateAndRegister();
@@ -752,7 +757,7 @@ public final class ManagementUtils {
 				.addInterface(java.lang.management.ThreadMXBean.class)
 				.validateAndRegister();
 
-			// register OpenJ9-specific singleton beans
+			// Register OpenJ9-specific singleton beans for JDK8.
 			create(GUEST_OPERATING_SYSTEM_MXBEAN_NAME, com.ibm.virtualization.management.internal.GuestOS.getInstance())
 				.addInterface(com.ibm.virtualization.management.GuestOSMXBean.class)
 				.validateAndRegister();
@@ -769,12 +774,18 @@ public final class ManagementUtils {
 				.addInterface(openj9.lang.management.OpenJ9DiagnosticsMXBean.class)
 				.validateAndRegister();
 
-			// register standard optional beans
+/*[IF CRAC_SUPPORT]*/
+			create(jdk.crac.management.CRaCMXBean.CRAC_MXBEAN_NAME, jdk.crac.management.internal.CRaCMXBeanImpl.getInstance())
+				.addInterface(jdk.crac.management.CRaCMXBean.class)
+				.validateAndRegister();
+/*[ENDIF] CRAC_SUPPORT */
+
+			// Register standard optional beans for JDK8.
 			create(ManagementFactory.COMPILATION_MXBEAN_NAME, CompilationMXBeanImpl.getInstance())
 				.addInterface(java.lang.management.CompilationMXBean.class)
 				.validateAndRegister();
 
-			// register beans with zero or more instances
+			// Register beans with zero or more instances for JDK8.
 			create(BUFFERPOOL_MXBEAN_DOMAIN_TYPE, BufferPoolMXBeanImpl.getBufferPoolMXBeans())
 				.addInterface(java.lang.management.BufferPoolMXBean.class)
 				.validateAndRegister();
@@ -787,7 +798,7 @@ public final class ManagementUtils {
 				.validateAndRegister();
 
 			create(ManagementFactory.MEMORY_MANAGER_MXBEAN_DOMAIN_TYPE,
-					// exclude garbage collector beans handled above
+					// Exclude garbage collector beans handled above.
 					excluding(ExtendedMemoryMXBeanImpl.getInstance().getMemoryManagerMXBeans(false), java.lang.management.GarbageCollectorMXBean.class))
 				.addInterface(java.lang.management.MemoryManagerMXBean.class)
 				.validateAndRegister();
@@ -892,7 +903,8 @@ public final class ManagementUtils {
 			checkNames(beans, pattern);
 			/*[ENDIF]*/
 
-			this.beansByName = new HashMap<>(beans.size());
+			// HashMap.DEFAULT_LOAD_FACTOR is 0.75
+			this.beansByName = new HashMap<>(beans.size() * 4 / 3);
 			this.interfaceTypes = new HashSet<>();
 			this.isSingleton = true;
 
@@ -1023,6 +1035,6 @@ public final class ManagementUtils {
 
 	}
 
-	/*[ENDIF] !Sidecar19-SE*/
+	/*[ENDIF] JAVA_SPEC_VERSION == 8 */
 
 }

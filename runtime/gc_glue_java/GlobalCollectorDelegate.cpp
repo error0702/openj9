@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2017, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2017
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "j9.h"
@@ -183,13 +183,12 @@ MM_GlobalCollectorDelegate::mainThreadGarbageCollectFinished(MM_EnvironmentBase 
 	/* Check that all reference object lists are empty:
 	 * lists must be processed at Mark and nothing should be flushed after
 	 */
-	UDATA listCount = _extensions->gcThreadCount;
 	MM_HeapRegionDescriptorStandard *region = NULL;
 	GC_HeapRegionIteratorStandard regionIterator(_extensions->heap->getHeapRegionManager());
 	while(NULL != (region = regionIterator.nextRegion())) {
 		/* check all lists for regions, they should be empty */
 		MM_HeapRegionDescriptorStandardExtension *regionExtension =  MM_ConfigurationDelegate::getHeapRegionDescriptorStandardExtension(env, region);
-		for (UDATA i = 0; i < listCount; i++) {
+		for (UDATA i = 0; i < regionExtension->_maxListIndex; i++) {
 			MM_ReferenceObjectList *list = &regionExtension->_referenceObjectLists[i];
 			Assert_MM_true(list->isWeakListEmpty());
 			Assert_MM_true(list->isSoftListEmpty());
@@ -463,7 +462,7 @@ MM_GlobalCollectorDelegate::unloadDeadClassLoaders(MM_EnvironmentBase *env)
 	/* The list of classLoaders to be unloaded by cleanUpClassLoadersEnd is rooted in unloadLink */
 	J9ClassLoader *unloadLink = NULL;
 	J9MemorySegment *reclaimedSegments = NULL;
-	_extensions->classLoaderManager->cleanUpClassLoaders(env, classLoadersUnloadedList, &reclaimedSegments, &unloadLink, &_finalizationRequired);
+	_extensions->classLoaderManager->cleanUpClassLoaders(env, classLoadersUnloadedList, classUnloadStats, &reclaimedSegments, &unloadLink, &_finalizationRequired);
 
 	/* Free the class memory segments associated with dead classLoaders, unload (free) the dead classLoaders that don't
 	 * require finalization, and perform any final clean up after the dead classLoaders are gone.

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2017, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2017
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 #include "JProfilingValue.hpp"
 
@@ -547,18 +547,21 @@ TR_JProfilingValue::addProfilingTrees(
       {
       TR_PersistentProfileInfo *profileInfo = comp->getRecompilationInfo()->findOrCreateProfileInfo();
       TR_BlockFrequencyInfo *bfi = TR_BlockFrequencyInfo::get(profileInfo);
-      TR::Node *loadIsQueuedForRecompilation = TR::Node::createWithSymRef(value, TR::iload, 0, comp->getSymRefTab()->createKnownStaticDataSymbolRef(bfi->getIsQueuedForRecompilation(), TR::Int32));
-      TR::Node *checkIfQueueForRecompilation = TR::Node::createif(TR::ificmpeq, loadIsQueuedForRecompilation, TR::Node::iconst(value, -1), mainlineReturn->getEntry());
-      TR::TreeTop *checkIfNeedToProfileValue = TR::TreeTop::create(comp, checkIfQueueForRecompilation);
-      iter->append(checkIfNeedToProfileValue);
-      if (origBlockGlRegDeps != NULL)
+      if (bfi != NULL)
          {
-         TR::Node *exitGlRegDeps = copyGlRegDeps(comp, origBlockGlRegDeps);
-         checkIfQueueForRecompilation->addChildren(&exitGlRegDeps, 1);
+         TR::Node *loadIsQueuedForRecompilation = TR::Node::createWithSymRef(value, TR::iload, 0, comp->getSymRefTab()->createKnownStaticDataSymbolRef(bfi->getIsQueuedForRecompilation(), TR::Int32));
+         TR::Node *checkIfQueueForRecompilation = TR::Node::createif(TR::ificmpeq, loadIsQueuedForRecompilation, TR::Node::iconst(value, -1), mainlineReturn->getEntry());
+         TR::TreeTop *checkIfNeedToProfileValue = TR::TreeTop::create(comp, checkIfQueueForRecompilation);
+         iter->append(checkIfNeedToProfileValue);
+         if (origBlockGlRegDeps != NULL)
+            {
+            TR::Node *exitGlRegDeps = copyGlRegDeps(comp, origBlockGlRegDeps);
+            checkIfQueueForRecompilation->addChildren(&exitGlRegDeps, 1);
+            }
+         lastBranchToMainlineReturnTT = checkIfNeedToProfileValue;
+         if (trace)
+            traceMsg(comp, "\t\t\tCheck if queued for recompilation test performed in block_%d: n%dn\n", iter->getNumber(), checkIfQueueForRecompilation->getGlobalIndex());
          }
-      lastBranchToMainlineReturnTT = checkIfNeedToProfileValue;
-      if (trace)
-         traceMsg(comp, "\t\t\tCheck if queued for recompilation test performed in block_%d\n", iter->getNumber());
       }
 
    /* In case profiling vft , need to do null test for the object. */

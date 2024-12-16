@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,14 +15,17 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include <string.h>
 #if defined (LINUXPPC64) || (defined (AIXPPC) && defined (PPC64)) || defined (J9ZOS39064) || defined(J9ZTPF)
 #include <stdlib.h> /* for getenv */
+#endif
+#ifdef J9ZTPF
+#include <tpf/cujvm.h> /* for z/TPF OS VM exit hook: cjvm_jvm_shutdown_hook() */
 #endif
 
 #include "j9user.h"
@@ -127,8 +130,9 @@ jint JNICALL J9_CreateJavaVM(JavaVM ** p_vm, void ** p_env, J9CreateJavaVMParams
 	omrthread_monitor_t globalMonitor;
 #endif
 
-	if (!jniVersionIsValid(version) || version == JNI_VERSION_1_1)
-		return JNI_EVERSION;			/* unknown arg style, exit. */
+	if ((JNI_VERSION_1_1 == version) || !jniVersionIsValid(version)) {
+		return JNI_EVERSION; /* unknown arg style, exit. */
+	}
 
 #ifndef J9VM_OPT_MULTI_VM
 	if (*pvmList)
@@ -225,6 +229,10 @@ error:
 #ifdef J9VM_INTERP_SIG_QUIT_THREAD
 	vm->J9SigQuitShutdown(vm);
 #endif
+
+#if defined(J9VM_INTERP_SIG_USR2)
+	vm->J9SigUsr2Shutdown(vm);
+#endif /* defined(J9VM_INTERP_SIG_USR2) */
 
 #ifdef J9VM_PROF_EVENT_REPORTING
 	if (env) {
@@ -360,7 +368,7 @@ protectedDestroyJavaVM(J9PortLibrary* portLibrary, void * userData)
 	setEventFlag(vmThread, J9_PUBLIC_FLAGS_STOPPED);
 
 	/* We are dead at this point. Clear the suspend bit prior to triggering the thread end hook */
-    clearHaltFlag(vmThread, J9_PUBLIC_FLAGS_HALT_THREAD_JAVA_SUSPEND);
+	clearHaltFlag(vmThread, J9_PUBLIC_FLAGS_HALT_THREAD_JAVA_SUSPEND);
 
 	TRIGGER_J9HOOK_VM_THREAD_END(vm->hookInterface, vmThread, 1);
 
@@ -392,6 +400,12 @@ protectedDestroyJavaVM(J9PortLibrary* portLibrary, void * userData)
 	}
 #endif
 
+#if defined(J9VM_INTERP_SIG_USR2)
+	if (vm->J9SigUsr2Shutdown) {
+		vm->J9SigUsr2Shutdown(vm);
+	}
+#endif /* defined(J9VM_INTERP_SIG_USR2) */
+
 	Trc_JNIinv_protectedDestroyJavaVM_vmShutdownDone();
 
 	if (terminateRemainingThreads(vmThread)) {
@@ -413,6 +427,11 @@ protectedDestroyJavaVM(J9PortLibrary* portLibrary, void * userData)
 #endif /* COUNT_BYTECODE_PAIRS */
 
 		Trc_JNIinv_protectedDestroyJavaVM_CallingExitHookSecondary();
+
+#ifdef J9ZTPF
+		/* run z/TPF OS exit hook */
+		cjvm_jvm_shutdown_hook();
+#endif
 		
 		if (vm->exitHook) {
 #if defined(J9VM_ZOS_3164_INTEROPERABILITY)
@@ -447,6 +466,11 @@ protectedDestroyJavaVM(J9PortLibrary* portLibrary, void * userData)
 #endif
 
 	Trc_JNIinv_protectedDestroyJavaVM_CallingExitHook();
+
+#ifdef J9ZTPF
+	/* run z/TPF OS exit hook */
+	cjvm_jvm_shutdown_hook();
+#endif
 
 	if (vm->exitHook) {
 #if defined(J9VM_ZOS_3164_INTEROPERABILITY)
@@ -677,8 +701,8 @@ protectedInternalAttachCurrentThread(J9PortLibrary* portLibrary, void * userData
 		}
 	}
 
-
-	if ((env = allocateVMThread(vm, args->osThread, threadType, memorySpace, NULL)) == NULL) {
+	env = allocateVMThread(vm, args->osThread, threadType, memorySpace, NULL);
+	if (NULL == env) {
 		return JNI_ENOMEM;
 	}
 	env->gpProtected = TRUE;
@@ -822,14 +846,9 @@ jint JNICALL GetEnv(JavaVM *jvm, void **penv, jint version)
 		return JNI_EDETACHED;
 	}
 
-	/* Call the hook - if rc changes from JNI_EVERSION, return it.
-	 * Note: the JavaVM parameter must be used in the call instead of the J9JavaVM
-	 * because the JavaVM parameter should be a J9InvocationJavaVM* when GetEnv()
-	 * is called from JVMTI agents.
-	 */
-	TRIGGER_J9HOOK_VM_GETENV(vm->hookInterface, jvm, penv, version, rc);
-	if (rc != JNI_EVERSION) {
-		return rc;
+	if (jniVersionIsValid((UDATA)version)) {
+		*penv = (void *)vmThread;
+		return JNI_OK;
 	}
 
 	if (version == UTE_VERSION_1_1) {
@@ -844,9 +863,8 @@ jint JNICALL GetEnv(JavaVM *jvm, void **penv, jint version)
 		if (vm->j9rasGlobalStorage == NULL) {	
 			j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_VM_JVMRI_REQUESTED_WITHOUT_TRACE);
 			return JNI_EINVAL;
-		} else {
-			*penv = ((RasGlobalStorage *)vm->j9rasGlobalStorage)->jvmriInterface;
 		}
+		*penv = ((RasGlobalStorage *)vm->j9rasGlobalStorage)->jvmriInterface;
 		return *penv == NULL ? JNI_EVERSION : JNI_OK;
 	}
 
@@ -863,15 +881,22 @@ jint JNICALL GetEnv(JavaVM *jvm, void **penv, jint version)
 	 */
 	if (IFA_ENABLED_JNI_VERSION == (version & IFA_ENABLED_JNI_VERSION_MASK)) {
 		version &= ~IFA_ENABLED_JNI_VERSION_MASK;
+		if (jniVersionIsValid((UDATA)version)) {
+			*penv = (void *)vmThread;
+			return JNI_OK;
+		}
+		return JNI_EVERSION;
 	}
 #endif /* defined(J9VM_OPT_JAVA_OFFLOAD_SUPPORT) */
 
-   if (!jniVersionIsValid((UDATA)version)) {
-		return JNI_EVERSION;
-	}
-
-	*penv = (void *)vmThread;
-	return JNI_OK;
+	/* Call the hook to allow modules to add custom version numbers.
+	 *
+	 * Note: the JavaVM parameter must be used in the call instead of the J9JavaVM
+	 * because the JavaVM parameter should be a J9InvocationJavaVM* when GetEnv()
+	 * is called from JVMTI agents.
+	 */
+	TRIGGER_J9HOOK_VM_GETENV(vm->hookInterface, jvm, penv, version, rc);
+	return rc;
 }
 
 

@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 1991, 2021 IBM Corp. and others
+# Copyright IBM Corp. and others 1991
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
 # OpenJDK Assembly Exception [2].
 #
 # [1] https://www.gnu.org/software/classpath/license.html
-# [2] http://openjdk.java.net/legal/assembly-exception.html
+# [2] https://openjdk.org/legal/assembly-exception.html
 #
-# SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+# SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
 ################################################################################
 
 #TODO Platform hacks
@@ -26,16 +26,8 @@ set(J9VM_ENV_HAS_FPU ON CACHE BOOL "")
 set(OMR_OPT_CUDA OFF CACHE BOOL "")
 
 set(OMR_GC_DYNAMIC_CLASS_UNLOADING ON CACHE BOOL "")
-set(OMR_GC_LEAF_BITS ON CACHE BOOL "")
-set(OMR_GC_MODRON_COMPACTION ON CACHE BOOL "")
-set(OMR_GC_MODRON_CONCURRENT_MARK ON CACHE BOOL "")
-set(OMR_GC_MODRON_SCAVENGER ON CACHE BOOL "")
-set(OMR_GC_REALTIME ON CACHE BOOL "")
-set(OMR_GC_SEGREGATED_HEAP ON CACHE BOOL "")
-set(OMR_GC_VLHGC ON CACHE BOOL "")
 
 #TODO these options to be properly configured like the rest
-set(OMR_GC_CONCURRENT_SWEEP ON CACHE BOOL "")
 set(OMR_JIT ON CACHE BOOL "")
 set(OMR_COMPILER ON CACHE BOOL "")
 set(OMR_PORT_ASYNC_HANDLER ON CACHE BOOL "")
@@ -47,10 +39,6 @@ set(OMR_THR_CUSTOM_SPIN_OPTIONS ON CACHE BOOL "")
 set(OMR_NOTIFY_POLICY_CONTROL ON CACHE BOOL "")
 set(OMR_THR_THREE_TIER_LOCKING ON CACHE BOOL "")
 set(J9VM_BUILD_JAVA7 ON CACHE BOOL "")
-set(J9VM_OPT_MEMORY_CHECK_SUPPORT ON CACHE BOOL "")
-set(J9VM_GC_VLHGC ON CACHE BOOL "")
-
-set(J9VM_MODULE_JEXTRACTNATIVES ON CACHE BOOL "")
 
 set(J9VM_MODULE_ALGORITHM_TEST ON CACHE BOOL "")
 set(J9VM_MODULE_BCUTIL ON CACHE BOOL "")
@@ -168,6 +156,7 @@ set(J9VM_INTERP_NEW_HEADER_SHAPE ON CACHE BOOL "")
 set(J9VM_INTERP_PROFILING_BYTECODES ON CACHE BOOL "")
 set(J9VM_INTERP_SIG_QUIT_THREAD ON CACHE BOOL "")
 set(J9VM_INTERP_SIG_QUIT_THREAD_USES_SEMAPHORES ON CACHE BOOL "")
+set(J9VM_INTERP_SIG_USR2 ON CACHE BOOL "")
 set(J9VM_INTERP_USE_SPLIT_SIDE_TABLES ON CACHE BOOL "")
 set(J9VM_INTERP_USE_UNSAFE_HELPER ON CACHE BOOL "")
 set(J9VM_INTERP_VERBOSE ON CACHE BOOL "")
@@ -200,7 +189,6 @@ set(J9VM_OPT_JXE_LOAD_SUPPORT ON CACHE BOOL "")
 set(J9VM_OPT_MEMORY_CHECK_SUPPORT ON CACHE BOOL "")
 set(J9VM_OPT_METHOD_HANDLE ON CACHE BOOL "")
 set(J9VM_OPT_METHOD_HANDLE_COMMON ON CACHE BOOL "")
-set(J9VM_OPT_MODULE ON CACHE BOOL "")
 set(J9VM_OPT_MULTI_VM ON CACHE BOOL "")
 set(J9VM_OPT_NEW_OBJECT_HASH ON CACHE BOOL "")
 set(J9VM_OPT_NEW_ROM_CLASS_BUILDER ON CACHE BOOL "")
@@ -208,6 +196,7 @@ set(J9VM_OPT_OPENJDK_METHODHANDLE OFF CACHE BOOL "")
 set(J9VM_OPT_REFLECT ON CACHE BOOL "")
 set(J9VM_OPT_ROM_IMAGE_SUPPORT ON CACHE BOOL "")
 set(J9VM_OPT_SHARED_CLASSES ON CACHE BOOL "")
+set(J9VM_OPT_SNAPSHOTS OFF CACHE BOOL "")
 set(J9VM_OPT_SIDECAR ON CACHE BOOL "")
 set(J9VM_OPT_SRP_AVL_TREE_SUPPORT ON CACHE BOOL "")
 set(J9VM_OPT_STRING_COMPRESSION ON CACHE BOOL "")

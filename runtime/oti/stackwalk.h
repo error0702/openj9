@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #ifndef STACKWALK_H
@@ -142,7 +142,14 @@ extern "C" {
 #define J9_STACK_FLAGS_JIT_FAILED_METHOD_MONITOR_ENTER_RESOLVE 0x01000000
 #define J9_STACK_FLAGS_JIT_EXCEPTION_CATCH_RESOLVE 0x01100000
 
-/* Platform-specific defines */
+/* Platform-specific defines
+ *
+ * - J9SW_JIT_STACK_SLOTS_USED_BY_CALL
+ *     Number of slots pushed on a stack by call itself. Should be 0 (zero)
+ *     for architectures that store return address into a link register.
+ *     Currently only X86 defines it as 1 since x86 `call` instruction pushes
+ *     return address onto a stack.
+ */
 
 #if defined(J9VM_ARCH_X86)
 
@@ -358,7 +365,7 @@ extern "C" {
 
 /* @ddr_namespace: map_to_type=J9StackWalkConstants */
 
-#define J9SW_JIT_STACK_SLOTS_USED_BY_CALL 0x1
+#define J9SW_JIT_STACK_SLOTS_USED_BY_CALL 0x0
 #define J9SW_ARGUMENT_REGISTER_COUNT 0x8
 #define J9SW_JIT_FLOAT_ARGUMENT_REGISTER_COUNT 0x8
 #define J9SW_POTENTIAL_SAVED_REGISTERS 0xC

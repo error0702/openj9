@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include <algorithm>
@@ -51,6 +51,7 @@
 #include "runtime/DataCache.hpp"
 #include "env/FrontEnd.hpp"
 #include "infra/Monitor.hpp"
+#include "env/PersistentCHTable.hpp"
 #include "env/PersistentInfo.hpp"
 #include "env/VMAccessCriticalSection.hpp"
 #include "env/CompilerEnv.hpp"
@@ -77,6 +78,81 @@
 #if defined(J9VM_OPT_JITSERVER)
 #include "control/CompilationThread.hpp"
 #endif /* defined(J9VM_OPT_JITSERVER) */
+
+#include "exceptions/AOTFailure.hpp"
+
+const char *TR_RelocationRuntime::_reloErrorCodeNames[] =
+   {
+   "relocationOK",                                     // 0
+
+   "outOfMemory",                                      // 1
+   "reloActionFailCompile",                            // 2
+   "unknownRelocation",                                // 3
+   "unknownReloAction",                                // 4
+   "invalidRelocation",                                // 5
+   "exceptionThrown",                                  // 6
+
+   "methodEnterValidationFailure",                     // 7
+   "methodExitValidationFailure",                      // 8
+   "exceptionHookValidationFailure",                   // 9
+   "stringCompressionValidationFailure",               // 10
+   "tmValidationFailure",                              // 11
+   "osrValidationFailure",                             // 12
+   "instanceFieldValidationFailure",                   // 13
+   "staticFieldValidationFailure",                     // 14
+   "classValidationFailure",                           // 15
+   "arbitraryClassValidationFailure",                  // 16
+   "classByNameValidationFailure",                     // 17
+   "profiledClassValidationFailure",                   // 18
+   "classFromCPValidationFailure",                     // 19
+   "definingClassFromCPValidationFailure",             // 20
+   "staticClassFromCPValidationFailure",               // 21
+   "arrayClassFromComponentClassValidationFailure",    // 22
+   "superClassFromClassValidationFailure",             // 23
+   "classInstanceOfClassValidationFailure",            // 24
+   "systemClassByNameValidationFailure",               // 25
+   "classFromITableIndexCPValidationFailure",          // 26
+   "declaringClassFromFieldOrStaticValidationFailure", // 27
+   "concreteSubclassFromClassValidationFailure",       // 28
+   "classChainValidationFailure",                      // 29
+   "methodFromClassValidationFailure",                 // 30
+   "staticMethodFromCPValidationFailure",              // 31
+   "specialMethodFromCPValidationFailure",             // 32
+   "virtualMethodFromCPValidationFailure",             // 33
+   "virtualMethodFromOffsetValidationFailure",         // 34
+   "interfaceMethodFromCPValidationFailure",           // 35
+   "improperInterfaceMethodFromCPValidationFailure",   // 36
+   "methodFromClassAndSigValidationFailure",           // 37
+   "stackWalkerMaySkipFramesValidationFailure",        // 38
+   "classInfoIsInitializedValidationFailure",          // 39
+   "methodFromSingleImplValidationFailure",            // 40
+   "methodFromSingleInterfaceImplValidationFailure",   // 41
+   "methodFromSingleAbstractImplValidationFailure",    // 42
+   "j2iThunkFromMethodValidationFailure",              // 43
+   "isClassVisibleValidationFailure",                  // 44
+   "svmValidationFailure",                             // 45
+   "wkcValidationFailure",                             // 46
+   "methodTracingValidationFailure",                   // 47
+   "dynamicMethodFromcallsiteIndexValidationFailure",  // 48
+   "handleMethodFromcallsiteIndexValidationFailure" ,  // 49
+
+   "classAddressRelocationFailure",                    // 50
+   "inlinedMethodRelocationFailure",                   // 51
+   "symbolFromManagerRelocationFailure",               // 52
+   "thunkRelocationFailure",                           // 53
+   "trampolineRelocationFailure",                      // 54
+   "picTrampolineRelocationFailure",                   // 55
+   "cacheFullRelocationFailure",                       // 56
+   "blockFrequencyRelocationFailure",                  // 57
+   "recompQueuedFlagRelocationFailure",                // 58
+   "debugCounterRelocationFailure",                    // 59
+   "directJNICallRelocationFailure",                   // 60
+   "ramMethodConstRelocationFailure",                  // 61
+   "catchBlockCounterRelocationFailure",               // 62
+   "staticDefaultValueInstanceRelocationFailure",      // 63
+
+   "maxRelocationError"                                // 64
+   };
 
 TR_RelocationRuntime::TR_RelocationRuntime(J9JITConfig *jitCfg)
    {
@@ -142,6 +218,7 @@ TR_RelocationRuntime::TR_RelocationRuntime(J9JITConfig *jitCfg)
       }
 
       _isLoading = false;
+      _isRelocating = false;
 
 #if defined(DEBUG) || defined(PROD_WITH_ASSUMES)
       _numValidations = 0;
@@ -166,7 +243,9 @@ TR_RelocationRuntime::prepareRelocateAOTCodeAndData(J9VMThread* vmThread,
                                                     TR::Options *options,
                                                     TR::Compilation *comp,
                                                     TR_ResolvedMethod *resolvedMethod,
-                                                    uint8_t *existingCode)
+                                                    uint8_t *existingCode,
+                                                    TR_J9SharedCache *cacheOverride
+                                                    )
    {
    _currentThread = vmThread;
    _fe = theFE;
@@ -180,6 +259,7 @@ TR_RelocationRuntime::prepareRelocateAOTCodeAndData(J9VMThread* vmThread,
    _relocationStatus = RelocationNoError;
    _haveReservedCodeCache = false; // MCT
    _returnCode = 0;
+   _reloErrorCode = TR_RelocationErrorCode::relocationOK;
 
    _comp = comp;
    _trMemory = comp->trMemory();
@@ -190,6 +270,8 @@ TR_RelocationRuntime::prepareRelocateAOTCodeAndData(J9VMThread* vmThread,
    _options = options;
    TR_ASSERT(_options, "Options were not correctly initialized.");
    _reloLogger->setupOptions(_options);
+
+   TR_RelocationRuntime::IsRelocating startRelocating(this, cacheOverride);
 
    uint8_t *tempCodeStart, *tempDataStart;
    uint8_t *oldDataStart, *oldCodeStart, *newCodeStart;
@@ -202,25 +284,33 @@ TR_RelocationRuntime::prepareRelocateAOTCodeAndData(J9VMThread* vmThread,
 
    // If we want to trace this method but the AOT body is not prepared to handle it
    // we must fail this AOT load with an error code that will force retrial
-   if ((fej9->isMethodTracingEnabled((TR_OpaqueMethodBlock*)theMethod) || fej9->canMethodExitEventBeHooked())
-      &&
-       (_aotMethodHeaderEntry->flags & TR_AOTMethodHeader_IsNotCapableOfMethodExitTracing))
+   if (fej9->canMethodEnterEventBeHooked()
+       && !(_aotMethodHeaderEntry->flags & TR_AOTMethodHeader_MethodEnterEventCanBeHooked))
       {
-      setReturnCode(compilationAotValidateMethodExitFailure);
+      setReloErrorCode(TR_RelocationErrorCode::methodEnterValidationFailure);
+      setReturnCode(compilationRelocationFailure);
       return NULL; // fail
       }
-   if ((fej9->isMethodTracingEnabled((TR_OpaqueMethodBlock*)theMethod) || fej9->canMethodEnterEventBeHooked())
-      &&
-       (_aotMethodHeaderEntry->flags & TR_AOTMethodHeader_IsNotCapableOfMethodEnterTracing))
+   if (fej9->canMethodExitEventBeHooked()
+       && !(_aotMethodHeaderEntry->flags & TR_AOTMethodHeader_MethodExitEventCanBeHooked))
       {
-      setReturnCode(compilationAotValidateMethodEnterFailure);
+      setReloErrorCode(TR_RelocationErrorCode::methodExitValidationFailure);
+      setReturnCode(compilationRelocationFailure);
+      return NULL; // fail
+      }
+   if (fej9->isMethodTracingEnabled((TR_OpaqueMethodBlock *)theMethod)
+       && !(_aotMethodHeaderEntry->flags & TR_AOTMethodHeader_MethodTracingEnabled))
+      {
+      setReloErrorCode(TR_RelocationErrorCode::methodTracingValidationFailure);
+      setReturnCode(compilationRelocationFailure);
       return NULL; // fail
       }
 
    if (fej9->canExceptionEventBeHooked()
        && (_aotMethodHeaderEntry->flags & TR_AOTMethodHeader_IsNotCapableOfExceptionHook))
       {
-      setReturnCode(compilationAotValidateExceptionHookFailure);
+      setReloErrorCode(TR_RelocationErrorCode::exceptionHookValidationFailure);
+      setReturnCode(compilationRelocationFailure);
       return NULL;
       }
 
@@ -244,7 +334,8 @@ TR_RelocationRuntime::prepareRelocateAOTCodeAndData(J9VMThread* vmThread,
          }
       if (conflict)
          {
-         setReturnCode(compilationAotValidateStringCompressionFailure);
+         setReloErrorCode(TR_RelocationErrorCode::stringCompressionValidationFailure);
+         setReturnCode(compilationRelocationFailure);
          return NULL;
          }
       }
@@ -255,7 +346,8 @@ TR_RelocationRuntime::prepareRelocateAOTCodeAndData(J9VMThread* vmThread,
 
    if ((_aotMethodHeaderEntry->flags & TR_AOTMethodHeader_TMDisabled) && !comp->getOption(TR_DisableTM))
       {
-      setReturnCode(compilationAOTValidateTMFailure);
+      setReloErrorCode(TR_RelocationErrorCode::tmValidationFailure);
+      setReturnCode(compilationRelocationFailure);
       return NULL;
       }
 
@@ -268,7 +360,8 @@ TR_RelocationRuntime::prepareRelocateAOTCodeAndData(J9VMThread* vmThread,
                                      _aotMethodHeaderEntry->_osrBufferInfo._scratchBufferSizeInBytes,
                                      _aotMethodHeaderEntry->_osrBufferInfo._stackFrameSizeInBytes))
          {
-         setReturnCode(compilationAOTValidateOSRFailure);
+         setReloErrorCode(TR_RelocationErrorCode::osrValidationFailure);
+         setReturnCode(compilationRelocationFailure);
          return NULL;
          }
       }
@@ -353,10 +446,12 @@ TR_RelocationRuntime::prepareRelocateAOTCodeAndData(J9VMThread* vmThread,
                // Before copying, memorize the real size of the block returned by the code cache manager
                // and fix it later
                U_32 blockSize = ((OMR::CodeCacheMethodHeader*)newCodeStart)->_size;
+               omrthread_jit_write_protect_disable();
                memcpy(newCodeStart, tempCodeStart, codeSize);  // the real size may have been overwritten
                ((OMR::CodeCacheMethodHeader*)newCodeStart)->_size = blockSize; // fix it
                // Must fix the pointer to the metadata which is stored in the OMR::CodeCacheMethodHeader
                ((OMR::CodeCacheMethodHeader*)newCodeStart)->_metaData = _exceptionTable;
+               omrthread_jit_write_protect_enable();
                }
             else
                {
@@ -506,14 +601,43 @@ TR_RelocationRuntime::relocateAOTCodeAndData(U_8 *tempDataStart,
 
          try
             {
-            _returnCode = reloGroup.applyRelocations(this, reloTarget(), newMethodCodeStart() + codeCacheDelta());
+            TR_RelocationErrorCode errorCode = reloGroup.applyRelocations(this, reloTarget(), newMethodCodeStart() + codeCacheDelta());
+            setReloErrorCode(errorCode);
+            switch (errorCode)
+               {
+               case TR_RelocationErrorCode::relocationOK:
+                  setReturnCode(compilationOK);
+                  break;
+               case TR_RelocationErrorCode::trampolineRelocationFailure:
+                  setReturnCode(compilationAotTrampolineReloFailure);
+                  break;
+               case TR_RelocationErrorCode::picTrampolineRelocationFailure:
+                  setReturnCode(compilationAotPicTrampolineReloFailure);
+                  break;
+               case TR_RelocationErrorCode::cacheFullRelocationFailure:
+                  setReturnCode(compilationAotCacheFullReloFailure);
+                  break;
+               default:
+                  setReturnCode(compilationRelocationFailure);
+               }
+            }
+         catch (const std::bad_alloc &e)
+            {
+            setReloErrorCode(TR_RelocationErrorCode::outOfMemory);
+            setReturnCode(compilationHeapLimitExceeded);
+            }
+         catch (const J9::AOTSymbolValidationManagerFailure &e)
+            {
+            setReloErrorCode(TR_RelocationErrorCode::svmValidationFailure);
+            setReturnCode(compilationSymbolValidationManagerFailure);
             }
          catch (...)
             {
-            _returnCode = compilationAotClassReloFailure;
+            setReloErrorCode(TR_RelocationErrorCode::exceptionThrown);
+            setReturnCode(compilationRelocationFailure);
             }
 
-         RELO_LOG(reloLogger(), 6, "relocateAOTCodeAndData: return code %d\n", _returnCode);
+         RELO_LOG(reloLogger(), 6, "relocateAOTCodeAndData: return code %d\n", returnCode());
 
 #if defined(DEBUG) || defined(PROD_WITH_ASSUMES)
          // Detect some potential incorrectness that could otherwise be missed
@@ -537,7 +661,7 @@ TR_RelocationRuntime::relocateAOTCodeAndData(U_8 *tempDataStart,
             }
 #endif
 
-         if (_returnCode != 0)
+         if (getReloErrorCode() != TR_RelocationErrorCode::relocationOK)
             {
             //clean up code cache
             _relocationStatus = RelocationFailure;
@@ -572,7 +696,7 @@ TR_RelocationRuntime::relocateAOTCodeAndData(U_8 *tempDataStart,
             excptEntry32->ramMethod = actualMethod;
 
             excptEntry32++;
-            if (_comp->getOption(TR_FullSpeedDebug))
+            if (_aotMethodHeaderEntry->flags & TR_AOTMethodHeader_UsesFSD)
                excptEntry32 = (J9JIT32BitExceptionTableEntry *) ((uint8_t *) excptEntry32 + 4);
 
             numExcptionRanges--;
@@ -584,7 +708,7 @@ TR_RelocationRuntime::relocateAOTCodeAndData(U_8 *tempDataStart,
       } //end if J9_JIT_DCE_EXCEPTION_INFO
 
 #if defined(J9VM_OPT_JITSERVER)
-   TR_ASSERT_FATAL(!TR::CompilationInfo::getStream(), "TR_RelocationRuntime::relocateAOTCodeAndData should not be called at the JITSERVER");
+   TR_ASSERT_FATAL(!_comp->getStream(), "TR_RelocationRuntime::relocateAOTCodeAndData should not be called at the JITSERVER");
 #endif /* defined(J9VM_OPT_JITSERVER) */
    if (startPC)
       {
@@ -751,6 +875,132 @@ TR_RelocationRuntime::aotMethodHeaderVersionsMatch()
    return true;
    }
 
+void
+TR_RelocationRuntime::fillAOTHeader(J9JavaVM *vm, TR_FrontEnd *fe, TR_AOTHeader *aotHeader)
+   {
+   PORT_ACCESS_FROM_JAVAVM(vm);
+
+   TR_J9VMBase *fej9 = (TR_J9VMBase *)fe;
+
+   memset(aotHeader, 0, sizeof(TR_AOTHeader));
+   aotHeader->eyeCatcher = TR_AOTHeaderEyeCatcher;
+
+   TR_Version *aotHeaderVersion = &aotHeader->version;
+   aotHeaderVersion->structSize = sizeof(TR_Version);
+   aotHeaderVersion->majorVersion = TR_AOTHeaderMajorVersion;
+   aotHeaderVersion->minorVersion = TR_AOTHeaderMinorVersion;
+   strncpy(aotHeaderVersion->vmBuildVersion, EsBuildVersionString, sizeof(aotHeaderVersion->vmBuildVersion) - 1);
+   aotHeaderVersion->vmBuildVersion[sizeof(aotHeaderVersion->vmBuildVersion) - 1] = '\0';
+   strncpy(aotHeaderVersion->jitBuildVersion, TR_BUILD_NAME, sizeof(aotHeaderVersion->jitBuildVersion) - 1);
+   aotHeaderVersion->jitBuildVersion[sizeof(aotHeaderVersion->jitBuildVersion) - 1] = '\0';
+
+   aotHeader->gcPolicyFlag = vm->memoryManagerFunctions->j9gc_modron_getWriteBarrierType(vm);
+   aotHeader->lockwordOptionHashValue = getCurrentLockwordOptionHashValue(vm);
+   aotHeader->compressedPointerShift = vm->memoryManagerFunctions->j9gc_objaccess_compressedPointersShift(vm->internalVMFunctions->currentVMThread(vm));
+   aotHeader->processorDescription = TR::Compiler->relocatableTarget.cpu.getProcessorDescription();
+
+   // Set up other feature flags
+   aotHeader->featureFlags = generateFeatureFlags(fe);
+
+   // Set ArrayLet Size if supported
+   aotHeader->arrayLetLeafSize = TR::Compiler->om.arrayletLeafSize();
+   }
+
+// The method CS::Hash_FNV is being used to compute the hash value
+// Notice that currently CS2::Hash_FNV is a hash function that never returns 0
+uint32_t
+TR_RelocationRuntime::getCurrentLockwordOptionHashValue(J9JavaVM *vm)
+   {
+   IDATA currentLockwordArgIndex = FIND_ARG_IN_VMARGS(STARTSWITH_MATCH, J9::Options::_externalOptionStrings[J9::ExternalOptions::Xlockword], NULL);
+   uint32_t currentLockwordOptionHashValue = 0;
+   if (currentLockwordArgIndex >= 0)
+      {
+      char * currentLockwordOption = NULL;
+      GET_OPTION_VALUE(currentLockwordArgIndex, ':', &currentLockwordOption);
+      currentLockwordOptionHashValue = CS2::Hash_FNV((unsigned char*)currentLockwordOption, strlen(currentLockwordOption));
+      }
+   return currentLockwordOptionHashValue;
+   }
+
+uintptr_t
+TR_RelocationRuntime::generateFeatureFlags(TR_FrontEnd *fe)
+   {
+   uintptr_t featureFlags = 0;
+   TR_J9VMBase *fej9 = (TR_J9VMBase *)fe;
+
+   featureFlags |= TR_FeatureFlag_sanityCheckBegin;
+
+   if (TR::Compiler->relocatableTarget.isSMP())
+      featureFlags |= TR_FeatureFlag_IsSMP;
+
+   if (TR::Options::useCompressedPointers())
+      featureFlags |= TR_FeatureFlag_UsesCompressedPointers;
+
+   if (TR::Options::getCmdLineOptions()->getOption(TR_DisableTraps))
+      featureFlags |= TR_FeatureFlag_DisableTraps;
+
+   if (TR::Options::getAOTCmdLineOptions()->getOption(TR_TLHPrefetch))
+      featureFlags |= TR_FeatureFlag_TLHPrefetch;
+
+   if (TR::CodeCacheManager::instance()->codeCacheConfig().needsMethodTrampolines())
+      featureFlags |= TR_FeatureFlag_MethodTrampolines;
+
+   if (TR::Options::getCmdLineOptions()->getOption(TR_FullSpeedDebug))
+      featureFlags |= TR_FeatureFlag_FSDEnabled;
+
+   if (TR::Options::getCmdLineOptions()->getOption(TR_EnableHCR))
+      featureFlags |= TR_FeatureFlag_HCREnabled;
+
+#ifdef TR_TARGET_S390
+   if (TR::Compiler->relocatableTarget.cpu.supportsFeature(OMR_FEATURE_S390_VECTOR_FACILITY))
+      featureFlags |= TR_FeatureFlag_SIMDEnabled;
+#endif
+
+   if (TR::Compiler->om.readBarrierType() != gc_modron_readbar_none)
+      {
+      featureFlags |= TR_FeatureFlag_ConcurrentScavenge;
+
+#ifdef TR_TARGET_S390
+      if (!TR::Compiler->relocatableTarget.cpu.supportsFeature(OMR_FEATURE_S390_GUARDED_STORAGE))
+         featureFlags |= TR_FeatureFlag_SoftwareReadBarrier;
+#endif
+      }
+
+   if (TR::Compiler->om.isIndexableDataAddrPresent())
+      featureFlags |= TR_FeatureFlag_ArrayHeaderShape;
+
+   if (fej9->isAsyncCompilation())
+      featureFlags |= TR_FeatureFlag_AsyncCompilation;
+
+
+   if (!TR::Options::getCmdLineOptions()->getOption(TR_DisableTM) &&
+       !TR::Options::getAOTCmdLineOptions()->getOption(TR_DisableTM))
+      {
+      if (TR::Compiler->relocatableTarget.cpu.supportsTransactionalMemoryInstructions())
+         {
+         featureFlags |= TR_FeatureFlag_UsesTM;
+         }
+      }
+
+   if (TR::Options::getCmdLineOptions()->isVariableHeapBaseForBarrierRange0())
+      featureFlags |= TR_FeatureFlag_IsVariableHeapBaseForBarrierRange0;
+
+   if (TR::Options::getCmdLineOptions()->isVariableHeapSizeForBarrierRange0())
+      featureFlags |= TR_FeatureFlag_IsVariableHeapSizeForBarrierRange0;
+
+   if (TR::Options::getCmdLineOptions()->isVariableActiveCardTableBase())
+      featureFlags |= TR_FeatureFlag_IsVariableActiveCardTableBase;
+
+   TR::CompilationInfo *compInfo = TR::CompilationInfo::get();
+   TR_PersistentCHTable *cht = compInfo->getPersistentInfo()->getPersistentCHTable();
+   if (!TR::Options::getAOTCmdLineOptions()->getOption(TR_DisableCHOpts)
+       && cht && cht->isActive())
+      {
+      featureFlags |= TR_FeatureFlag_CHTableEnabled;
+      }
+
+   return featureFlags;
+   }
 
 bool
 TR_RelocationRuntime::storeAOTHeader(TR_FrontEnd *fe, J9VMThread *curThread)
@@ -817,7 +1067,7 @@ uintptr_t TR_RelocationRuntime::_globalValueList[TR_NumGlobalValueItems] =
    0          // TR_HeapSizeForBarrierRange0
    };
 
-char *TR_RelocationRuntime::_globalValueNames[TR_NumGlobalValueItems] =
+const char *TR_RelocationRuntime::_globalValueNames[TR_NumGlobalValueItems] =
    {
    "not used (0)",
    "TR_CountForRecompile (1)",
@@ -871,7 +1121,18 @@ TR_SharedCacheRelocationRuntime::allocateSpaceInCodeCache(UDATA codeSize)
       }
 
    uint8_t *coldCode;
-   U_8 *codeStart = manager->allocateCodeMemory(codeSize, 0, &_codeCache, &coldCode, false);
+   U_8 *codeStart;
+   bool installIntoCold = TR::Options::getCmdLineOptions()->getOption(TR_InstallAOTToColdCode);
+
+   if (!installIntoCold)
+      {
+      codeStart = manager->allocateCodeMemory(codeSize, 0, &_codeCache, &coldCode, false);
+      }
+   else
+      {
+      codeStart = manager->allocateCodeMemory(0, codeSize, &_codeCache, &coldCode, false);
+      }
+
    // FIXME: the GC may unload classes if code caches have been switched
    if (compThreadID >= 0 && fej9->getCompilationShouldBeInterruptedFlag())
       {
@@ -880,7 +1141,8 @@ TR_SharedCacheRelocationRuntime::allocateSpaceInCodeCache(UDATA codeSize)
       //*returnCode = compilationInterrupted; // allow retrial
       return NULL; // fail this AOT load
       }
-   return codeStart;
+
+   return installIntoCold ? coldCode : codeStart;
    }
 
 
@@ -915,11 +1177,11 @@ TR_SharedCacheRelocationRuntime::initializeCacheDeltas()
    }
 
 void
-TR_SharedCacheRelocationRuntime::incompatibleCache(U_32 module_name, U_32 reason, char *assumeMessage)
+TR_SharedCacheRelocationRuntime::incompatibleCache(U_32 module_name, U_32 reason, const char *assumeMessage)
    {
    if (TR::Options::isAnyVerboseOptionSet())
       {
-      TR_VerboseLog::writeLineLocked(TR_Vlog_INFO, "%s\n", assumeMessage);
+      TR_VerboseLog::writeLineLocked(TR_Vlog_INFO, "%s", assumeMessage);
       }
 
    if (javaVM()->sharedClassConfig->verboseFlags & J9SHR_VERBOSEFLAG_ENABLE_VERBOSE)
@@ -930,7 +1192,7 @@ TR_SharedCacheRelocationRuntime::incompatibleCache(U_32 module_name, U_32 reason
    }
 
 bool
-TR_SharedCacheRelocationRuntime::generateError(U_32 module_name, U_32 reason, char *assumeMessage)
+TR_SharedCacheRelocationRuntime::generateError(U_32 module_name, U_32 reason, const char *assumeMessage)
    {
    incompatibleCache(module_name, reason, assumeMessage);
    return false;
@@ -941,7 +1203,7 @@ TR_SharedCacheRelocationRuntime::checkAOTHeaderFlags(const TR_AOTHeader *hdrInCa
    {
    bool defaultMessage = true;
 
-   if (!TR::Compiler->target.cpu.isCompatible(hdrInCache->processorDescription))
+   if (!TR::Compiler->relocatableTarget.cpu.isCompatible(hdrInCache->processorDescription))
       defaultMessage = generateError(J9NLS_RELOCATABLE_CODE_WRONG_HARDWARE, "AOT header validation failed: Processor incompatible.");
    if ((featureFlags & TR_FeatureFlag_sanityCheckBegin) != (hdrInCache->featureFlags & TR_FeatureFlag_sanityCheckBegin))
       defaultMessage = generateError(J9NLS_RELOCATABLE_CODE_HEADER_START_SANITY_BIT_MANGLED, "AOT header validation failed: Processor feature sanity bit mangled.");
@@ -975,27 +1237,15 @@ TR_SharedCacheRelocationRuntime::checkAOTHeaderFlags(const TR_AOTHeader *hdrInCa
       defaultMessage = generateError(J9NLS_RELOCATABLE_CODE_HEAP_SIZE_FOR_BARRIER_RANGE_MISMATCH, "AOT header validation failed: Heap Size for Barrier Range feature mismatch.");
    if ((featureFlags & TR_FeatureFlag_IsVariableActiveCardTableBase) != (hdrInCache->featureFlags & TR_FeatureFlag_IsVariableActiveCardTableBase))
       defaultMessage = generateError(J9NLS_RELOCATABLE_CODE_ACTIVE_CARD_TABLE_BASE_MISMATCH, "AOT header validation failed: Active Card Table Base feature mismatch.");
+   if ((featureFlags & TR_FeatureFlag_ArrayHeaderShape) != (hdrInCache->featureFlags & TR_FeatureFlag_ArrayHeaderShape))
+      defaultMessage = generateError(J9NLS_RELOCATABLE_CODE_ARRAY_HEADER_SHAPE_MISMATCH, "AOT header validation failed: Array header shape mismatch.");
+   if ((featureFlags & TR_FeatureFlag_CHTableEnabled) != (hdrInCache->featureFlags & TR_FeatureFlag_CHTableEnabled))
+      defaultMessage = generateError(J9NLS_RELOCATABLE_CODE_CH_TABLE_MISMATCH, "AOT header validation failed: CH Table mismatch.");
    if ((featureFlags & TR_FeatureFlag_SanityCheckEnd) != (hdrInCache->featureFlags & TR_FeatureFlag_SanityCheckEnd))
       defaultMessage = generateError(J9NLS_RELOCATABLE_CODE_HEADER_END_SANITY_BIT_MANGLED, "AOT header validation failed: Trailing sanity bit mismatch.");
 
    if (defaultMessage)
       generateError(J9NLS_RELOCATABLE_CODE_UNKNOWN_PROBLEM, "AOT header validation failed: Unkown problem with processor features.");
-   }
-
-// The method CS::Hash_FNV is being used to compute the hash value
-// Notice that currently CS2::Hash_FNV is a hash function that never returns 0
-uint32_t
-TR_SharedCacheRelocationRuntime::getCurrentLockwordOptionHashValue(J9JavaVM *vm) const
-   {
-   IDATA currentLockwordArgIndex = FIND_ARG_IN_VMARGS(STARTSWITH_MATCH, "-Xlockword", NULL);
-   uint32_t currentLockwordOptionHashValue = 0;
-   if (currentLockwordArgIndex >= 0)
-      {
-      char * currentLockwordOption = NULL;
-      GET_OPTION_VALUE(currentLockwordArgIndex, ':', &currentLockwordOption);
-      currentLockwordOptionHashValue = CS2::Hash_FNV((unsigned char*)currentLockwordOption, strlen(currentLockwordOption));
-      }
-   return currentLockwordOptionHashValue;
    }
 
 OMRProcessorDesc
@@ -1072,12 +1322,20 @@ TR_SharedCacheRelocationRuntime::validateAOTHeader(TR_FrontEnd *fe, J9VMThread *
          }
       else if
          (hdrInCache->featureFlags != featureFlags ||
-          !TR::Compiler->target.cpu.isCompatible(hdrInCache->processorDescription)
+          !TR::Compiler->relocatableTarget.cpu.isCompatible(hdrInCache->processorDescription)
          )
          {
          checkAOTHeaderFlags(hdrInCache, featureFlags);
          }
-      else if (hdrInCache->gcPolicyFlag != javaVM()->memoryManagerFunctions->j9gc_modron_getWriteBarrierType(javaVM()) )
+      else if (!((hdrInCache->gcPolicyFlag == javaVM()->memoryManagerFunctions->j9gc_modron_getWriteBarrierType(javaVM())) ||
+                 // it's safe to run AOT code with inline cardmark barrier even if runtime will not need it since the barrier
+                 // is only executed for active Concurrent Mark cycles (which won't ever happen with Concurrent Mark disabled
+                 // in runtime)
+                 ((hdrInCache->gcPolicyFlag == gc_modron_wrtbar_cardmark_and_oldcheck) &&
+                  (javaVM()->memoryManagerFunctions->j9gc_modron_getWriteBarrierType(javaVM()) == gc_modron_wrtbar_oldcheck)
+                 )
+                )
+              )
          {
          incompatibleCache(J9NLS_RELOCATABLE_CODE_WRONG_GC_POLICY,
                            "AOT header validation failed: incompatible gc write barrier type");
@@ -1120,57 +1378,29 @@ TR_SharedCacheRelocationRuntime::validateAOTHeader(TR_FrontEnd *fe, J9VMThread *
    }
 
 const TR_AOTHeader *
-TR_SharedCacheRelocationRuntime::getStoredAOTHeader(J9VMThread *curThread)
+TR_SharedCacheRelocationRuntime::getStoredAOTHeaderWithConfig(J9SharedClassConfig *sharedClassConfig, J9VMThread *curThread)
    {
    J9SharedDataDescriptor firstDescriptor;
    firstDescriptor.address = NULL;
-   javaVM()->sharedClassConfig->findSharedData(curThread, aotHeaderKey, aotHeaderKeyLength,
-                                               J9SHR_DATA_TYPE_AOTHEADER, FALSE, &firstDescriptor, NULL);
+   sharedClassConfig->findSharedData(curThread, aotHeaderKey, aotHeaderKeyLength,
+                                     J9SHR_DATA_TYPE_AOTHEADER, FALSE, &firstDescriptor, NULL);
    return (const TR_AOTHeader *)firstDescriptor.address;
+   }
+
+const TR_AOTHeader *
+TR_SharedCacheRelocationRuntime::getStoredAOTHeader(J9VMThread *curThread)
+   {
+   return getStoredAOTHeaderWithConfig(javaVM()->sharedClassConfig, curThread);
    }
 
 TR_AOTHeader *
 TR_SharedCacheRelocationRuntime::createAOTHeader(TR_FrontEnd *fe)
    {
    PORT_ACCESS_FROM_JAVAVM(javaVM());
-
-   TR_J9VMBase *fej9 = (TR_J9VMBase *)fe;
-   TR_AOTHeader * aotHeader = (TR_AOTHeader *)j9mem_allocate_memory(sizeof(TR_AOTHeader), J9MEM_CATEGORY_JIT);
+   TR_AOTHeader *aotHeader = (TR_AOTHeader *)j9mem_allocate_memory(sizeof(TR_AOTHeader), J9MEM_CATEGORY_JIT);
 
    if (aotHeader)
-      {
-      memset(aotHeader, 0, sizeof(TR_AOTHeader));
-      aotHeader->eyeCatcher = TR_AOTHeaderEyeCatcher;
-
-      TR_Version *aotHeaderVersion = &aotHeader->version;
-      aotHeaderVersion->structSize = sizeof(TR_Version);
-      aotHeaderVersion->majorVersion = TR_AOTHeaderMajorVersion;
-      aotHeaderVersion->minorVersion = TR_AOTHeaderMinorVersion;
-      strncpy(aotHeaderVersion->vmBuildVersion, EsBuildVersionString, sizeof(aotHeaderVersion->vmBuildVersion) - 1);
-      aotHeaderVersion->vmBuildVersion[sizeof(aotHeaderVersion->vmBuildVersion) - 1] = '\0';
-      strncpy(aotHeaderVersion->jitBuildVersion, TR_BUILD_NAME, sizeof(aotHeaderVersion->jitBuildVersion) - 1);
-      aotHeaderVersion->jitBuildVersion[sizeof(aotHeaderVersion->jitBuildVersion) - 1] = '\0';
-
-      aotHeader->gcPolicyFlag = javaVM()->memoryManagerFunctions->j9gc_modron_getWriteBarrierType(javaVM());
-      aotHeader->lockwordOptionHashValue = getCurrentLockwordOptionHashValue(javaVM());
-      aotHeader->compressedPointerShift = javaVM()->memoryManagerFunctions->j9gc_objaccess_compressedPointersShift(javaVM()->internalVMFunctions->currentVMThread(javaVM()));
-
-      if (J9_ARE_ANY_BITS_SET(javaVM()->extendedRuntimeFlags2, J9_EXTENDED_RUNTIME2_ENABLE_PORTABLE_SHARED_CACHE))
-         {
-         TR::Compiler->relocatableTarget.cpu = TR::CPU::detectRelocatable(TR::Compiler->omrPortLib);
-         aotHeader->processorDescription = TR::Compiler->relocatableTarget.cpu.getProcessorDescription();
-         }
-      else
-         {
-         aotHeader->processorDescription = TR::Compiler->target.cpu.getProcessorDescription();
-         }
-
-      // Set up other feature flags
-      aotHeader->featureFlags = generateFeatureFlags(fe);
-
-      // Set ArrayLet Size if supported
-      aotHeader->arrayLetLeafSize = TR::Compiler->om.arrayletLeafSize();
-      }
+      fillAOTHeader(javaVM(), fe, aotHeader);
 
    return aotHeader;
    }
@@ -1242,76 +1472,6 @@ TR_SharedCacheRelocationRuntime::storeAOTHeader(TR_FrontEnd *fe, J9VMThread *cur
       TR_J9SharedCache::setStoreSharedDataFailedLength(aotHeaderLen);
       return false;
       }
-   }
-
-uintptr_t
-TR_SharedCacheRelocationRuntime::generateFeatureFlags(TR_FrontEnd *fe)
-   {
-   uintptr_t featureFlags = 0;
-   TR_J9VMBase *fej9 = (TR_J9VMBase *)fe;
-
-   featureFlags |= TR_FeatureFlag_sanityCheckBegin;
-
-   if (TR::Compiler->target.isSMP())
-      featureFlags |= TR_FeatureFlag_IsSMP;
-
-   if (TR::Options::useCompressedPointers())
-      featureFlags |= TR_FeatureFlag_UsesCompressedPointers;
-
-   if (TR::Options::getCmdLineOptions()->getOption(TR_DisableTraps))
-      featureFlags |= TR_FeatureFlag_DisableTraps;
-
-   if (TR::Options::getCmdLineOptions()->getOption(TR_TLHPrefetch))
-      featureFlags |= TR_FeatureFlag_TLHPrefetch;
-
-   if (TR::CodeCacheManager::instance()->codeCacheConfig().needsMethodTrampolines())
-      featureFlags |= TR_FeatureFlag_MethodTrampolines;
-
-   if (TR::Options::getCmdLineOptions()->getOption(TR_FullSpeedDebug))
-      featureFlags |= TR_FeatureFlag_FSDEnabled;
-
-   if (TR::Options::getCmdLineOptions()->getOption(TR_EnableHCR))
-      featureFlags |= TR_FeatureFlag_HCREnabled;
-
-#ifdef TR_TARGET_S390
-   if (TR::Compiler->target.cpu.supportsFeature(OMR_FEATURE_S390_VECTOR_FACILITY))
-      featureFlags |= TR_FeatureFlag_SIMDEnabled;
-#endif
-
-   if (TR::Compiler->om.readBarrierType() != gc_modron_readbar_none)
-      {
-      featureFlags |= TR_FeatureFlag_ConcurrentScavenge;
-
-#ifdef TR_TARGET_S390
-      if (!TR::Compiler->target.cpu.supportsFeature(OMR_FEATURE_S390_GUARDED_STORAGE))
-         featureFlags |= TR_FeatureFlag_SoftwareReadBarrier;
-#endif
-      }
-
-
-   if (fej9->isAsyncCompilation())
-      featureFlags |= TR_FeatureFlag_AsyncCompilation;
-
-
-   if (!TR::Options::getCmdLineOptions()->getOption(TR_DisableTM) &&
-       !TR::Options::getAOTCmdLineOptions()->getOption(TR_DisableTM))
-      {
-      if (TR::Compiler->target.cpu.supportsTransactionalMemoryInstructions())
-         {
-         featureFlags |= TR_FeatureFlag_UsesTM;
-         }
-      }
-
-   if (TR::Options::getCmdLineOptions()->isVariableHeapBaseForBarrierRange0())
-      featureFlags |= TR_FeatureFlag_IsVariableHeapBaseForBarrierRange0;
-
-   if (TR::Options::getCmdLineOptions()->isVariableHeapSizeForBarrierRange0())
-      featureFlags |= TR_FeatureFlag_IsVariableHeapSizeForBarrierRange0;
-
-   if (TR::Options::getCmdLineOptions()->isVariableActiveCardTableBase())
-      featureFlags |= TR_FeatureFlag_IsVariableActiveCardTableBase;
-
-   return featureFlags;
    }
 
 void TR_RelocationRuntime::initializeHWProfilerRecords(TR::Compilation *comp)

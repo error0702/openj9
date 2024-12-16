@@ -1,6 +1,6 @@
 
 /*******************************************************************************
- * Copyright (c) 1991, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,9 +16,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 /**
@@ -47,11 +47,11 @@ GC_ConstantPoolClassSlotIterator::nextSlot()
 			_cpDescriptionIndex = J9_CP_DESCRIPTIONS_PER_U32;
 		}
 
-		U_32 slotType = _cpDescription & J9_CP_DESCRIPTION_MASK;
+		uint32_t slotType = _cpDescription & J9_CP_DESCRIPTION_MASK;
 		J9Object **slotPtr = _cpEntry;
 
 		/* Adjust the CP slot and description information */
-		_cpEntry = (J9Object **)( ((U_8 *)_cpEntry) + sizeof(J9RAMConstantPoolItem) );
+		_cpEntry = (J9Object **)(((uint8_t *)_cpEntry) + sizeof(J9RAMConstantPoolItem));
 		_cpEntryCount -= 1;
 
 		_cpDescription >>= J9_CP_BITS_PER_DESCRIPTION;

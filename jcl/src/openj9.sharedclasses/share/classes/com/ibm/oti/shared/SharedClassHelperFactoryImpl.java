@@ -1,8 +1,6 @@
 /*[INCLUDE-IF SharedClasses]*/
-package com.ibm.oti.shared;
-
-/*******************************************************************************
- * Copyright (c) 1998, 2017 IBM Corp. and others
+/*
+ * Copyright IBM Corp. and others 1998
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -18,54 +16,45 @@ package com.ibm.oti.shared;
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
+package com.ibm.oti.shared;
 
 import java.net.URL;
+/*[IF JAVA_SPEC_VERSION >= 9]*/
+import java.util.HashSet;
+import java.util.Set;
+/*[ENDIF] JAVA_SPEC_VERSION >= 9 */
 import java.util.WeakHashMap;
 
 import com.ibm.oti.util.Msg;
-/*[IF Sidecar19-SE]*/
-import java.util.Set;
-import java.util.HashSet;
-/*[ENDIF]*/
 
-/** 
+/**
  * Implementation of SharedClassHelperFactory.
- * <p>
+ *
  * @see SharedClassHelperFactory
  * @see SharedAbstractHelperFactory
  */
 final class SharedClassHelperFactoryImpl extends SharedAbstractHelperFactory implements SharedClassHelperFactory {
 
-	/*[IF Sidecar19-SE]*/
-	private static final WeakHashMap<ClassLoader, SharedClassTokenHelper> tokenHelpers;
-	private static final WeakHashMap<ClassLoader, SharedClassURLHelper> urlHelpers;
-	private static final WeakHashMap<ClassLoader, SharedClassURLClasspathHelper> urlcpHelpers;
-	/*[ELSE] Sidecar19-SE */
-	private static final WeakHashMap<ClassLoader, SharedHelper> helpers;
-	/*[ENDIF] Sidecar19-SE */
+	/*[IF JAVA_SPEC_VERSION >= 9]*/
+	private static final WeakHashMap<ClassLoader, SharedClassTokenHelper> tokenHelpers = new WeakHashMap<>();
+	private static final WeakHashMap<ClassLoader, SharedClassURLHelper> urlHelpers = new WeakHashMap<>();
+	private static final WeakHashMap<ClassLoader, SharedClassURLClasspathHelper> urlcpHelpers = new WeakHashMap<>();
+	/*[ELSE] JAVA_SPEC_VERSION >= 9 */
+	private static final WeakHashMap<ClassLoader, SharedHelper> helpers = new WeakHashMap<>();
+	/*[ENDIF] JAVA_SPEC_VERSION >= 9 */
 
 	private static SharedClassFilter globalSharingFilter;
 	private static final String GLOBAL_SHARING_FILTER = "com.ibm.oti.shared.SharedClassGlobalFilterClass"; //$NON-NLS-1$
 
-	static {
-		/*[IF Sidecar19-SE]*/
-		tokenHelpers = new WeakHashMap<>();
-		urlHelpers = new WeakHashMap<>();
-		urlcpHelpers = new WeakHashMap<>();
-		/*[ELSE] Sidecar19-SE */
-		helpers = new WeakHashMap<>();
-		/*[ENDIF] Sidecar19-SE */
-	}
-
 	private static SharedClassFilter getGlobalSharingFilter() {
 		if (globalSharingFilter == null) {
 			try {
-				String className = com.ibm.oti.vm.VM.getVMLangAccess().internalGetProperties().getProperty(GLOBAL_SHARING_FILTER);
-				if(null != className) {
+				String className = com.ibm.oti.vm.VM.internalGetProperties().getProperty(GLOBAL_SHARING_FILTER);
+				if (null != className) {
 					Class<?> filterClass = Class.forName(className);
 					globalSharingFilter = SharedClassFilter.class.cast(filterClass.getDeclaredConstructor().newInstance());
 				}
@@ -77,8 +66,11 @@ final class SharedClassHelperFactoryImpl extends SharedAbstractHelperFactory imp
 	}
 
 	@Override
-	public SharedClassHelper findHelperForClassLoader(ClassLoader loader) {	
-		/*[IF Sidecar19-SE] */
+	/*[IF JAVA_SPEC_VERSION >= 9]*/
+	@Deprecated(forRemoval=false, since="9")
+	/*[ENDIF] JAVA_SPEC_VERSION >= 9 */
+	public SharedClassHelper findHelperForClassLoader(ClassLoader loader) {
+		/*[IF JAVA_SPEC_VERSION >= 9]*/
 		Set<SharedClassHelper> helperSet = findHelpersForClassLoader(loader);
 		int size = helperSet.size();
 		if (1 == size) {
@@ -90,12 +82,12 @@ final class SharedClassHelperFactoryImpl extends SharedAbstractHelperFactory imp
 			throw new java.lang.IllegalStateException(Msg.getString("K0642")); //$NON-NLS-1$
 		}
 		return null;
-		/*[ELSE] Sidecar19-SE
-		return (SharedClassHelper)helpers.get(loader);
-		/*[ENDIF] Sidecar19-SE */
+		/*[ELSE] JAVA_SPEC_VERSION >= 9 */
+		return (SharedClassHelper) helpers.get(loader);
+		/*[ENDIF] JAVA_SPEC_VERSION >= 9 */
 	}
-	
-	/*[IF Sidecar19-SE] */
+
+	/*[IF JAVA_SPEC_VERSION >= 9]*/
 	@Override
 	public Set<SharedClassHelper> findHelpersForClassLoader(ClassLoader loader) {
 		Set<SharedClassHelper> helperSet = new HashSet<>();
@@ -113,48 +105,49 @@ final class SharedClassHelperFactoryImpl extends SharedAbstractHelperFactory imp
 		}
 		return helperSet;
 	}
-	/*[ENDIF] Sidecar19-SE */
-	
+	/*[ENDIF] JAVA_SPEC_VERSION >= 9 */
+
 	@Override
-	public SharedClassTokenHelper getTokenHelper(
-			ClassLoader loader, SharedClassFilter filter)
-	/*[IF !Sidecar19-SE] */
-			throws HelperAlreadyDefinedException 
-	/*[ENDIF] !Sidecar19-SE */
+	public SharedClassTokenHelper getTokenHelper(ClassLoader loader, SharedClassFilter filter)
+	/*[IF JAVA_SPEC_VERSION == 8]*/
+			throws HelperAlreadyDefinedException
+	/*[ENDIF] JAVA_SPEC_VERSION == 8 */
 	{
 		SharedClassTokenHelper helper = getTokenHelper(loader);
-		if (helper!=null) helper.setSharingFilter(filter);
+		if (helper != null) {
+			helper.setSharingFilter(filter);
+		}
 		return helper;
 	}
 
 	@Override
 	public SharedClassTokenHelper getTokenHelper(ClassLoader loader)
-	/*[IF !Sidecar19-SE] */
-			throws HelperAlreadyDefinedException 
-	/*[ENDIF] !Sidecar19-SE */
+	/*[IF JAVA_SPEC_VERSION == 8]*/
+			throws HelperAlreadyDefinedException
+	/*[ENDIF] JAVA_SPEC_VERSION == 8 */
 	{
-		if (loader==null) {
+		if (loader == null) {
 			return null;
 		}
-		/*[IF Sidecar19-SE]
+		/*[IF JAVA_SPEC_VERSION >= 9] */
 		WeakHashMap<ClassLoader, SharedClassTokenHelper> helpers = tokenHelpers;
-		/*[ENDIF] Sidecar19-SE */
+		/*[ENDIF] JAVA_SPEC_VERSION >= 9 */
 
-		synchronized(helpers) {
-			/*[IF Sidecar19-SE]
+		synchronized (helpers) {
+			/*[IF JAVA_SPEC_VERSION >= 9] */
 			SharedClassTokenHelper helper = helpers.get(loader);
 			if (helper != null) {
 				return helper;
-			/*[ELSE] Sidecar19-SE */
+			/*[ELSE] JAVA_SPEC_VERSION >= 9 */
 			SharedClassHelper helper = findHelperForClassLoader(loader);
 
 			if (helper != null) {
 				if (helper instanceof SharedClassTokenHelper) {
-					return (SharedClassTokenHelper)helper;
+					return (SharedClassTokenHelper) helper;
 				}
 				/*[MSG "K059d", "A different type of helper already exists for this classloader"]*/
 				throw new HelperAlreadyDefinedException(Msg.getString("K059d")); //$NON-NLS-1$
-			/*[ENDIF] Sidecar19-SE */
+			/*[ENDIF] JAVA_SPEC_VERSION >= 9 */
 			} else {
 				boolean canFind = canFind(loader);
 				boolean canStore = canStore(loader);
@@ -174,35 +167,36 @@ final class SharedClassHelperFactoryImpl extends SharedAbstractHelperFactory imp
 	}
 
 	@Override
-	public SharedClassURLHelper getURLHelper(
-			ClassLoader loader, SharedClassFilter filter) 
-	/*[IF !Sidecar19-SE] */
-			throws HelperAlreadyDefinedException 
-	/*[ENDIF] !Sidecar19-SE */
+	public SharedClassURLHelper getURLHelper(ClassLoader loader, SharedClassFilter filter)
+	/*[IF JAVA_SPEC_VERSION == 8]*/
+			throws HelperAlreadyDefinedException
+	/*[ENDIF] JAVA_SPEC_VERSION == 8 */
 	{
 		SharedClassURLHelper helper = getURLHelper(loader);
-		if (helper!=null) helper.setSharingFilter(filter);
+		if (helper != null) {
+			helper.setSharingFilter(filter);
+		}
 		return helper;
 	}
-	
+
 	@Override
 	public SharedClassURLHelper getURLHelper(ClassLoader loader)
-	/*[IF !Sidecar19-SE] */
-			throws HelperAlreadyDefinedException 
-	/*[ENDIF] !Sidecar19-SE */
+	/*[IF JAVA_SPEC_VERSION == 8]*/
+			throws HelperAlreadyDefinedException
+	/*[ENDIF] JAVA_SPEC_VERSION == 8 */
 	{
-		if (loader==null) {
+		if (loader == null) {
 			return null;
 		}
-		/*[IF Sidecar19-SE] 
+		/*[IF JAVA_SPEC_VERSION >= 9]*/
 		WeakHashMap<ClassLoader, SharedClassURLHelper> helpers = urlHelpers;
-		/*[ENDIF] Sidecar19-SE */
-		synchronized(helpers) {
-			/*[IF Sidecar19-SE]
+		/*[ENDIF] JAVA_SPEC_VERSION >= 9 */
+		synchronized (helpers) {
+			/*[IF JAVA_SPEC_VERSION >= 9]*/
 			SharedClassURLHelper helper = helpers.get(loader);
 			if (helper != null) {
 				return helper;
-			/*[ELSE] Sidecar19-SE */
+			/*[ELSE] JAVA_SPEC_VERSION >= 9 */
 			SharedClassHelper helper = findHelperForClassLoader(loader);
 
 			if (helper != null) {
@@ -211,7 +205,7 @@ final class SharedClassHelperFactoryImpl extends SharedAbstractHelperFactory imp
 				}
 				/*[MSG "K059d", "A different type of helper already exists for this classloader"]*/
 				throw new HelperAlreadyDefinedException(Msg.getString("K059d")); //$NON-NLS-1$
-			/*[ENDIF] Sidecar19-SE */
+			/*[ENDIF] JAVA_SPEC_VERSION >= 9 */
 			} else {
 				boolean canFind = canFind(loader);
 				boolean canStore = canStore(loader);
@@ -229,40 +223,42 @@ final class SharedClassHelperFactoryImpl extends SharedAbstractHelperFactory imp
 		}
 		return null;
 	}
-	
+
 	@Override
 	public SharedClassURLClasspathHelper getURLClasspathHelper(
 			ClassLoader loader, URL[] classpath, SharedClassFilter filter) throws HelperAlreadyDefinedException {
-		SharedClassURLClasspathHelper helper = getURLClasspathHelper(loader,classpath);
-		if (helper!=null) helper.setSharingFilter(filter);
+		SharedClassURLClasspathHelper helper = getURLClasspathHelper(loader, classpath);
+		if (helper != null) {
+			helper.setSharingFilter(filter);
+		}
 		return helper;
 	}
 
 	@Override
 	public SharedClassURLClasspathHelper getURLClasspathHelper(
 			ClassLoader loader, URL[] classpath)  throws HelperAlreadyDefinedException {
-		if (loader==null || classpath==null) {
+		if (loader == null || classpath == null) {
 			return null;
 		}
-		/*[IF Sidecar19-SE]
+		/*[IF JAVA_SPEC_VERSION >= 9]*/
 		WeakHashMap<ClassLoader, SharedClassURLClasspathHelper> helpers = urlcpHelpers;
-		/*[ENDIF] Sidecar19-SE */
-		
-		synchronized(helpers) {
-			/*[IF Sidecar19-SE]
+		/*[ENDIF] JAVA_SPEC_VERSION >= 9 */
+
+		synchronized (helpers) {
+			/*[IF JAVA_SPEC_VERSION >= 9]*/
 			SharedClassURLClasspathHelper helper = helpers.get(loader);
-			/*[ELSE] Sidecar19-SE */
+			/*[ELSE] JAVA_SPEC_VERSION >= 9 */
 			SharedClassHelper helper = findHelperForClassLoader(loader);
-			/*[ENDIF] Sidecar19-SE */
+			/*[ENDIF] JAVA_SPEC_VERSION >= 9 */
 			SharedClassURLClasspathHelperImpl result;
 			boolean found = true;
 			if (helper != null) {
-				/*[IF !Sidecar19-SE] */
+				/*[IF JAVA_SPEC_VERSION == 8]*/
 				if (helper instanceof SharedClassURLClasspathHelper) {
-				/*[ENDIF] !Sidecar19-SE */
-					result = (SharedClassURLClasspathHelperImpl)helper;
+					/*[ENDIF] JAVA_SPEC_VERSION == 8 */
+					result = (SharedClassURLClasspathHelperImpl) helper;
 					URL[] testCP = result.getClasspath();
-					for (int j=0; j<classpath.length; j++) {
+					for (int j = 0; j < classpath.length; j++) {
 						if (!classpath[j].equals(testCP[j])) {
 							found = false;
 							break;
@@ -274,12 +270,12 @@ final class SharedClassHelperFactoryImpl extends SharedAbstractHelperFactory imp
 						/*[MSG "K059e", "A SharedClassURLClasspathHelper already exists for this classloader with a different classpath"]*/
 						throw new HelperAlreadyDefinedException(Msg.getString("K059e")); //$NON-NLS-1$
 					}
-				/*[IF !Sidecar19-SE] */
+				/*[IF JAVA_SPEC_VERSION == 8]*/
 				} else {
 					/*[MSG "K059d", "A different type of helper already exists for this classloader"]*/
 					throw new HelperAlreadyDefinedException(Msg.getString("K059d")); //$NON-NLS-1$
 				}
-				/*[ENDIF] !Sidecar19-SE */
+				/*[ENDIF] JAVA_SPEC_VERSION == 8 */
 			} else {
 				boolean canFind = canFind(loader);
 				boolean canStore = canStore(loader);

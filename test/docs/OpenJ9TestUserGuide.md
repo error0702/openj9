@@ -1,5 +1,5 @@
 <!--
-Copyright (c) 2016, 2022 IBM Corp. and others
+Copyright IBM Corp. and others 2016
 
 This program and the accompanying materials are made available under
 the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@ Exception [1] and GNU General Public License, version 2 with the
 OpenJDK Assembly Exception [2].
 
 [1] https://www.gnu.org/software/classpath/license.html
-[2] http://openjdk.java.net/legal/assembly-exception.html
+[2] https://openjdk.org/legal/assembly-exception.html
 
-SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
 -->
 
 # How-to Run Tests
@@ -105,25 +105,39 @@ the format to use.
 - If you have many new test cases to add and special build requirements, then you may want to copy the [TestExample](https://github.com/eclipse-openj9/openj9/blob/master/test/functional/TestExample) update the build.xml and playlist.xml files to match your new Test class names. The playlist.xml format is defined in TKG/playlist.xsd.
 
 - A test can be tagged with following elements:
-      - level:   [sanity|extended|special] (extended default value)
-      - group:   [functional|system|openjdk|external|perf|jck] (required
-                 to provide one group per test)
-      - type:    [regular|native] (if a test is tagged with native, it means this
-                 test needs to run with test image (native test libs);
-                 NATIVE_TEST_LIBS needs to be set for local testing; if Grinder is used,
-                 native test libs download link needs to be provided in addition to SDK
-                 download link in CUSTOMIZED_SDK_URL; for details, please refer to
-                 [How-to-Run-a-Grinder-Build-on-Jenkins](https://github.com/adoptium/aqa-tests/wiki/How-to-Run-a-Grinder-Build-on-Jenkins);
-                 default to regular)
-      - impl:    [openj9|hotspot|ibm] (filter test based on exported JDK_IMPL
-                 value; a test can be tagged with multiple impls at the
-                 same time; default to all impls)
-      - version:  [8|8+|9|9+|10|10+|11|11+|Panama|Valhalla] (filter test based on
-                 exported JDK_VERSION value; a test can be tagged with
-                 multiple versions at the same time; if a test tagged with
-                 a number (e.g., 8), it will used to match JDK_VERSION; if
-                 a test tagged with a number followed by + sign, any JDK_VERSION
-                 after the number will be a match; default to always match)
+
+    - level:                    [sanity|extended|special] (extended default value)
+    - group:                    [functional|system|openjdk|external|perf|jck] (required
+                                to provide one group per test)
+    - type:                     [regular|native] (if a test is tagged with native, it means this
+                                test needs to run with test image (native test libs);
+                                NATIVE_TEST_LIBS needs to be set for local testing; if Grinder is used,
+                                native test libs download link needs to be provided in addition to SDK
+                                download link in CUSTOMIZED_SDK_URL; for details, please refer to
+                                [How-to-Run-a-Grinder-Build-on-Jenkins](https://github.com/adoptium/aqa-tests/wiki/How-to-Run-a-Grinder-Build-on-Jenkins);
+                                default to regular)
+    - impl:                     [openj9|hotspot|ibm] (filter test based on exported JDK_IMPL
+                                value; a test can be tagged with multiple impls at the
+                                same time; default to all impls)
+    - version:                  [8|8+|9|9+|10|10+|11|11+|Panama|Valhalla] (filter test based on
+                                exported JDK_VERSION value; a test can be tagged with
+                                multiple versions at the same time; if a test tagged with
+                                a number (e.g., 8), it will used to match JDK_VERSION; if
+                                a test tagged with a number followed by + sign, any JDK_VERSION
+                                after the number will be a match; default to always match)
+    - platformRequirements:     comma separated machine labels (`os.xxx,bits.xxx,arch.xxx`) (execute test only on
+                                the specified criteria; logical and relationship between comma separated labels;
+                                for example,
+                                `<platformRequirements>os.osx,bits.64,arch.x86</platformRequirements>` will run on osx_x86-64;
+                                multiple nested `<platformRequirements>` inside `<platformRequirementsList>` represents logical
+                                or relationship;
+                                for example, the following will run on both windows and aix:
+        ```
+        </platformRequirementsList>
+          <platformRequirements>os.win</platformRequirements>
+          <platformRequirements>os.aix</platformRequirements>
+        </platformRequirementsList>
+        ```
 
 - Most OpenJ9 FV tests are written with TestNG. We leverage
     TestNG groups to create test make targets. This means that
@@ -223,6 +237,18 @@ make _testList TESTLIST=jit_jitt,jit_recognizedMethod,testSCCMLTests2_1
 
 For example, adding a `<versions><version>8</version></versions>` block into the [target definition of TestExample](https://github.com/eclipse-openj9/openj9/blob/master/test/functional/TestExample/playlist.xml#L26-L49) would mean that test would only get run against jdk8 and would be skipped for other JDK versions.  If `<versions>` or `<impls>` are not included in the target definition, then it is assumed that ALL versions and implementations are valid for that test target.
 
+#### Run tests against specific feature
+
+`<feature>` elements are used to annotate tests in playlist.xml, so that the test can be specially treated based on the JDK feature. There are four options (i.e., applicable, nonapplicable, required and explicit) to choose for one feature. Different features can be enclosed in one `<features>`. The following is an example for AOT feature. For other features, just replace AOT with the feature name defined in TEST_FLAG. 
+
+```
+<features>
+           <feature>AOT:applicable</feature> ------ This is the default option. The test will run whether or not TEST_FLAG contains AOT (Special treatment will be applied when TEST_FLAG contains AOT, it will be run multiple times and special JVM option will be applied)
+           <feature>AOT:nonapplicable</feature> ------ The test will NOT run when TEST_FLAG contains AOT
+           <feature>AOT:explicit</feature> ------ The test will run whether or not TEST_FLAG contains AOT (No special treatment will be applied when TEST_FLAG contains AOT, the test will run as-is) Currently, this option is only meaningful for AOT.
+           <feature>AOT:required</feature> ------ the test will run ONLY when TEST_FLAG contains AOT (Special treatment will be applied)
+</features>
+```
 
 #### Rerun the failed tests from the last run
 ```
@@ -306,6 +332,10 @@ plat is defined in regular expression. All platforms can be found here: https://
 To exclude the 2nd variation listed which is assigned suffix_1 ```-Xmx1024m``` against adoptopenjdk openj9 java 8 on windows only:
 
 ```auto exclude test jdk_test_1 impl=openj9 vendor=adoptopenjdk ver=8 plat=.*windows.*```
+
+To exclude multiple tests with different criteria:
+
+```auto exclude test jdk_test1 plat=.*linux.*; jdk_test2 ver=8; jdk_test3 impl=openj9```
 
 After the comment is left, there will be a auto PR created with the exclude change in the playlist.xml. The PR will be linked to issue. If the testName can not be found in the repo, no PR will be created and there will be a comment left in the issue linking to the failed workflow run for more details. In the case where the parameter contains space separated values, use single quotes to group the parameter.
 

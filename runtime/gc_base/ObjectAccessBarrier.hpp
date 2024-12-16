@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 /**
@@ -60,6 +60,7 @@ protected:
 #endif /* defined(OMR_GC_COMPRESSED_POINTERS) */
 	UDATA _referenceLinkOffset; /** Offset within java/lang/ref/Reference of the reference link field */
 	UDATA _ownableSynchronizerLinkOffset; /** Offset within java/util/concurrent/locks/AbstractOwnableSynchronizer of the ownable synchronizer link field */
+	UDATA _continuationLinkOffset; /** Offset within java/lang/VirtualThread$VThreadContinuation (jdk/internal/vm/Continuation) of the continuation link field */
 public:
 
 	/* member function */
@@ -82,6 +83,49 @@ private:
 protected:
 	virtual bool initialize(MM_EnvironmentBase *env);
 	virtual void tearDown(MM_EnvironmentBase *env);
+
+	/**
+	 * Copy array data to an allocated native memory.
+	 *
+	 * @param vmThread[in] the current J9VMThread.
+	 * @param data[out] the pointer of copied Array Data address.
+	 * @param arrayObject[in] the array object
+	 * @param isCopy[out] if it true, the array is successfully copied.
+	 */
+	void copyArrayCritical(J9VMThread *vmThread, void **data,
+				J9IndexableObject *arrayObject, jboolean *isCopy);
+	/**
+	 * Copy back array data from the native memory and might free the native memory.
+	 *
+	 * @param vmThread[in]	the current J9VMThread.
+	 * @param elems[in] the pointer of native memory.
+	 * @param arrayObject[in] the pointer of array object
+	 * @param mode[in] JNIMode(JNI_COMMIT, JNI_ABORT...).
+	 */
+	void copyBackArrayCritical(J9VMThread *vmThread, void *elems,
+				J9IndexableObject **arrayObject, jint mode);
+
+	/**
+	 * Copy string bytes to the allocated native memory.
+	 *
+	 * @param vmThread[in] the current J9VMThread.
+	 * @param data[in] the pointer of native memory address.
+	 * @param valueObject[in] the pointer of array object
+	 * @param stringObject[in] Java String
+	 * @param isCopy[out] if it true, the array is successfully copied.
+	 * @param isCompressed[in] if it is compressed.
+	 */
+	void copyStringCritical(J9VMThread *vmThread, jchar **data,
+				J9IndexableObject *valueObject, J9Object *stringObject,
+				jboolean *isCopy, bool isCompressed);
+
+	/**
+	 * Free the native memory for java char array.
+	 *
+	 * @param vmThread[in] the current J9VMThread.
+	 * @param elems[in] the pointer of native memory.
+	 */
+	void freeStringCritical(J9VMThread *vmThread, const jchar *elems);
 
 	/**
 	 * Find the finalize link field in the specified object.
@@ -225,12 +269,16 @@ public:
 	virtual void staticStoreU64(J9VMThread *vmThread, J9Class *clazz, U_64 *destSlot, U_64 value, bool isVolatile=false);
 	virtual void staticStoreI64(J9VMThread *vmThread, J9Class *clazz, I_64 *destSlot, I_64 value, bool isVolatile=false);
 
+	MMINLINE virtual IDATA indexableDataDisplacement(J9VMThread *vmThread, J9IndexableObject *src, J9IndexableObject *dst)
+	{
+		return (IDATA)(((UDATA)dst) - ((UDATA)src));
+	}
 	virtual U_8 *getArrayObjectDataAddress(J9VMThread *vmThread, J9IndexableObject *arrayObject);
 	virtual j9objectmonitor_t *getLockwordAddress(J9VMThread *vmThread, J9Object *object);
 	virtual void cloneObject(J9VMThread *vmThread, J9Object *srcObject, J9Object *destObject);
-	virtual void copyObjectFields(J9VMThread *vmThread, J9Class *valueClass, J9Object *srcObject, UDATA srcOffset, J9Object *destObject, UDATA destOffset);
+	virtual void copyObjectFields(J9VMThread *vmThread, J9Class *valueClass, J9Object *srcObject, UDATA srcOffset, J9Object *destObject, UDATA destOffset, MM_objectMapFunction objectMapFunction = NULL, void *objectMapData = NULL, bool initializeLockWord = true);
 	virtual BOOLEAN structuralCompareFlattenedObjects(J9VMThread *vmThread, J9Class *valueClass, j9object_t lhsObject, j9object_t rhsObject, UDATA startOffset);
-	virtual void cloneIndexableObject(J9VMThread *vmThread, J9IndexableObject *srcObject, J9IndexableObject *destObject);
+	virtual void cloneIndexableObject(J9VMThread *vmThread, J9IndexableObject *srcObject, J9IndexableObject *destObject, MM_objectMapFunction objectMapFunction, void *objectMapData);
 	virtual J9Object *asConstantPoolObject(J9VMThread *vmThread, J9Object* toConvert, UDATA allocationFlags);
 	virtual void storeObjectToInternalVMSlot(J9VMThread *vmThread, J9Object** destSlot, J9Object *value);
 	virtual J9Object *readObjectFromInternalVMSlot(J9VMThread *vmThread, J9Object **srcSlot);
@@ -266,6 +314,8 @@ public:
 	virtual bool postObjectRead(J9VMThread *vmThread, J9Object *srcObject, fj9object_t *srcAddress);
 	virtual bool postObjectRead(J9VMThread *vmThread, J9Class *srcClass, J9Object **srcAddress);
 
+	virtual void preMountContinuation(J9VMThread *vmThread, j9object_t contObject) {}
+	virtual void postUnmountContinuation(J9VMThread *vmThread, j9object_t contObject) {}
 	/**
 	 * Return back true if object references are compressed
 	 * @return true, if object references are compressed
@@ -491,6 +541,26 @@ public:
 	}
 
 	/**
+	 * Set the continuationLink link field of the specified reference object to value.
+	 * @param object the object to modify
+	 * @param value the value to store into the object's reference link field
+	 */
+	void setContinuationLink(j9object_t object, j9object_t value);
+
+	/**
+	 * Fetch the continuationLink link field of the specified reference object.
+	 * @param object the object to read
+	 * @return the value stored in the object's reference link field
+	 */
+	j9object_t getContinuationLink(j9object_t object)
+	{
+		UDATA linkOffset = _continuationLinkOffset;
+		fj9object_t *continuationLink = (fj9object_t*)((UDATA)object + linkOffset);
+		GC_SlotObject slot(_extensions->getOmrVM(), continuationLink);
+		return slot.readReferenceFromSlot();
+	}
+
+	/**
 	 * Implementation of the JNI GetPrimitiveArrayCritical API.
 	 * See the JNI spec for full details.
 	 *
@@ -582,8 +652,8 @@ public:
 	}
 
 	MM_ObjectAccessBarrier(MM_EnvironmentBase *env) : MM_BaseVirtual()
-		, _extensions(NULL) 
-		, _heap(NULL)
+		, _extensions(MM_GCExtensions::getExtensions(env))
+		, _heap(_extensions->heap)
 #if defined(OMR_GC_COMPRESSED_POINTERS)
 #if defined(OMR_GC_FULL_POINTERS)
 		, _compressObjectReferences(false)
@@ -592,6 +662,7 @@ public:
 #endif /* defined(OMR_GC_COMPRESSED_POINTERS) */
 		, _referenceLinkOffset(UDATA_MAX)
 		, _ownableSynchronizerLinkOffset(UDATA_MAX)
+		, _continuationLinkOffset(UDATA_MAX)
 	{
 		_typeId = __FUNCTION__;
 	}

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "j9.h"
@@ -46,12 +46,12 @@ computeStringCRC(const char* buf)
 }
 
 void 
-checkStringCRC(JNIEnv* env, const char* function, U_32 argNum, const char* buf, U_32 oldCRC)
+checkStringCRC(const char* function, U_32 argNum, const char* buf, U_32 oldCRC)
 {
 	U_32 newCRC = computeStringCRC(buf);
 
 	if (newCRC != oldCRC) {
-		jniCheckFatalErrorNLS(env, J9NLS_JNICHK_BUFFER_MODIFIED, function, argNum, function, function);
+		jniCheckFatalErrorNLS(J9NLS_JNICHK_BUFFER_MODIFIED, function, argNum, function, function);
 	}
 }
 
@@ -70,12 +70,12 @@ computeDataCRC(const void* buf, IDATA len)
 }
 
 void 
-checkDataCRC(JNIEnv* env, const char* function, U_32 argNum, const void* buf, IDATA len, U_32 oldCRC)
+checkDataCRC(const char* function, U_32 argNum, const void* buf, IDATA len, U_32 oldCRC)
 {
 	U_32 newCRC = computeDataCRC(buf, len);
 
 	if (newCRC != oldCRC) {
-		jniCheckFatalErrorNLS(env, J9NLS_JNICHK_BUFFER_MODIFIED, function, argNum, function, function);
+		jniCheckFatalErrorNLS(J9NLS_JNICHK_BUFFER_MODIFIED, function, argNum, function, function);
 	}
 }
 
@@ -125,12 +125,12 @@ computeArgsCRC(const jvalue *args, jmethodID methodID)
 }
 
 void 
-checkArgsCRC(JNIEnv* env, const char* function, U_32 argNum, const jvalue *args, jmethodID methodID, U_32 oldCRC)
+checkArgsCRC(const char* function, U_32 argNum, const jvalue *args, jmethodID methodID, U_32 oldCRC)
 {
 	U_32 newCRC = computeArgsCRC(args, methodID);
 
 	if (newCRC != oldCRC) {
-		jniCheckFatalErrorNLS(env, J9NLS_JNICHK_BUFFER_MODIFIED, function, argNum, function, function);
+		jniCheckFatalErrorNLS(J9NLS_JNICHK_BUFFER_MODIFIED, function, argNum, function, function);
 	}
 }
 

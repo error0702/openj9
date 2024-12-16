@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 /**
@@ -425,7 +425,7 @@ MM_IncrementalGenerationalGC::globalMarkPhase(MM_EnvironmentVLHGC *env, bool inc
 
 	if (incrementalMark) {
 		reportGMPMarkStart(env);
-		I_64 endTime = j9time_current_time_millis() + _schedulingDelegate.currentGlobalMarkIncrementTimeMillis(env);
+		U_64 endTime = j9time_hires_clock() + _schedulingDelegate.currentGlobalMarkIncrementTimeMillis(env) * j9time_hires_frequency() / 1000;
 		if (env->_cycleState->_markDelegateState == MM_CycleState::state_mark_idle) {
 			_globalMarkDelegate.performMarkSetInitialState(env);
 		}
@@ -1750,6 +1750,7 @@ MM_IncrementalGenerationalGC::verifyMarkMapClosure(MM_EnvironmentVLHGC *env, MM_
 				case GC_ObjectModel::SCAN_MIXED_OBJECT:
 				case GC_ObjectModel::SCAN_CLASS_OBJECT:
 				case GC_ObjectModel::SCAN_CLASSLOADER_OBJECT:
+				case GC_ObjectModel::SCAN_CONTINUATION_OBJECT:
 				{
 					Assert_MM_true(_extensions->classLoaderRememberedSet->isInstanceRemembered(env, object));
 					
@@ -2261,9 +2262,8 @@ MM_IncrementalGenerationalGC::exportStats(MM_EnvironmentVLHGC *env, MM_Collectio
 					stats->_nonLocalNumaNodeBytes += usedMemory;
 				}
 			}
-			if (region->isArrayletLeaf()) {
+			if (region->isArrayletLeaf() && !_extensions->isVirtualLargeObjectHeapEnabled) {
 				J9IndexableObject *spine = region->_allocateData.getSpine();
-
 				/* if we recently (end of GMP) unloaded classes, but have not done sweep yet (just about to do it),
 				 * there might be unswept arraylet leaf regions, for which we must not try to access class data (for scan type).
 				 * Therefore, we count these arraylets as 'unknown' type.
@@ -2299,7 +2299,6 @@ MM_IncrementalGenerationalGC::exportStats(MM_EnvironmentVLHGC *env, MM_Collectio
 					}
 				}
 			}
-
 		}
 		/* there would be a case that mutators use more than assigned regions, correct totalRegionEdenSize to avoid inconsistent Exception */
 		if (allocateEdenTotal > stats->_edenHeapSize) {
@@ -2522,7 +2521,7 @@ MM_IncrementalGenerationalGC::unloadDeadClassLoaders(MM_EnvironmentVLHGC *env)
 		/* The list of classLoaders to be unloaded by cleanUpClassLoadersEnd is rooted in unloadLink */
 		J9ClassLoader *unloadLink = NULL;
 		J9MemorySegment *reclaimedSegments = NULL;
-		_extensions->classLoaderManager->cleanUpClassLoaders(env, classLoadersUnloadedList, &reclaimedSegments, &unloadLink, &env->_cycleState->_finalizationRequired);
+		_extensions->classLoaderManager->cleanUpClassLoaders(env, classLoadersUnloadedList, classUnloadStats, &reclaimedSegments, &unloadLink, &env->_cycleState->_finalizationRequired);
 
 		/* Free the class memory segments associated with dead classLoaders, unload (free) the dead classLoaders that don't
 		 * require finalization, and perform any final clean up after the dead classLoaders are gone.

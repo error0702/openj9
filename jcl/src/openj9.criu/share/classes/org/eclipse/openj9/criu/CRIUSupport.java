@@ -1,6 +1,6 @@
 /*[INCLUDE-IF CRIU_SUPPORT]*/
-/*******************************************************************************
- * Copyright (c) 2021, 2022 IBM Corp. and others
+/*
+ * Copyright IBM Corp. and others 2021
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,66 +16,48 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
 package org.eclipse.openj9.criu;
 
 import java.nio.file.Path;
-/*[IF JAVA_SPEC_VERSION < 17] */
-import java.security.AccessController;
-/*[ENDIF] JAVA_SPEC_VERSION < 17 */
-import java.security.PrivilegedAction;
-import java.nio.file.Files;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
-/*[IF JAVA_SPEC_VERSION == 8] */
-import sun.misc.Unsafe;
-/*[ELSE]
-import jdk.internal.misc.Unsafe;
-/*[ENDIF] JAVA_SPEC_VERSION == 8 */
-import java.util.Objects;
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.FileReader;
-import java.lang.reflect.Constructor;
-import java.lang.reflect.Field;
-import java.lang.reflect.Method;
+import openj9.internal.criu.InternalCRIUSupport;
 
 /**
  * CRIU Support API
+ *
+ * A checkpoint is the act of halting the JVM, saving its state and writing it out to a file(s). Restore is reading the saved checkpoint state
+ * and resuming the JVM application from when it was checkpointed. This technology is available via CRIU (checkpoint/restore in user space
+ * see, https://criu.org/Main_Page).
+ *
+ * This API enables the use of CRIU capabilities provided by the OS as well as JVM support for facilitating a successful checkpoint
+ * and restore in varying environments.
  */
+/*[IF JAVA_SPEC_VERSION >= 17]*/
+@SuppressWarnings({ "deprecation", "removal" })
+/*[ENDIF] JAVA_SPEC_VERSION >= 17 */
 public final class CRIUSupport {
 
-	@SuppressWarnings("restriction")
-	private static Unsafe unsafe;
+	/**
+	 * A hook can be one of the following states:
+	 *
+	 * SINGLE_THREAD_MODE - a mode in which only the Java thread that requested a
+	 * checkpoint is permitted to run. This means that global state changes are
+	 * permitted without the risk of race conditions. It also implies that if one
+	 * attempts to acquire a resource held by another Java thread a deadlock might
+	 * occur, or a JVMCheckpointException or JVMRestoreException to be thrown if
+	 * such an attempt is detected by JVM.
+	 *
+	 * CONCURRENT_MODE - a hook running when the SINGLE_THREAD_MODE is NOT enabled
+	 */
+	public static enum HookMode {
+		SINGLE_THREAD_MODE,
+		CONCURRENT_MODE
+	}
 
-	private static final CRIUDumpPermission CRIU_DUMP_PERMISSION = new CRIUDumpPermission();
-
-	private static boolean criuSupportEnabled = false;
-
-	private static native boolean isCRIUSupportEnabledImpl();
-
-	private static native boolean isCheckpointAllowed();
-
-	private static boolean nativeLoaded = false;
-
-	private static boolean initComplete = false;
-
-	private static native void checkpointJVMImpl(String imageDir,
-			boolean leaveRunning,
-			boolean shellJob,
-			boolean extUnixSupport,
-			int logLevel,
-			String logFile,
-			boolean fileLocks,
-			String workDir,
-			boolean tcpEstablished,
-			boolean autoDedup,
-			boolean trackMemory);
+	private InternalCRIUSupport internalCRIUSupport;
 
 	/**
 	 * Constructs a new {@code CRIUSupport}.
@@ -97,6 +79,8 @@ public final class CRIUSupport {
 	 * <p>
 	 * {@code fileLocks} = false
 	 * <p>
+	 * {@code ghostFileLimit} = 1 MB
+	 * <p>
 	 * {@code workDir} = imageDir, the directory where the images are to be created.
 	 *
 	 * @param imageDir the directory that will hold the dump files as a
@@ -107,107 +91,47 @@ public final class CRIUSupport {
 	 * @throws IllegalArgumentException if imageDir is not a valid directory
 	 */
 	public CRIUSupport(Path imageDir) {
-		/* [IF JAVA_SPEC_VERSION < 17] */
-		@SuppressWarnings({"deprecation" })
-		/* [ENDIF] JAVA_SPEC_VERSION < 17 */
-		SecurityManager manager = System.getSecurityManager();
-		if (manager != null) {
-			manager.checkPermission(CRIU_DUMP_PERMISSION);
-		}
-
-		setImageDir(imageDir);
-	}
-
-	@SuppressWarnings({ "restriction", "deprecation" })
-	private static synchronized void init() {
-		if (!initComplete) {
-			if (loadNativeLibrary()) {
-				criuSupportEnabled = isCRIUSupportEnabledImpl();
-				AccessController.doPrivileged((PrivilegedAction<Void>) () -> {
-					try {
-						Field f = Unsafe.class.getDeclaredField("theUnsafe"); //$NON-NLS-1$
-						f.setAccessible(true);
-						unsafe = (Unsafe) f.get(null);
-					} catch (NoSuchFieldException | SecurityException | IllegalArgumentException | IllegalAccessException e) {
-						throw new InternalError(e);
-					}
-					return null;
-				});
-
-			}
-
-			initComplete = true;
-		}
+		internalCRIUSupport = new InternalCRIUSupport(imageDir);
 	}
 
 	/**
-	 * Queries if CRIU support is enabled.
+	 * Queries if CRIU support is enabled and criu library has been loaded.
 	 *
-	 * @return TRUE is support is enabled, FALSE otherwise
+	 * @return TRUE if CRIU support is enabled and the library is loaded, FALSE otherwise
 	 */
-	public synchronized static boolean isCRIUSupportEnabled() {
-		if (!initComplete) {
-			init();
-		}
+	public static boolean isCRIUSupportEnabled() {
+		return InternalCRIUSupport.isCRIUSupportEnabledAndNativeLoaded();
+	}
 
-		return criuSupportEnabled;
+	/**
+	 * Checks if the CRIUSecProvider is enabled when CRIU
+	 * checkpoints are allowed (checks whether -XX:-CRIUSecProvider
+	 * has been specified).
+	 *
+	 * @return true if CRIUSecProvider is enabled, otherwise false
+	 */
+	public static boolean enableCRIUSecProvider() {
+		return InternalCRIUSupport.enableCRIUSecProvider();
+	}
+
+	/**
+	 * Queries if CRIU Checkpoint is allowed. With -XX:+CRIURestoreNonPortableMode enabled
+	 * (default policy) only a single checkpoint is allowed.
+	 *
+	 * @return true if Checkpoint is allowed, otherwise false
+	 */
+	public static boolean isCheckpointAllowed() {
+		return InternalCRIUSupport.isCheckpointAllowed();
 	}
 
 	/**
 	 * Returns an error message describing why isCRIUSupportEnabled()
 	 * returns false, and what can be done to remediate the issue.
 	 *
-	 * @return NULL if isCRIUSupportEnabled() returns true. Otherwise the error message
+	 * @return NULL if isCRIUSupportEnabled() returns true and nativeLoaded is true as well, otherwise the error message.
 	 */
 	public static String getErrorMessage() {
-		String s = null;
-		if (!isCRIUSupportEnabled()) {
-			if (nativeLoaded) {
-				s = "To enable criu support, please run java with the `-XX:+EnableCRIUSupport` option.";
-			} else {
-				s = "There was a problem loaded the criu native library.\n"
-						+ "Please check that criu is installed on the machine by running `criu check`.\n"
-						+ "Also, please ensure that the JDK is criu enabled by contacting your JDK provider.";
-			}
-		}
-		return s;
-	}
-	/* Higher priority hooks are run last in pre-checkoint hooks, and are run
-	 * first in post restore hooks.
-	 */
-	private static final int RESTORE_ENVIRONMENT_VARIABLES_PRIORITY = 100;
-	private static final int USER_HOOKS_PRIORITY = 1;
-
-	private String imageDir;
-	private boolean leaveRunning;
-	private boolean shellJob;
-	private boolean extUnixSupport;
-	private int logLevel;
-	private String logFile;
-	private boolean fileLocks;
-	private String workDir;
-	private boolean tcpEstablished;
-	private boolean autoDedup;
-	private boolean trackMemory;
-	private Path envFile;
-
-	@SuppressWarnings("deprecation")
-	private synchronized static boolean loadNativeLibrary() {
-		if (!nativeLoaded) {
-			try {
-				AccessController.doPrivileged((PrivilegedAction<Void>) () -> {
-					System.loadLibrary("j9criu29"); //$NON-NLS-1$
-					nativeLoaded = true;
-					return null;
-				});
-			} catch (UnsatisfiedLinkError e) {
-				if (System.getProperty("enable.j9internal.checkpoint.hook.api.debug") != null) { //$NON-NLS-1$
-					e.printStackTrace();
-				}
-			}
-		}
-
-		return nativeLoaded;
+		return InternalCRIUSupport.getErrorMessage();
 	}
 
 	/**
@@ -221,21 +145,7 @@ public final class CRIUSupport {
 	 * @throws IllegalArgumentException if imageDir is not a valid directory
 	 */
 	public CRIUSupport setImageDir(Path imageDir) {
-		Objects.requireNonNull(imageDir, "Image directory cannot be null");
-		if (!Files.isDirectory(imageDir)) {
-			throw new IllegalArgumentException("imageDir is not a valid directory");
-		}
-		String dir = imageDir.toAbsolutePath().toString();
-
-		/* [IF JAVA_SPEC_VERSION < 17] */
-		@SuppressWarnings({"deprecation" })
-		/* [ENDIF] JAVA_SPEC_VERSION < 17 */
-		SecurityManager manager = System.getSecurityManager();
-		if (manager != null) {
-			manager.checkWrite(dir);
-		}
-
-		this.imageDir = dir;
+		internalCRIUSupport = internalCRIUSupport.setImageDir(imageDir);
 		return this;
 	}
 
@@ -248,7 +158,7 @@ public final class CRIUSupport {
 	 * @return this
 	 */
 	public CRIUSupport setLeaveRunning(boolean leaveRunning) {
-		this.leaveRunning = leaveRunning;
+		internalCRIUSupport = internalCRIUSupport.setLeaveRunning(leaveRunning);
 		return this;
 	}
 
@@ -261,7 +171,7 @@ public final class CRIUSupport {
 	 * @return this
 	 */
 	public CRIUSupport setShellJob(boolean shellJob) {
-		this.shellJob = shellJob;
+		internalCRIUSupport = internalCRIUSupport.setShellJob(shellJob);
 		return this;
 	}
 
@@ -274,7 +184,7 @@ public final class CRIUSupport {
 	 * @return this
 	 */
 	public CRIUSupport setExtUnixSupport(boolean extUnixSupport) {
-		this.extUnixSupport = extUnixSupport;
+		internalCRIUSupport = internalCRIUSupport.setExtUnixSupport(extUnixSupport);
 		return this;
 	}
 
@@ -294,11 +204,7 @@ public final class CRIUSupport {
 	 * @throws IllegalArgumentException if logLevel is not valid
 	 */
 	public CRIUSupport setLogLevel(int logLevel) {
-		if (logLevel > 0 && logLevel <= 4) {
-			this.logLevel = logLevel;
-		} else {
-			throw new IllegalArgumentException("Log level must be 1 to 4 inclusive");
-		}
+		internalCRIUSupport = internalCRIUSupport.setLogLevel(logLevel);
 		return this;
 	}
 
@@ -313,11 +219,7 @@ public final class CRIUSupport {
 	 * @throws IllegalArgumentException if logFile is null or a path
 	 */
 	public CRIUSupport setLogFile(String logFile) {
-		if (logFile != null && !logFile.contains(File.separator)) {
-			this.logFile = logFile;
-		} else {
-			throw new IllegalArgumentException("Log file must not be null and not be a path");
-		}
+		internalCRIUSupport = internalCRIUSupport.setLogFile(logFile);
 		return this;
 	}
 
@@ -330,7 +232,7 @@ public final class CRIUSupport {
 	 * @return this
 	 */
 	public CRIUSupport setFileLocks(boolean fileLocks) {
-		this.fileLocks = fileLocks;
+		internalCRIUSupport = internalCRIUSupport.setFileLocks(fileLocks);
 		return this;
 	}
 
@@ -343,7 +245,7 @@ public final class CRIUSupport {
 	 * @return this
 	 */
 	public CRIUSupport setTCPEstablished(boolean tcpEstablished) {
-		this.tcpEstablished = tcpEstablished;
+		internalCRIUSupport = internalCRIUSupport.setTCPEstablished(tcpEstablished);
 		return this;
 	}
 
@@ -356,7 +258,7 @@ public final class CRIUSupport {
 	 * @return this
 	 */
 	public CRIUSupport setAutoDedup(boolean autoDedup) {
-		this.autoDedup = autoDedup;
+		internalCRIUSupport = internalCRIUSupport.setAutoDedup(autoDedup);
 		return this;
 	}
 
@@ -369,7 +271,7 @@ public final class CRIUSupport {
 	 * @return this
 	 */
 	public CRIUSupport setTrackMemory(boolean trackMemory) {
-		this.trackMemory = trackMemory;
+		internalCRIUSupport = internalCRIUSupport.setTrackMemory(trackMemory);
 		return this;
 	}
 
@@ -385,21 +287,35 @@ public final class CRIUSupport {
 	 * @throws IllegalArgumentException if workDir is not a valid directory
 	 */
 	public CRIUSupport setWorkDir(Path workDir) {
-		Objects.requireNonNull(workDir, "Work directory cannot be null");
-		if (!Files.isDirectory(workDir)) {
-			throw new IllegalArgumentException("workDir is not a valid directory");
-		}
-		String dir = workDir.toAbsolutePath().toString();
+		internalCRIUSupport = internalCRIUSupport.setWorkDir(workDir);
+		return this;
+	}
 
-		/* [IF JAVA_SPEC_VERSION < 17] */
-		@SuppressWarnings({"deprecation" })
-		/* [ENDIF] JAVA_SPEC_VERSION < 17 */
-		SecurityManager manager = System.getSecurityManager();
-		if (manager != null) {
-			manager.checkWrite(dir);
-		}
+	/**
+	 * Controls whether CRIU will be invoked in privileged or unprivileged mode.
+	 * <p>
+	 * Default: false
+	 *
+	 * @param unprivileged
+	 * @return this
+	 */
+	public CRIUSupport setUnprivileged(boolean unprivileged) {
+		internalCRIUSupport = internalCRIUSupport.setUnprivileged(unprivileged);
+		return this;
+	}
 
-		this.workDir = dir;
+	/**
+	 * Set the size limit for ghost files when taking a checkpoint. File limit
+	 * can not be greater than 2^32 - 1 or negative.
+	 *
+	 * Default: 1MB set by CRIU
+	 *
+	 * @param limit the file limit size in bytes.
+	 * @return this
+	 * @throws UnsupportedOperationException if file limit is greater than 2^32 - 1 or negative.
+	 */
+	public CRIUSupport setGhostFileLimit(long limit) {
+		internalCRIUSupport = internalCRIUSupport.setGhostFileLimit(limit);
 		return this;
 	}
 
@@ -412,37 +328,136 @@ public final class CRIUSupport {
 	 * Format for envFile is the following: ENV_VAR_NAME1=ENV_VAR_VALUE1 ...
 	 * ENV_VAR_NAMEN=ENV_VAR_VALUEN
 	 *
+	 * OPENJ9_RESTORE_JAVA_OPTIONS is a special environment variable that can be
+	 * used to add JVM options on restore.
+	 *
 	 * @param envFile The file that contains the new environment variables to be
 	 *                added
 	 * @return this
 	 */
 	public CRIUSupport registerRestoreEnvFile(Path envFile) {
-		this.envFile = envFile;
+		internalCRIUSupport = internalCRIUSupport.registerRestoreEnvFile(envFile);
+		return this;
+	}
+
+	/**
+	 * Add new JVM options upon restore. The options will be specified in an options
+	 * file with the form specified in https://www.eclipse.org/openj9/docs/xoptionsfile/
+	 *
+	 * Only a subset of JVM options are available on restore. Consult the CRIU Support section of Eclipse OpenJ9 documentation to determine
+	 * which options are supported.
+	 *
+	 * @param optionsFile The file that contains the new JVM options to be added on restore
+	 *
+	 * @return this
+	 */
+	public CRIUSupport registerRestoreOptionsFile(Path optionsFile) {
+		internalCRIUSupport = internalCRIUSupport.registerRestoreOptionsFile(optionsFile);
+		return this;
+	}
+
+	/**
+	 * User hook that is run after restoring a checkpoint image. This is equivalent
+	 * to registerPostRestoreHook(hook, HookMode.SINGLE_THREAD_MODE,
+	 * DEFAULT_SINGLE_THREAD_MODE_HOOK_PRIORITY);
+	 *
+	 * Hooks will be run in single threaded mode, no other application threads
+	 * will be active. Users should avoid synchronization of objects that are not owned
+	 * by the thread, terminally blocking operations and launching new threads in the hook.
+	 * If the thread attempts to acquire a lock that it doesn't own, an exception will
+	 * be thrown.
+	 *
+	 * @param hook user hook
+	 *
+	 * @return this
+	 */
+	public CRIUSupport registerPostRestoreHook(Runnable hook) {
+		try {
+			internalCRIUSupport = internalCRIUSupport.registerPostRestoreHook(hook);
+		} catch (openj9.internal.criu.JVMCheckpointException jce) {
+			throw new JVMCheckpointException(jce.getMessage(), 0, jce);
+		} catch (openj9.internal.criu.JVMRestoreException jre) {
+			throw new JVMRestoreException(jre.getMessage(), 0, jre);
+		}
 		return this;
 	}
 
 	/**
 	 * User hook that is run after restoring a checkpoint image.
 	 *
+	 * If SINGLE_THREAD_MODE is requested, no other application threads will be
+	 * active. Users should avoid synchronization of objects that are not owned by
+	 * the thread, terminally blocking operations and launching new threads in the
+	 * hook. If the thread attempts to acquire a lock that it doesn't own, an
+	 * exception will be thrown.
+	 *
+	 * If CONCURRENT_MODE is requested, the hook will be run alongside all other
+	 * active Java threads.
+	 *
+	 * High-priority hooks are run first after restore, and vice-versa for
+	 * low-priority hooks. The priority of the hook is with respect to the other
+	 * hooks run within that mode. CONCURRENT_MODE hooks are implicitly lower
+	 * priority than SINGLE_THREAD_MODE hooks. Ie. the lowest priority
+	 * SINGLE_THREAD_MODE hook is a higher priority than the highest priority
+	 * CONCURRENT_MODE hook. The hooks of the same mode with the same priority are
+	 * run in random order.
+	 *
+	 * @param hook     user hook
+	 * @param mode     the mode in which the hook is run, either CONCURRENT_MODE or
+	 *                 SINGLE_THREAD_MODE
+	 * @param priority the priority of the hook, between LOWEST_USER_HOOK_PRIORITY -
+	 *                 HIGHEST_USER_HOOK_PRIORITY. Throws
+	 *                 UnsupportedOperationException otherwise.
+	 *
+	 * @return this
+	 *
+	 * @throws UnsupportedOperationException if the hook mode is not
+	 *                                       SINGLE_THREAD_MODE or CONCURRENT_MODE
+	 *                                       or the priority is not between
+	 *                                       LOWEST_USER_HOOK_PRIORITY and
+	 *                                       HIGHEST_USER_HOOK_PRIORITY.
+	 */
+	public CRIUSupport registerPostRestoreHook(Runnable hook, HookMode mode, int priority)
+			throws UnsupportedOperationException {
+		InternalCRIUSupport.HookMode internalMode;
+		if (mode == HookMode.SINGLE_THREAD_MODE) {
+			internalMode = InternalCRIUSupport.HookMode.SINGLE_THREAD_MODE;
+		} else {
+			internalMode = InternalCRIUSupport.HookMode.CONCURRENT_MODE;
+		}
+		try {
+			internalCRIUSupport = internalCRIUSupport.registerPostRestoreHook(hook, internalMode, priority);
+		} catch (openj9.internal.criu.JVMCheckpointException jce) {
+			throw new JVMCheckpointException(jce.getMessage(), 0, jce);
+		} catch (openj9.internal.criu.JVMRestoreException jre) {
+			throw new JVMRestoreException(jre.getMessage(), 0, jre);
+		}
+		return this;
+	}
+
+	/**
+	 * User hook that is run before checkpointing the JVM. This is equivalent to
+	 * registerPreCheckpointHook(hook, HookMode.SINGLE_THREAD_MODE,
+	 * DEFAULT_SINGLE_THREAD_MODE_HOOK_PRIORITY).
+	 *
 	 * Hooks will be run in single threaded mode, no other application threads
 	 * will be active. Users should avoid synchronization of objects that are not owned
 	 * by the thread, terminally blocking operations and launching new threads in the hook.
+	 * If the thread attempts to acquire a lock that it doesn't own, an exception will
+	 * be thrown.
 	 *
 	 * @param hook user hook
 	 *
 	 * @return this
 	 *
-	 * TODO: Additional JVM capabilities will be added to prevent certain deadlock scenarios
 	 */
-	public CRIUSupport registerPostRestoreHook(Runnable hook) {
-		if (hook != null) {
-			J9InternalCheckpointHookAPI.registerPostRestoreHook(USER_HOOKS_PRIORITY, "User post-restore hook", ()->{ //$NON-NLS-1$
-				try {
-					hook.run();
-				} catch (Throwable t) {
-					throw new RestoreException("Exception thrown when running user post-restore hook", 0, t);
-				}
-			});
+	public CRIUSupport registerPreCheckpointHook(Runnable hook) {
+		try {
+			internalCRIUSupport = internalCRIUSupport.registerPreCheckpointHook(hook);
+		} catch (openj9.internal.criu.JVMCheckpointException jce) {
+			throw new JVMCheckpointException(jce.getMessage(), 0, jce);
+		} catch (openj9.internal.criu.JVMRestoreException jre) {
+			throw new JVMRestoreException(jre.getMessage(), 0, jre);
 		}
 		return this;
 	}
@@ -450,113 +465,54 @@ public final class CRIUSupport {
 	/**
 	 * User hook that is run before checkpointing the JVM.
 	 *
-	 * Hooks will be run in single threaded mode, no other application threads
-	 * will be active. Users should avoid synchronization of objects that are not owned
-	 * by the thread, terminally blocking operations and launching new threads in the hook.
+	 * If SINGLE_THREAD_MODE is requested, no other application threads will be
+	 * active. Users should avoid synchronization of objects that are not owned by
+	 * the thread, terminally blocking operations and launching new threads in the
+	 * hook. If the thread attempts to acquire a lock that it doesn't own, an
+	 * exception will be thrown.
 	 *
-	 * @param hook user hook
+	 * If CONCURRENT_MODE is requested, the hook will be run alongside all other
+	 * active Java threads.
+	 *
+	 * High-priority hooks are run last before checkpoint, and vice-versa for
+	 * low-priority hooks. The priority of the hook is with respect to the other
+	 * hooks run within that mode. CONCURRENT_MODE hooks are implicitly lower
+	 * priority than SINGLE_THREAD_MODEd hooks. Ie. the lowest priority
+	 * SINGLE_THREAD_MODE hook is a higher priority than the highest priority
+	 * CONCURRENT_MODE hook. The hooks of the same mode with the same priority are
+	 * run in random order.
+	 *
+	 * @param hook     user hook
+	 * @param mode     the mode in which the hook is run, either CONCURRENT_MODE or
+	 *                 SINGLE_THREAD_MODE
+	 * @param priority the priority of the hook, between LOWEST_USER_HOOK_PRIORITY -
+	 *                 HIGHEST_USER_HOOK_PRIORITY. Throws
+	 *                 UnsupportedOperationException otherwise.
 	 *
 	 * @return this
 	 *
-	 * TODO: Additional JVM capabilities will be added to prevent certain deadlock scenarios
+	 * @throws UnsupportedOperationException if the hook mode is not
+	 *                                       SINGLE_THREAD_MODE or CONCURRENT_MODE
+	 *                                       or the priority is not between
+	 *                                       LOWEST_USER_HOOK_PRIORITY and
+	 *                                       HIGHEST_USER_HOOK_PRIORITY.
 	 */
-	public CRIUSupport registerPreSnapshotHook(Runnable hook) {
-		if (hook != null) {
-			J9InternalCheckpointHookAPI.registerPreCheckpointHook(USER_HOOKS_PRIORITY, "User pre-checkpoint hook", ()->{ //$NON-NLS-1$
-				try {
-					hook.run();
-				} catch (Throwable t) {
-					throw new JVMCheckpointException("Exception thrown when running user pre-checkpoint hook", 0, t);
-				}
-			});
+	public CRIUSupport registerPreCheckpointHook(Runnable hook, HookMode mode, int priority)
+			throws UnsupportedOperationException {
+		InternalCRIUSupport.HookMode internalMode;
+		if (mode == HookMode.SINGLE_THREAD_MODE) {
+			internalMode = InternalCRIUSupport.HookMode.SINGLE_THREAD_MODE;
+		} else {
+			internalMode = InternalCRIUSupport.HookMode.CONCURRENT_MODE;
+		}
+		try {
+			internalCRIUSupport = internalCRIUSupport.registerPreCheckpointHook(hook, internalMode, priority);
+		} catch (openj9.internal.criu.JVMCheckpointException jce) {
+			throw new JVMCheckpointException(jce.getMessage(), 0, jce);
+		} catch (openj9.internal.criu.JVMRestoreException jre) {
+			throw new JVMRestoreException(jre.getMessage(), 0, jre);
 		}
 		return this;
-	}
-
-	@SuppressWarnings("restriction")
-	private void registerRestoreEnvVariables() {
-		if (this.envFile == null) {
-			return;
-		}
-
-		J9InternalCheckpointHookAPI.registerPostRestoreHook(RESTORE_ENVIRONMENT_VARIABLES_PRIORITY,
-				"Restore environment variables via env file: " + envFile, () -> { //$NON-NLS-1$
-					if (!Files.exists(this.envFile)) {
-						throw throwSetEnvException(new IllegalArgumentException(
-								"Restore environment variable file " + envFile + " does not exist."));
-					}
-
-					String file = envFile.toAbsolutePath().toString();
-
-					try (BufferedReader envFileReader = new BufferedReader(new FileReader(file))) {
-
-						Class<?> processEnvironmentClass = Class.forName("java.lang.ProcessEnvironment"); //$NON-NLS-1$
-						Class<?> stringEnvironmentClass = Class.forName("java.lang.ProcessEnvironment$StringEnvironment"); //$NON-NLS-1$
-						Class<?> variableClass = Class.forName("java.lang.ProcessEnvironment$Variable"); //$NON-NLS-1$
-						Class<?> valueClass = Class.forName("java.lang.ProcessEnvironment$Value"); //$NON-NLS-1$
-						Field theUnmodifiableEnvironmentHandle = processEnvironmentClass.getDeclaredField("theUnmodifiableEnvironment"); //$NON-NLS-1$
-						Field theEnvironmentHandle = processEnvironmentClass.getDeclaredField("theEnvironment"); //$NON-NLS-1$
-						Constructor<?> newStringEnvironment = stringEnvironmentClass.getConstructor(new Class<?>[] { Map.class });
-						Method variableValueOf = variableClass.getDeclaredMethod("valueOf", new Class<?>[] { String.class }); //$NON-NLS-1$
-						Method valueValueOf = valueClass.getDeclaredMethod("valueOf", new Class<?>[] { String.class }); //$NON-NLS-1$
-						theUnmodifiableEnvironmentHandle.setAccessible(true);
-						theEnvironmentHandle.setAccessible(true);
-						newStringEnvironment.setAccessible(true);
-						variableValueOf.setAccessible(true);
-						valueValueOf.setAccessible(true);
-
-						@SuppressWarnings("unchecked")
-						Map<String, String> oldTheUnmodifiableEnvironment = (Map<String, String>) theUnmodifiableEnvironmentHandle
-								.get(processEnvironmentClass);
-						@SuppressWarnings("unchecked")
-						Map<Object, Object> theEnvironment = (Map<Object, Object>) theEnvironmentHandle
-								.get(processEnvironmentClass);
-
-						String entry = null;
-
-						List<String> illegalKeys = new ArrayList<>(0);
-						while ((entry = envFileReader.readLine()) != null) {
-							// Keep the leading or trailing spaces of entry
-							if (!entry.trim().isEmpty()) {
-								// Only split into 2 (max) allow "=" to be contained in the value.
-								String entrySplit[] = entry.split("=", 2); //$NON-NLS-1$
-								if (entrySplit.length != 2) {
-									throw new IllegalArgumentException(
-											"Env File entry is not in the correct format: [envVarName]=[envVarVal]: " //$NON-NLS-1$
-													+ entry);
-								}
-
-								String name = entrySplit[0];
-								String newValue = entrySplit[1];
-								String oldValue = oldTheUnmodifiableEnvironment.get(name);
-								if (oldValue != null) {
-									if (!Objects.equals(oldValue, newValue)) {
-										illegalKeys.add(name);
-									}
-								} else {
-									theEnvironment.put(variableValueOf.invoke(null, name), valueValueOf.invoke(null, newValue));
-								}
-							}
-						}
-
-						if (!illegalKeys.isEmpty()) {
-							throw new IllegalArgumentException(String.format("Env file entry cannot modifiy pre-existing environment keys: %s", String.valueOf(illegalKeys)));
-						}
-
-						@SuppressWarnings("unchecked")
-						Map<String, String> newTheUnmodifiableEnvironment = (Map<String, String>) newStringEnvironment.newInstance(theEnvironment);
-
-						unsafe.putObject(processEnvironmentClass, unsafe.staticFieldOffset(theUnmodifiableEnvironmentHandle),
-								Collections.unmodifiableMap(newTheUnmodifiableEnvironment));
-
-					} catch (Throwable t) {
-						throw throwSetEnvException(t);
-					}
-				});
-	}
-
-	private static RestoreException throwSetEnvException(Throwable cause) {
-		throw new RestoreException("Failed to setup new environment variables", 0, cause);
 	}
 
 	/**
@@ -564,21 +520,28 @@ public final class CRIUSupport {
 	 * options setters.
 	 *
 	 * @throws UnsupportedOperationException if CRIU is not supported
-	 * @throws JVMCheckpointException        if a JVM error occurred before
-	 *                                       checkpoint
-	 * @throws SystemCheckpointException     if a CRIU operation failed
-	 * @throws RestoreException              if an error occurred during or after
-	 *                                       restore
+	 *  or running in non-portable mode (only one checkpoint is allowed),
+	 *  and we have already checkpointed once.
+	 * @throws JVMCheckpointException        if a JVM error occurred before checkpoint
+	 * @throws SystemCheckpointException     if a System operation failed before checkpoint
+	 * @throws SystemRestoreException        if a System operation failed during or after restore
+	 * @throws JVMRestoreException           if an error occurred during or after restore
 	 */
-	public void checkpointJVM() {
-		/* Add env variables restore hook */
-		registerRestoreEnvVariables();
-
+	public synchronized void checkpointJVM() {
 		if (isCRIUSupportEnabled()) {
-			checkpointJVMImpl(imageDir, leaveRunning, shellJob, extUnixSupport, logLevel, logFile, fileLocks, workDir,
-					tcpEstablished, autoDedup, trackMemory);
+			try {
+				internalCRIUSupport.checkpointJVM();
+			} catch (openj9.internal.criu.JVMCheckpointException jce) {
+				throw new JVMCheckpointException(jce.getMessage(), 0, jce);
+			} catch (openj9.internal.criu.JVMRestoreException jre) {
+				throw new JVMRestoreException(jre.getMessage(), 0, jre);
+			} catch (openj9.internal.criu.SystemCheckpointException sce) {
+				throw new SystemCheckpointException(sce.getMessage(), 0, sce);
+			} catch (openj9.internal.criu.SystemRestoreException sre) {
+				throw new SystemRestoreException(sre.getMessage(), 0, sre);
+			}
 		} else {
-			throw new UnsupportedOperationException("CRIU support is not enabled");
+			throw new UnsupportedOperationException("CRIU support is not enabled"); //$NON-NLS-1$
 		}
 	}
 }

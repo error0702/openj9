@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 /* #define J9VM_DBG */
@@ -80,9 +80,28 @@ UDATA initializeVMThreading(J9JavaVM *vm)
 
 		omrthread_monitor_init_with_name(&vm->constantDynamicMutex, 0, "Wait mutex for constantDynamic during resolve") ||
 
-#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+#if defined(J9VM_OPT_VALHALLA_FLATTENABLE_VALUE_TYPES)
 		omrthread_monitor_init_with_name(&vm->valueTypeVerificationMutex, 0, "Wait mutex for verifying valuetypes") ||
-#endif /* defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */
+#endif /* defined(J9VM_OPT_VALHALLA_FLATTENABLE_VALUE_TYPES) */
+
+#if JAVA_SPEC_VERSION >= 16
+		omrthread_monitor_init_with_name(&vm->cifNativeCalloutDataCacheMutex, 0, "CIF cache mutex") ||
+		omrthread_monitor_init_with_name(&vm->cifArgumentTypesCacheMutex, 0, "CIF argument types mutex") ||
+		omrthread_monitor_init_with_name(&vm->thunkHeapListMutex, 0, "Wait mutex for allocating the upcall thunk memory") ||
+#endif /* JAVA_SPEC_VERSION >= 16 */
+
+#if JAVA_SPEC_VERSION >= 19
+		/* Held when adding or removing a virtual thread from the list at virtual thread start or terminate. */
+		omrthread_monitor_init_with_name(&vm->tlsFinalizersMutex, 0, "TLS finalizers mutex") ||
+		omrthread_monitor_init_with_name(&vm->tlsPoolMutex, 0, "TLS pool mutex") ||
+#endif /* JAVA_SPEC_VERSION >= 19 */
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+		omrthread_monitor_init_with_name(&vm->delayedLockingOperationsMutex, 0, "Delayed locking operations mutex") ||
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
+
+#if JAVA_SPEC_VERSION >= 22
+		omrthread_monitor_init_with_name(&vm->closeScopeMutex, 0, "ScopedMemoryAccess closeScope0 mutex") ||
+#endif /* JAVA_SPEC_VERSION >= 22 */
 
 		initializeMonitorTable(vm)
 	)
@@ -160,9 +179,37 @@ void terminateVMThreading(J9JavaVM *vm)
 	if (vm->nativeLibraryMonitor) omrthread_monitor_destroy(vm->nativeLibraryMonitor);
 	if (vm->vmRuntimeStateListener.runtimeStateListenerMutex) omrthread_monitor_destroy(vm->vmRuntimeStateListener.runtimeStateListenerMutex);
 	if (vm->constantDynamicMutex) omrthread_monitor_destroy(vm->constantDynamicMutex);
-#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+#if defined(J9VM_OPT_VALHALLA_FLATTENABLE_VALUE_TYPES)
 	if (vm->valueTypeVerificationMutex) omrthread_monitor_destroy(vm->valueTypeVerificationMutex);
-#endif /* defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */
+#endif /* defined(J9VM_OPT_VALHALLA_FLATTENABLE_VALUE_TYPES) */
+#if JAVA_SPEC_VERSION >= 16
+	if (NULL != vm->cifNativeCalloutDataCacheMutex) {
+		omrthread_monitor_destroy(vm->cifNativeCalloutDataCacheMutex);
+		vm->cifNativeCalloutDataCacheMutex = NULL;
+	}
+
+	if (NULL != vm->cifArgumentTypesCacheMutex) {
+		omrthread_monitor_destroy(vm->cifArgumentTypesCacheMutex);
+		vm->cifArgumentTypesCacheMutex = NULL;
+	}
+
+	if (NULL != vm->thunkHeapListMutex) {
+		omrthread_monitor_destroy(vm->thunkHeapListMutex);
+		vm->thunkHeapListMutex = NULL;
+	}
+#endif /* JAVA_SPEC_VERSION >= 16 */
+
+#if JAVA_SPEC_VERSION >= 19
+	if (NULL != vm->tlsFinalizersMutex) {
+		omrthread_monitor_destroy(vm->tlsFinalizersMutex);
+		vm->tlsFinalizersMutex = NULL;
+	}
+	if (NULL != vm->tlsPoolMutex) {
+		omrthread_monitor_destroy(vm->tlsPoolMutex);
+		vm->tlsPoolMutex = NULL;
+	}
+#endif /* JAVA_SPEC_VERSION >= 19 */
+
 	destroyMonitorTable(vm);
 }
 

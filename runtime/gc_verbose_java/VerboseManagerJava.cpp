@@ -1,6 +1,6 @@
 
 /*******************************************************************************
- * Copyright (c) 1991, 2014 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,9 +16,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "gcutils.h"
@@ -175,5 +175,19 @@ MM_VerboseManagerJava::handleFileOpenError(MM_EnvironmentBase *env, char *fileNa
 {
 	OMRPORT_ACCESS_FROM_OMRPORT(env->getPortLibrary());
 	omrnls_printf(J9NLS_ERROR, J9NLS_GC_UNABLE_TO_OPEN_FILE, fileName);
+}
+
+int32_t
+MM_VerboseManagerJava::fileOpenMode(MM_EnvironmentBase *env)
+{
+	int32_t mode = EsOpenTruncate;
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+	MM_GCExtensions *extensions = MM_GCExtensions::getExtensions(env->getOmrVM());
+	if (extensions->reinitializationInProgress()) {
+		mode = EsOpenAppend;
+	}
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
+
+	return mode;
 }
 

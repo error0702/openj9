@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
  
  /**
@@ -114,7 +114,13 @@ J9AllocateObjectNoGC(J9VMThread *vmThread, J9Class *clazz, uintptr_t allocateFla
 			objectPtr = OMR_GC_AllocateObject(vmThread->omrVMThread, &mixedOAM);
 			if (NULL != objectPtr) {
 				uintptr_t allocatedBytes = env->getExtensions()->objectModel.getConsumedSizeInBytesWithHeader(objectPtr);
-				Assert_MM_true(allocatedBytes == mixedOAM.getAllocateDescription()->getContiguousBytes());
+
+				/* Do sanity check: size of actually allocated Mixed object should match requested */
+				uintptr_t requestedBytes = mixedOAM.getAllocateDescription()->getContiguousBytes();
+				Assert_GC_true_with_message4(env, allocatedBytes == requestedBytes,
+						"J9AllocateObjectNoGC: Object %p, requested %zu bytes, but read %zu, MM_MixedObjectAllocationModel %p\n",
+						objectPtr, requestedBytes, allocatedBytes, &mixedOAM);
+
 				if (LN_HAS_LOCKWORD(vmThread, objectPtr)) {
 					j9objectmonitor_t initialLockword = VM_ObjectMonitor::getInitialLockword(vmThread->javaVM, clazz);
 					if (0 != initialLockword) {
@@ -355,7 +361,12 @@ J9AllocateIndexableObjectNoGC(J9VMThread *vmThread, J9Class *clazz, uint32_t num
 			objectPtr = OMR_GC_AllocateObject(vmThread->omrVMThread, &indexableOAM);
 			if (NULL != objectPtr) {
 				uintptr_t allocatedBytes = env->getExtensions()->objectModel.getConsumedSizeInBytesWithHeader(objectPtr);
-				Assert_MM_true(allocatedBytes == indexableOAM.getAllocateDescription()->getContiguousBytes());
+
+				/* Do sanity check: size of actually allocated Indexable object should match requested */
+				uintptr_t requestedBytes = indexableOAM.getAllocateDescription()->getContiguousBytes();
+				Assert_GC_true_with_message4(env, allocatedBytes == requestedBytes,
+						"J9AllocateIndexableObjectNoGC: Object %p, requested %zu bytes, but read %zu, MM_IndexableObjectAllocationModel %p\n",
+						objectPtr, requestedBytes, allocatedBytes, &indexableOAM);
 			}
 			env->_isInNoGCAllocationCall = false;
 		}
@@ -387,6 +398,8 @@ J9AllocateObject(J9VMThread *vmThread, J9Class *clazz, uintptr_t allocateFlags)
 {
 	MM_EnvironmentBase *env = MM_EnvironmentBase::getEnvironment(vmThread->omrVMThread);
 
+	VM_VMAccess::setPublicFlags(vmThread, J9_PUBLIC_FLAGS_NOT_AT_SAFE_POINT);
+
 #if defined(J9VM_GC_THREAD_LOCAL_HEAP)	
 	if (!env->isInlineTLHAllocateEnabled()) {
 		/* For duration of call restore TLH allocate fields;
@@ -414,7 +427,13 @@ J9AllocateObject(J9VMThread *vmThread, J9Class *clazz, uintptr_t allocateFlags)
 		objectPtr = OMR_GC_AllocateObject(vmThread->omrVMThread, &mixedOAM);
 		if (NULL != objectPtr) {
 			uintptr_t allocatedBytes = env->getExtensions()->objectModel.getConsumedSizeInBytesWithHeader(objectPtr);
-			Assert_MM_true(allocatedBytes == mixedOAM.getAllocateDescription()->getContiguousBytes());
+
+			/* Do sanity check: size of actually allocated Mixed object should match requested */
+			uintptr_t requestedBytes = mixedOAM.getAllocateDescription()->getContiguousBytes();
+			Assert_GC_true_with_message4(env, allocatedBytes == requestedBytes,
+					"J9AllocateObject: Object %p, requested %zu bytes, but read %zu, MM_MixedObjectAllocationModel %p\n",
+					objectPtr, requestedBytes, allocatedBytes, &mixedOAM);
+
 			if (LN_HAS_LOCKWORD(vmThread, objectPtr)) {
 				j9objectmonitor_t initialLockword = VM_ObjectMonitor::getInitialLockword(vmThread->javaVM, clazz);
 				if (0 != initialLockword) {
@@ -454,11 +473,17 @@ J9AllocateObject(J9VMThread *vmThread, J9Class *clazz, uintptr_t allocateFlags)
 				objectPtr, 
 				sizeInBytesRequired);
 		} else {
-			TRIGGER_J9HOOK_VM_OBJECT_ALLOCATE(
-				vmThread->javaVM->hookInterface, 
-				vmThread,
-				objectPtr, 
-				sizeInBytesRequired);
+			if (J9_EVENT_IS_HOOKED(vmThread->javaVM->hookInterface, J9HOOK_VM_OBJECT_ALLOCATE)) {
+				/* The JIT optimization only uses instrumentable allocate, so clear the NOT_AT_SAFE_POINT
+				 * bit now to allow the hook to run with no restrictions.
+				 */
+				VM_VMAccess::clearPublicFlags(vmThread, J9_PUBLIC_FLAGS_NOT_AT_SAFE_POINT);
+				ALWAYS_TRIGGER_J9HOOK_VM_OBJECT_ALLOCATE(
+					vmThread->javaVM->hookInterface,
+					vmThread,
+					objectPtr,
+					sizeInBytesRequired);
+			}
 		}
 		
 		if( !mixedOAM.getAllocateDescription()->isCompletedFromTlh()) {
@@ -516,6 +541,19 @@ J9AllocateObject(J9VMThread *vmThread, J9Class *clazz, uintptr_t allocateFlags)
 	}
 #endif /* J9VM_GC_THREAD_LOCAL_HEAP */	
 
+	if (J9_ARE_ANY_BITS_SET(vmThread->publicFlags, J9_PUBLIC_FLAGS_HALT_THREAD_ANY)) {
+		if (NULL != objectPtr) {
+			env->saveObjects((omrobjectptr_t)objectPtr);
+		}
+		vmThread->javaVM->internalVMFunctions->internalReleaseVMAccess(vmThread);
+		vmThread->javaVM->internalVMFunctions->internalAcquireVMAccess(vmThread);
+		if (NULL != objectPtr) {
+			env->restoreObjects((omrobjectptr_t*)&objectPtr);
+		}
+	}
+
+	VM_VMAccess::clearPublicFlags(vmThread, J9_PUBLIC_FLAGS_NOT_AT_SAFE_POINT);
+
 	return objectPtr;
 }
 
@@ -532,6 +570,8 @@ J9AllocateIndexableObject(J9VMThread *vmThread, J9Class *clazz, uint32_t numberO
 {
 	MM_EnvironmentBase *env = MM_EnvironmentBase::getEnvironment(vmThread->omrVMThread);
 	MM_GCExtensions *extensions = MM_GCExtensions::getExtensions(env);
+
+	VM_VMAccess::setPublicFlags(vmThread, J9_PUBLIC_FLAGS_NOT_AT_SAFE_POINT);
 
 	Assert_MM_false(allocateFlags & OMR_GC_ALLOCATE_OBJECT_NO_GC);
 	if (OMR_GC_ALLOCATE_OBJECT_NON_ZERO_TLH == (allocateFlags & OMR_GC_ALLOCATE_OBJECT_NON_ZERO_TLH)) {
@@ -555,7 +595,12 @@ J9AllocateIndexableObject(J9VMThread *vmThread, J9Class *clazz, uint32_t numberO
 		objectPtr = OMR_GC_AllocateObject(vmThread->omrVMThread, &indexableOAM);
 		if (NULL != objectPtr) {
 			uintptr_t allocatedBytes = env->getExtensions()->objectModel.getConsumedSizeInBytesWithHeader(objectPtr);
-			Assert_MM_true(allocatedBytes == indexableOAM.getAllocateDescription()->getContiguousBytes());
+
+			/* Do sanity check: size of actually allocated Indexable object should match requested */
+			uintptr_t requestedBytes = indexableOAM.getAllocateDescription()->getContiguousBytes();
+			Assert_GC_true_with_message4(env, allocatedBytes == requestedBytes,
+					"J9AllocateIndexableObject: Object %p, requested %zu bytes, but read %zu, MM_IndexableObjectAllocationModel %p\n",
+					objectPtr, requestedBytes, allocatedBytes, &indexableOAM);
 		}
 	}
 	
@@ -589,11 +634,17 @@ J9AllocateIndexableObject(J9VMThread *vmThread, J9Class *clazz, uint32_t numberO
 				objectPtr, 
 				sizeInBytesRequired);
 		} else {
-			TRIGGER_J9HOOK_VM_OBJECT_ALLOCATE(
-				vmThread->javaVM->hookInterface, 
-				vmThread, 
-				objectPtr, 
-				sizeInBytesRequired);
+			if (J9_EVENT_IS_HOOKED(vmThread->javaVM->hookInterface, J9HOOK_VM_OBJECT_ALLOCATE)) {
+				/* The JIT optimization only uses instrumentable allocate, so clear the NOT_AT_SAFE_POINT
+				 * bit now to allow the hook to run with no restrictions.
+				 */
+				VM_VMAccess::clearPublicFlags(vmThread, J9_PUBLIC_FLAGS_NOT_AT_SAFE_POINT);
+				TRIGGER_J9HOOK_VM_OBJECT_ALLOCATE(
+					vmThread->javaVM->hookInterface,
+					vmThread,
+					objectPtr,
+					sizeInBytesRequired);
+			}
 		}
 	
 		/* If this was a non-TLH allocation, trigger the hook */
@@ -654,6 +705,19 @@ J9AllocateIndexableObject(J9VMThread *vmThread, J9Class *clazz, uint32_t numberO
 		env->disableInlineTLHAllocate();
 	}
 #endif /* J9VM_GC_THREAD_LOCAL_HEAP */	
+
+	if (J9_ARE_ANY_BITS_SET(vmThread->publicFlags, J9_PUBLIC_FLAGS_HALT_THREAD_ANY)) {
+		if (NULL != objectPtr) {
+			env->saveObjects((omrobjectptr_t)objectPtr);
+		}
+		vmThread->javaVM->internalVMFunctions->internalReleaseVMAccess(vmThread);
+		vmThread->javaVM->internalVMFunctions->internalAcquireVMAccess(vmThread);
+		if (NULL != objectPtr) {
+			env->restoreObjects((omrobjectptr_t*)&objectPtr);
+		}
+	}
+
+	VM_VMAccess::clearPublicFlags(vmThread, J9_PUBLIC_FLAGS_NOT_AT_SAFE_POINT);
 
 	return objectPtr;
 }

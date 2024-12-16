@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #ifndef COMPILATION_RUNTIME_HPP
@@ -80,6 +80,9 @@ class JITServerAOTCacheMap;
 class JITServerAOTDeserializer;
 class JITServerSharedROMClassCache;
 #endif /* defined(J9VM_OPT_JITSERVER) */
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+namespace TR { class CRRuntime; }
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
 
 struct TR_SignatureCountPair
 {
@@ -119,6 +122,7 @@ class TR_LowPriorityCompQueue
       bool createLowPriorityCompReqAndQueueIt(TR::IlGeneratorMethodDetails &details, void *startPC, uint8_t reason);
       bool addFirstTimeCompReqToLPQ(J9Method *j9method, uint8_t reason);
       bool addUpgradeReqToLPQ(TR_MethodToBeCompiled*, uint8_t reason = TR_MethodToBeCompiled::REASON_UPGRADE);
+      bool addUpgradeReqToLPQ(J9Method *j9method, void *startPC, uint8_t reason);
       int32_t getLowPriorityQueueSize() const { return _sizeLPQ; }
       int32_t getLPQWeight() const { return _LPQWeight; }
       void increaseLPQWeightBy(uint8_t weight) { _LPQWeight += (int32_t)weight; }
@@ -171,6 +175,10 @@ class TR_LowPriorityCompQueue
       uint32_t _STAT_LPQcompFromIprofiler; // first time compilations coming from LPQ
       uint32_t _STAT_LPQcompFromInterpreter;
       uint32_t _STAT_LPQcompUpgrade;
+#if defined(J9VM_OPT_JITSERVER)
+      uint32_t _STAT_compReqQueuedByJITServer;
+      uint32_t _STAT_LPQcompServerUnavailable;
+#endif /* defined(J9VM_OPT_JITSERVER) */
       // stats written by application threads
       uint32_t _STAT_compReqQueuedByInterpreter;
       uint32_t _STAT_numFailedToEnqueueInLPQ;
@@ -373,6 +381,8 @@ public:
       SAMPLE_THR_FAILED_TO_ATTACH,
       SAMPLE_THR_ATTACHED,
       SAMPLE_THR_INITIALIZED,
+      SAMPLE_THR_SUSPENDED,
+      SAMPLE_THR_RESUMING,
       SAMPLE_THR_STOPPING,
       SAMPLE_THR_DESTROYED,
       SAMPLE_THR_LAST_STATE // must be the last one
@@ -442,12 +452,13 @@ public:
    static bool createCompilationInfo(J9JITConfig * jitConfig);
    static void freeCompilationInfo(J9JITConfig *jitConfig);
    static TR::CompilationInfo *get(J9JITConfig * = 0) { return _compilationRuntime; }
-   static bool shouldRetryCompilation(TR_MethodToBeCompiled *entry, TR::Compilation *comp);
+   static bool shouldRetryCompilation(J9VMThread *vmThread, TR_MethodToBeCompiled *entry, TR::Compilation *comp);
    static bool shouldAbortCompilation(TR_MethodToBeCompiled *entry, TR::PersistentInfo *persistentInfo);
    static bool canRelocateMethod(TR::Compilation * comp);
    static int computeCompilationThreadPriority(J9JavaVM *vm);
    static void *compilationEnd(J9VMThread *context, TR::IlGeneratorMethodDetails & details, J9JITConfig *jitConfig, void * startPC,
-                               void *oldStartPC, TR_FrontEnd *vm=0, TR_MethodToBeCompiled *entry=NULL, TR::Compilation *comp=NULL);
+                               void *oldStartPC, bool preventFutureMethodCountingOnFailure = true, TR_FrontEnd *vm=0,
+                               TR_MethodToBeCompiled *entry=NULL, TR::Compilation *comp=NULL);
 #if defined(J9VM_OPT_JITSERVER)
    static JITServer::ServerStream *getStream();
 #endif /* defined(J9VM_OPT_JITSERVER) */
@@ -729,7 +740,7 @@ public:
    // It makes sure the number of usable compilation threads is within allowed bounds.
    // If not, set it to the upper bound based on the mode: JITClient/non-JITServer or JITServer.
    void updateNumUsableCompThreads(int32_t &numUsableCompThreads);
-   bool allocateCompilationThreads(int32_t numUsableCompThreads);
+   bool allocateCompilationThreads(int32_t numCompThreads);
    void freeAllCompilationThreads();
    void freeAllResources();
 
@@ -738,18 +749,30 @@ public:
    void stopCompilationThreads();
 
    /**
-    * \brief
+    * @brief
     *    Stops a compilation thread by issuing an interruption request at the threads next yield point and by changing
     *    its state to signal termination. Note that there can be a delay between making this request and the thread
     *    state changing to `COMPTHREAD_STOPPED`.
     *
-    * \param compInfoPT
+    * @param compInfoPT
     *    The thread to be stopped.
     */
    void stopCompilationThread(CompilationInfoPerThread* compInfoPT);
 
-   void suspendCompilationThread();
+   /**
+    * @brief Suspends all compilation threads. By default it also purges the comp queue.
+    *
+    * @param purgeCompQueue bool to determine whether or not to purge the comp queue.
+    */
+   void suspendCompilationThread(bool purgeCompQueue = true);
+
+   /**
+    * @brief Resumes suspended compilation threads; the number of threads that are
+    *        resumed depends on several factors, such as the queue size and available
+    *        CPU resources.
+    */
    void resumeCompilationThread();
+
    void purgeMethodQueue(TR_CompilationErrorCode errorCode);
    void *compileMethod(J9VMThread * context, TR::IlGeneratorMethodDetails &details, void *oldStartPC,
       TR_YesNoMaybe async, TR_CompilationErrorCode *, bool *queued, TR_OptimizationPlan *optPlan);
@@ -846,6 +869,12 @@ public:
    bool              isInZOSSupervisorState() {return _flags.testAny(IsInZOSSupervisorState);}
    void              setIsInZOSSupervisorState() { _flags.set(IsInZOSSupervisorState);}
 
+   bool              isInShutdownMode() {return _isInShutdownMode;}
+   void              setIsInShutdownMode() {_isInShutdownMode = true;}
+
+   bool              isSwapMemoryDisabled() {return _isSwapMemoryDisabled;}
+   void              setIsSwapMemoryDisabled(bool b) {_isSwapMemoryDisabled = b;}
+
    TR_LinkHead0<TR_ClassHolder> *getListOfClassesToCompile() { return &_classesToCompileList; }
    int32_t getCompilationLag();
    int32_t getCompilationLagUnlocked() { return getCompilationLag(); } // will go away
@@ -882,10 +911,18 @@ public:
    TR::CompilationInfoPerThread *getCompInfoForThread(J9VMThread *vmThread);
    int32_t getNumUsableCompilationThreads() const { return _numCompThreads; }
    int32_t getNumTotalCompilationThreads() const { return _numCompThreads + _numDiagnosticThreads; }
+   int32_t getNumAllocatedCompilationThreads() const { return _numAllocatedCompThreads; }
+   int32_t getNumTotalAllocatedCompilationThreads() const { return _numAllocatedCompThreads + _numDiagnosticThreads; }
+   int32_t getFirstCompThreadID() const { return _firstCompThreadID; }
+   int32_t getFirstDiagThreadID() const { return _firstDiagnosticThreadID; }
+   int32_t getLastCompThreadID() const { return _lastCompThreadID; }
+   int32_t getLastDiagThreadID() const { return _lastDiagnosticTheadID; }
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+   void setNumUsableCompilationThreadsPostRestore(int32_t &numUsableCompThreads);
+#endif
    TR::CompilationInfoPerThreadBase *getCompInfoWithID(int32_t ID);
    TR::Compilation *getCompilationWithID(int32_t ID);
    TR::CompilationInfoPerThread *getFirstSuspendedCompilationThread();
-   bool useMultipleCompilationThreads() { return (getNumUsableCompilationThreads() + _numDiagnosticThreads) > 1; }
    bool getRampDownMCT() const { return _rampDownMCT; }
    void setRampDownMCT() { _rampDownMCT = true; } // cannot be reset
    static void printMethodNameToVlog(J9Method *method);
@@ -905,28 +942,29 @@ public:
    bool importantMethodForStartup(J9Method *method);
    bool shouldDowngradeCompReq(TR_MethodToBeCompiled *entry);
 
+   bool isMethodIneligibleForAot(J9Method *method);
 
    int32_t computeDynamicDumbInlinerBytecodeSizeCutoff(TR::Options *options);
    TR_YesNoMaybe shouldActivateNewCompThread();
 #if DEBUG
-   void debugPrint(char *debugString);
-   void debugPrint(J9VMThread *, char *);
-   void debugPrint(char *, intptr_t);
-   void debugPrint(J9VMThread *, char *, IDATA);
+   void debugPrint(const char *debugString);
+   void debugPrint(J9VMThread *, const char *);
+   void debugPrint(const char *, intptr_t);
+   void debugPrint(J9VMThread *, const char *, IDATA);
    void debugPrint(J9Method*);
-   void debugPrint(char *, J9Method *);
-   void debugPrint(J9VMThread *, char *, TR_MethodToBeCompiled *);
-   void debugPrint(char * debugString, TR::IlGeneratorMethodDetails & details, J9VMThread * vmThread);
+   void debugPrint(const char *, J9Method *);
+   void debugPrint(J9VMThread *, const char *, TR_MethodToBeCompiled *);
+   void debugPrint(const char * debugString, TR::IlGeneratorMethodDetails & details, J9VMThread * vmThread);
    void printQueue();
 #else // !DEBUG
-   void debugPrint(char *debugString) {}
-   void debugPrint(J9VMThread *, char *) {}
-   void debugPrint(char *, intptr_t) {}
-   void debugPrint(J9VMThread *, char *, IDATA) {}
+   void debugPrint(const char *debugString) {}
+   void debugPrint(J9VMThread *, const char *) {}
+   void debugPrint(const char *, intptr_t) {}
+   void debugPrint(J9VMThread *, const char *, IDATA) {}
    void debugPrint(J9Method*) {}
-   void debugPrint(char *, J9Method *) {}
-   void debugPrint(J9VMThread *, char *, TR_MethodToBeCompiled *) {}
-   void debugPrint(char * debugString, TR::IlGeneratorMethodDetails & details, J9VMThread * vmThread) { }
+   void debugPrint(const char *, J9Method *) {}
+   void debugPrint(J9VMThread *, const char *, TR_MethodToBeCompiled *) {}
+   void debugPrint(const char * debugString, TR::IlGeneratorMethodDetails & details, J9VMThread * vmThread) { }
    void printQueue() {}
 #endif // DEBUG
    void debugPrint(TR_OpaqueMethodBlock *omb){ debugPrint((J9Method*)omb); }
@@ -1030,6 +1068,15 @@ public:
    bool getSuspendThreadDueToLowPhysicalMemory() const { return _suspendThreadDueToLowPhysicalMemory; }
    void setSuspendThreadDueToLowPhysicalMemory(bool b) { _suspendThreadDueToLowPhysicalMemory = b; }
 
+   void initCPUEntitlement();
+
+   bool getLowCompDensityMode() const { return _lowCompDensityMode; }
+   void enterLowCompDensityMode() { _lowCompDensityMode = true; _hasEnteredLowCompDensityModeInThePast = true;}
+   void exitLowCompDensityMode() { _lowCompDensityMode = false; }
+   bool hasEnteredLowCompDensityModeInThePast() const { return _hasEnteredLowCompDensityModeInThePast; }
+   bool compileFromLPQRegardlessOfCPU() const { return _compileFromLPQRegardlessOfCPU; }
+   void setCompileFromLPQRegardlessOfCPU(bool b) { _compileFromLPQRegardlessOfCPU = b; }
+
 #if defined(J9VM_OPT_JITSERVER)
    ClientSessionHT *getClientSessionHT() const { return _clientSessionHT; }
    void setClientSessionHT(ClientSessionHT *ht) { _clientSessionHT = ht; }
@@ -1066,6 +1113,13 @@ public:
    void  addJITServerSslCert(const std::string &cert) { _sslCerts.push_back(cert); }
    const std::string &getJITServerSslRootCerts() const { return _sslRootCerts; }
    void  setJITServerSslRootCerts(const std::string &cert) { _sslRootCerts = cert; }
+   void  freeClientSslCertificates() { _sslRootCerts.clear(); }
+   const PersistentVector<std::string> &getJITServerMetricsSslKeys() const { return _metricsSslKeys; }
+   void  addJITServerMetricsSslKey(const std::string &key) { _metricsSslKeys.push_back(key); }
+   const PersistentVector<std::string> &getJITServerMetricsSslCerts() const { return _metricsSslCerts; }
+   void  addJITServerMetricsSslCert(const std::string &cert) { _metricsSslCerts.push_back(cert); }
+   bool  useSSL() const { return (_sslKeys.size() || _sslCerts.size() || _sslRootCerts.size() ||
+                                  _metricsSslKeys.size() || _metricsSslCerts.size()); }
 
    void setCompThreadActivationPolicy(JITServer::CompThreadActivationPolicy newPolicy) { _activationPolicy = newPolicy; }
    JITServer::CompThreadActivationPolicy getCompThreadActivationPolicy() const { return _activationPolicy; }
@@ -1079,7 +1133,24 @@ public:
 
    JITServerAOTDeserializer *getJITServerAOTDeserializer() const { return _JITServerAOTDeserializer; }
    void setJITServerAOTDeserializer(JITServerAOTDeserializer *deserializer) { _JITServerAOTDeserializer = deserializer; }
+
+   bool methodCanBeJITServerAOTCacheStored(const char *methodSig, TR::Method::Type ty);
+   bool methodCanBeJITServerAOTCacheLoaded(const char *methodSig, TR::Method::Type ty);
+
+   bool methodCanBeRemotelyCompiled(const char *methodSig, TR::Method::Type ty);
+
+   /**
+   * @brief Notify every compilation thread that a JITServer AOT deserializer reset has occurred
+   *
+   * This function sets the _deserializerWasReset flag in every compilation thread. This function
+   * must be called with the appropriate deserializer monitors in hand. See
+   * JITServerAOTDeserializer::reset() for details.
+   *
+   */
+   void notifyCompilationThreadsOfDeserializerReset();
 #endif /* defined(J9VM_OPT_JITSERVER) */
+   uint32_t getNumTotalCompilations() const { return _numSyncCompilations + _numAsyncCompilations; }
+   uint32_t getNumCompsUsedForCompDensityCalculations() const { return _numCompsUsedForCompDensityCalculations; }
 
    static void replenishInvocationCount(J9Method* method, TR::Compilation* comp);
 
@@ -1088,6 +1159,11 @@ public:
 #if defined(J9VM_INTERP_AOT_COMPILE_SUPPORT) && defined(J9VM_OPT_SHARED_CLASSES) && (defined(TR_HOST_X86) || defined(TR_HOST_POWER) || defined(TR_HOST_S390) || defined(TR_HOST_ARM) || defined(TR_HOST_ARM64))
    static void storeAOTInSharedCache(J9VMThread *vmThread, J9ROMMethod *romMethod, const U_8 *dataStart, UDATA dataSize, const U_8 *codeStart, UDATA codeSize, TR::Compilation *comp, J9JITConfig *jitConfig, TR_MethodToBeCompiled *entry);
 #endif
+
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+   TR::CRRuntime *getCRRuntime() { return _crRuntime; }
+   void setCRRuntime(TR::CRRuntime *crRuntime) { _crRuntime = crRuntime; }
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
 
    static int32_t         VERY_SMALL_QUEUE;
    static int32_t         SMALL_QUEUE;
@@ -1161,8 +1237,9 @@ private:
    TR::Monitor *_iprofilerBufferArrivalMonitor;
    TR::MonitorTable *_j9MonitorTable; // used only for RAS (debuggerExtensions); no accessor; use TR_J9MonitorTable::get() everywhere else
    TR_LinkHead0<TR_ClassHolder> _classesToCompileList; // used by compileClasses; adjusted by unload hooks
-   intptr_t               _numSyncCompilations;
-   intptr_t               _numAsyncCompilations;
+   uint32_t               _numSyncCompilations;
+   uint32_t               _numAsyncCompilations;
+   uint32_t               _numCompsUsedForCompDensityCalculations;
    int32_t                _numCompThreadsActive;
    int32_t                _numCompThreadsJobless; // threads are not suspended, but have no work to do
    int32_t                _numCompThreadsCompilingHotterMethods; // allow only one at a time; use compQmonitor to change
@@ -1240,8 +1317,16 @@ private:
 #ifdef DEBUG
    bool                   _traceCompiling;
 #endif
+   bool                   _isInShutdownMode;
+   bool                   _isSwapMemoryDisabled;
    int32_t                _numCompThreads; // Number of usable compilation threads that does not include the diagnostic thread
    int32_t                _numDiagnosticThreads;
+   int32_t                _numAllocatedCompThreads; // Number of allocated compilation threads that does not include the diagnostic thread
+   int32_t                _firstCompThreadID;
+   int32_t                _firstDiagnosticThreadID;
+   int32_t                _lastCompThreadID;
+   int32_t                _lastDiagnosticTheadID;
+   int32_t                _lastAllocatedCompThreadID;
    int32_t                _iprofilerMaxCount;
    int32_t                _numGCRQueued; // how many GCR requests are in the queue
                                          // We should disable GCR counting if too many
@@ -1274,6 +1359,10 @@ private:
    bool _suspendThreadDueToLowPhysicalMemory;
    TR_InterpreterSamplingTracking *_interpSamplTrackingInfo;
 
+   bool _lowCompDensityMode; // set to true when compilations occur infrequently and are unlikely to contribute to JVM performance
+   bool _hasEnteredLowCompDensityModeInThePast; // set to true when _lowCompDensityMode is set to true at least once
+   bool _compileFromLPQRegardlessOfCPU;
+
 #if defined(J9VM_OPT_JITSERVER)
    ClientSessionHT               *_clientSessionHT; // JITServer hashtable that holds session information about JITClients
    PersistentUnorderedSet<J9Class*> _classesCachedAtServer;
@@ -1289,14 +1378,19 @@ private:
    std::string                   _sslRootCerts;
    PersistentVector<std::string> _sslKeys;
    PersistentVector<std::string> _sslCerts;
+   PersistentVector<std::string> _metricsSslKeys;
+   PersistentVector<std::string> _metricsSslCerts;
    JITServer::CompThreadActivationPolicy _activationPolicy;
    JITServerSharedROMClassCache *_sharedROMClassCache;
    JITServerAOTCacheMap *_JITServerAOTCacheMap;
    JITServerAOTDeserializer *_JITServerAOTDeserializer;
 #endif /* defined(J9VM_OPT_JITSERVER) */
+
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+   TR::CRRuntime *_crRuntime;
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
    }; // CompilationInfo
 }
 
 
 #endif // COMPILATIONRUNTIME_HPP
-

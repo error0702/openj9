@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 /**
@@ -341,6 +341,24 @@ j9gc_objaccess_staticStoreU64Split(J9VMThread *vmThread, J9Class *clazz, U_64 *d
 	barrier->staticStoreU64(vmThread, clazz, destSlot, value64, 0 != isVolatile);
 }
 
+/**
+ * Returns the displacement for the data of moved array object.
+ * Used by the JIT, should only be called for off heap enabled cases,
+ * For adjacent Array, displacement = dst - src
+ * For Off-heap Array, displacement = 0.
+ *
+ * @param vmThread Pointer to the current J9VMThread
+ * @param src Pointer to the array object before moving
+ * @param dst Pointer to the array object after moving
+ * @return displacement
+ */
+IDATA
+j9gc_objaccess_indexableDataDisplacement(J9VMThread *vmThread, J9IndexableObject *src, J9IndexableObject *dst)
+{
+	MM_ObjectAccessBarrier *barrier = MM_GCExtensions::getExtensions(vmThread)->accessBarrier;
+	return barrier->indexableDataDisplacement(vmThread, src, dst);
+
+}
 
 /* TODO: After all array accesses in the VM have been made arraylet safe, 
  * it should be possible to delete this method + its associated ENVY and 
@@ -613,10 +631,10 @@ j9gc_objaccess_structuralCompareFlattenedObjects(J9VMThread *vmThread, J9Class *
  * Called by certain specs to copy objects
  */
 void
-j9gc_objaccess_copyObjectFields(J9VMThread *vmThread, J9Class *valueClass, J9Object *srcObject, UDATA srcOffset, J9Object *destObject, UDATA destOffset)
+j9gc_objaccess_copyObjectFields(J9VMThread *vmThread, J9Class *valueClass, J9Object *srcObject, UDATA srcOffset, J9Object *destObject, UDATA destOffset, MM_objectMapFunction objectMapFunction, void *objectMapData, UDATA initializeLockWord)
 {
 	MM_ObjectAccessBarrier *barrier = MM_GCExtensions::getExtensions(vmThread)->accessBarrier;
-	return barrier->copyObjectFields(vmThread, valueClass, srcObject, srcOffset, destObject, destOffset);
+	return barrier->copyObjectFields(vmThread, valueClass, srcObject, srcOffset, destObject, destOffset, objectMapFunction, objectMapData, FALSE != initializeLockWord);
 }
 
 /**
@@ -643,10 +661,10 @@ j9gc_objaccess_copyObjectFieldsFromFlattenedArrayElement(J9VMThread *vmThread, J
  * Called by certain specs to clone objects. See J9VMObjectAccessBarrier#cloneArray:into:sizeInElements:class:
  */
 void
-j9gc_objaccess_cloneIndexableObject(J9VMThread *vmThread, J9IndexableObject *srcObject, J9IndexableObject *destObject)
+j9gc_objaccess_cloneIndexableObject(J9VMThread *vmThread, J9IndexableObject *srcObject, J9IndexableObject *destObject, MM_objectMapFunction objectMapFunction, void *objectMapData)
 {
 	MM_ObjectAccessBarrier *barrier = MM_GCExtensions::getExtensions(vmThread)->accessBarrier;
-	return barrier->cloneIndexableObject(vmThread, srcObject, destObject);
+	return barrier->cloneIndexableObject(vmThread, srcObject, destObject, objectMapFunction, objectMapData);
 }
 
 /**
@@ -833,6 +851,20 @@ j9gc_objaccess_jniDeleteGlobalReference(J9VMThread *vmThread, J9Object *referenc
 {
 	MM_ObjectAccessBarrier *barrier = MM_GCExtensions::getExtensions(vmThread->javaVM)->accessBarrier;
 	barrier->jniDeleteGlobalReference(vmThread, reference);
+}
+
+void
+preMountContinuation(J9VMThread *vmThread, j9object_t object)
+{
+	MM_ObjectAccessBarrier *barrier = MM_GCExtensions::getExtensions(vmThread->javaVM)->accessBarrier;
+	barrier->preMountContinuation(vmThread, object);
+}
+
+void
+postUnmountContinuation(J9VMThread *vmThread, j9object_t object)
+{
+	MM_ObjectAccessBarrier *barrier = MM_GCExtensions::getExtensions(vmThread->javaVM)->accessBarrier;
+	barrier->postUnmountContinuation(vmThread, object);
 }
 
 } /* extern "C" */

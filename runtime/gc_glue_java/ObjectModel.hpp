@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 /**
@@ -97,6 +97,7 @@ private:
 	GC_ArrayObjectModel *_indexableObjectModel; /**< pointer to the indexable object model in extensions (so that we can delegate to it) */
 	J9Class *_classClass; /**< java.lang.Class class pointer for detecting special objects */
 	J9Class *_classLoaderClass; /**< java.lang.ClassLoader class pointer for detecting special objects */
+	J9Class *_continuationClass; /**< jdk/internal/vm/Continuation class pointer for detecting subclass of Continuation */
 	J9Class *_atomicMarkableReferenceClass; /**< java.util.concurrent.atomic.AtomicMarkableReference class pointer for detecting special objects */
 
 protected:
@@ -115,7 +116,8 @@ public:
 		SCAN_ATOMIC_MARKABLE_REFERENCE_OBJECT = 7,
 		SCAN_OWNABLESYNCHRONIZER_OBJECT = 8,
 		SCAN_MIXED_OBJECT_LINKED = 9,
-		SCAN_FLATTENED_ARRAY_OBJECT = 10
+		SCAN_FLATTENED_ARRAY_OBJECT = 10,
+		SCAN_CONTINUATION_OBJECT = 11
 	};
 
 	/**
@@ -179,7 +181,7 @@ public:
 		switch(J9GC_CLASS_SHAPE(clazz)) {
 		case OBJECT_HEADER_SHAPE_MIXED:
 		{
-			uintptr_t classFlags = J9CLASS_FLAGS(clazz) & (J9AccClassReferenceMask | J9AccClassGCSpecial | J9AccClassOwnableSynchronizer);
+			uintptr_t classFlags = J9CLASS_FLAGS(clazz) & (J9AccClassReferenceMask | J9AccClassGCSpecial | J9AccClassOwnableSynchronizer | J9AccClassContinuation);
 			if (0 == classFlags) {
 				if (0 != clazz->selfReferencingField1) {
 					result = SCAN_MIXED_OBJECT_LINKED;
@@ -193,6 +195,8 @@ public:
 					result = getSpecialClassScanType(clazz);
 				} else if (0 != (classFlags & J9AccClassOwnableSynchronizer)) {
 					result = SCAN_OWNABLESYNCHRONIZER_OBJECT;
+				} else if (0 != (classFlags & J9AccClassContinuation)) {
+					result = SCAN_CONTINUATION_OBJECT;
 				} else {
 					/* Assert_MM_unreachable(); */
 					assert(false);
@@ -557,16 +561,6 @@ public:
 	fixupForwardedObject(MM_ForwardedHeader *forwardedHeader, omrobjectptr_t destinationObjectPtr, uintptr_t objectAge)
 	{
 		GC_ObjectModelBase::fixupForwardedObject(forwardedHeader, destinationObjectPtr, objectAge);
-
-		if (isIndexable(forwardedHeader)) {
-			/* Updates internal field of indexable objects. Every indexable object have an extra field
-			 * that can be used to store any extra information about the indexable object. One use case is
-			 * OpenJ9 where we use this field to point to array data. In this case it will always point to
-			 * the address right after the header, in case of contiguous data it will point to the data
-			 * itself, and in case of discontiguous arraylet it will point to the first arrayiod. How to
-			 * updated dataAddr is up to the target language that must override fixupDataAddr */
-			_indexableObjectModel->fixupDataAddr(forwardedHeader, destinationObjectPtr);
-		}
 
 		fixupHashFlagsAndSlot(forwardedHeader, destinationObjectPtr);
 	}

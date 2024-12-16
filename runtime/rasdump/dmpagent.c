@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 
@@ -30,6 +30,7 @@
 #ifdef J9ZOS390
 #include <spawn.h>
 #include <errno.h>
+#include <sys/wait.h>
 #include "atoe.h"
 #endif
 #ifdef AIXPPC
@@ -57,6 +58,9 @@
 #include "j9dump.h"
 #include "omrthread.h"
 
+#if defined(J9ZTPF)
+#include <tpf/cujvm.h>
+#endif /* defined(J9ZTPF) */
 
 /* Possible command line actions */
 enum
@@ -131,30 +135,43 @@ typedef struct J9RASprotectedDumpData
 }\
 J9RASprotectedDumpData;
 
-/* Known dump events */
+/*
+ * Known dump events.
+ * The order matters because comparisons elsewhere may search for known
+ * event names by the shortest match and raise an error on remaining tokens;
+ * for example, if 'user2' was after 'user' and the event being searched was
+ * 'user2', then comparisons elsewhere may match 'user' first and then show
+ * an error starting at 2 since that is not part of the 'user' event and is
+ * a dangling token.
+ */
 static const J9RASdumpEvent rasDumpEvents[] =
 {
-	{ "gpf",         "ON_GP_FAULT",             J9RAS_DUMP_ON_GP_FAULT },
-	{ "user",        "ON_USER_SIGNAL",          J9RAS_DUMP_ON_USER_SIGNAL },
-	{ "abort",       "ON_ABORT_SIGNAL",         J9RAS_DUMP_ON_ABORT_SIGNAL },
-	{ "vmstart",     "ON_VM_STARTUP",           J9RAS_DUMP_ON_VM_STARTUP },
-	{ "vmstop",      "ON_VM_SHUTDOWN",          J9RAS_DUMP_ON_VM_SHUTDOWN },
-	{ "load",        "ON_CLASS_LOAD",           J9RAS_DUMP_ON_CLASS_LOAD },
-	{ "unload",      "ON_CLASS_UNLOAD",         J9RAS_DUMP_ON_CLASS_UNLOAD },
-	{ "throw",       "ON_EXCEPTION_THROW",      J9RAS_DUMP_ON_EXCEPTION_THROW },
-	{ "catch",       "ON_EXCEPTION_CATCH",      J9RAS_DUMP_ON_EXCEPTION_CATCH },
-	{ "thrstart",    "ON_THREAD_START",         J9RAS_DUMP_ON_THREAD_START },
-	{ "blocked",     "ON_THREAD_BLOCKED",       J9RAS_DUMP_ON_THREAD_BLOCKED },
-	{ "thrstop",     "ON_THREAD_END",           J9RAS_DUMP_ON_THREAD_END },
-	{ "fullgc",      "ON_GLOBAL_GC",            J9RAS_DUMP_ON_GLOBAL_GC },
-	{ "uncaught",    "ON_EXCEPTION_DESCRIBE",   J9RAS_DUMP_ON_EXCEPTION_DESCRIBE },
-	{ "slow",        "ON_SLOW_EXCLUSIVE_ENTER", J9RAS_DUMP_ON_SLOW_EXCLUSIVE_ENTER },
-	{ "systhrow",    "ON_EXCEPTION_SYSTHROW",   J9RAS_DUMP_ON_EXCEPTION_SYSTHROW },
-	{ "traceassert", "ON_TRACE_ASSERT",         J9RAS_DUMP_ON_TRACE_ASSERT },
+	{ "gpf",            "ON_GP_FAULT",             J9RAS_DUMP_ON_GP_FAULT },
+	{ "user2",          "ON_USER2_SIGNAL",         J9RAS_DUMP_ON_USER2_SIGNAL },
+	{ "user",           "ON_USER_SIGNAL",          J9RAS_DUMP_ON_USER_SIGNAL },
+	{ "abort",          "ON_ABORT_SIGNAL",         J9RAS_DUMP_ON_ABORT_SIGNAL },
+	{ "vmstart",        "ON_VM_STARTUP",           J9RAS_DUMP_ON_VM_STARTUP },
+	{ "vmstop",         "ON_VM_SHUTDOWN",          J9RAS_DUMP_ON_VM_SHUTDOWN },
+	{ "load",           "ON_CLASS_LOAD",           J9RAS_DUMP_ON_CLASS_LOAD },
+	{ "unload",         "ON_CLASS_UNLOAD",         J9RAS_DUMP_ON_CLASS_UNLOAD },
+	{ "throw",          "ON_EXCEPTION_THROW",      J9RAS_DUMP_ON_EXCEPTION_THROW },
+	{ "catch",          "ON_EXCEPTION_CATCH",      J9RAS_DUMP_ON_EXCEPTION_CATCH },
+	{ "thrstart",       "ON_THREAD_START",         J9RAS_DUMP_ON_THREAD_START },
+	{ "blocked",        "ON_THREAD_BLOCKED",       J9RAS_DUMP_ON_THREAD_BLOCKED },
+	{ "thrstop",        "ON_THREAD_END",           J9RAS_DUMP_ON_THREAD_END },
+	{ "fullgc",         "ON_GLOBAL_GC",            J9RAS_DUMP_ON_GLOBAL_GC },
+	{ "uncaught",       "ON_EXCEPTION_DESCRIBE",   J9RAS_DUMP_ON_EXCEPTION_DESCRIBE },
+	{ "slow",           "ON_SLOW_EXCLUSIVE_ENTER", J9RAS_DUMP_ON_SLOW_EXCLUSIVE_ENTER },
+	{ "systhrow",       "ON_EXCEPTION_SYSTHROW",   J9RAS_DUMP_ON_EXCEPTION_SYSTHROW },
+	{ "traceassert",    "ON_TRACE_ASSERT",         J9RAS_DUMP_ON_TRACE_ASSERT },
 	/* J9RAS_DUMP_ON_USER_REQUEST cannot be triggered via the command-line */
-	{ "allocation",  "ON_OBJECT_ALLOCATION",    J9RAS_DUMP_ON_OBJECT_ALLOCATION },
-	{ "corruptcache","ON_CORRUPT_CACHE",        J9RAS_DUMP_ON_CORRUPT_CACHE },
-	{ "excessivegc", "ON_EXCESSIVE_GC",         J9RAS_DUMP_ON_EXCESSIVE_GC },
+	{ "allocation",     "ON_OBJECT_ALLOCATION",    J9RAS_DUMP_ON_OBJECT_ALLOCATION },
+	{ "corruptcache",   "ON_CORRUPT_CACHE",        J9RAS_DUMP_ON_CORRUPT_CACHE },
+	{ "excessivegc",    "ON_EXCESSIVE_GC",         J9RAS_DUMP_ON_EXCESSIVE_GC },
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+	{ "criuCheckpoint", "ON_VM_CRIU_CHECKPOINT",   J9RAS_DUMP_ON_VM_CRIU_CHECKPOINT },
+	{ "criuRestore",    "ON_VM_CRIU_RESTORE",      J9RAS_DUMP_ON_VM_CRIU_RESTORE },
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
 };
 #define J9RAS_DUMP_KNOWN_EVENTS  ( sizeof(rasDumpEvents) / sizeof(J9RASdumpEvent) )
 
@@ -2746,10 +2763,48 @@ runDumpAgent(struct J9JavaVM *vm, J9RASdumpAgent * agent, J9RASdumpContext * con
 		/* If the dump is a heap dump and exclusive access hasn't been obtained, refuse to do the dump */
 		/* This might be encapsulated more neatly if the triggering code were moved down into the dump functions themselves */
 		if (gotExclusive || (agent->dumpFn != doHeapDump)) {
+#if defined(J9ZTPF)
+			struct cujvm_dmpagent_prehook_input preHookInputParms;
+			struct cujvm_dmpagent_prehook_output preHookOutputParms;
+			struct cujvm_dmpagent_posthook_input postHookInputParms;
+			struct cujvm_dmpagent_posthook_output postHookOutputParms;
+
+			memset(&preHookInputParms, '\0', sizeof(preHookInputParms));
+			memset(&preHookOutputParms, '\0', sizeof(preHookOutputParms));
+			memset(&postHookInputParms, '\0', sizeof(postHookInputParms));
+			memset(&postHookOutputParms, '\0', sizeof(postHookOutputParms));
+
+			preHookInputParms.agentInfo = (jvmDumpAgentInfo *)agent;
+			preHookInputParms.dumpPath = label;
+			preHookInputParms.context = (jvmDumpContext *)context;
+			preHookInputParms.vm_args = (jvmInitArgs *)vm->vmArgsArray->actualVMArgs;
+
+			cjvm_dumpagent_preHook(&preHookInputParms, &preHookOutputParms);
+
+			if (NULL != preHookOutputParms.dumpPath)  {
+				if (localLabel != label) {
+					free(label);
+				}
+				label = preHookOutputParms.dumpPath;
+			}
+#endif /* defined(J9ZTPF) */
+
 			agent->prepState = *state;
 			TRIGGER_J9HOOK_VM_DUMP_START(vm->hookInterface, vm->internalVMFunctions->currentVMThread(vm), label, detail);
+
 			retVal = runDumpFunction( agent, label, context );
+
 			TRIGGER_J9HOOK_VM_DUMP_END(vm->hookInterface, vm->internalVMFunctions->currentVMThread(vm), label, detail);
+
+#if defined(J9ZTPF)
+			postHookInputParms.agentInfo = (jvmDumpAgentInfo *)agent;
+			postHookInputParms.dumpPath = label;
+			postHookInputParms.context = (jvmDumpContext *)context;
+			postHookInputParms.vm_args = (jvmInitArgs *)vm->vmArgsArray->actualVMArgs;
+			cjvm_dumpagent_postHook(&postHookInputParms, &postHookOutputParms);
+			/* cjvm_dumpagent_finished_hook will be removed in the future (currently deprecated). */
+			cjvm_dumpagent_finished_hook((jvmDumpAgentInfo *)agent, label, (jvmDumpContext *)context);
+#endif /* defined(J9ZTPF) */
 			
 			if (context->dumpList) {
 				if (agent->dumpFn == doHeapDump) {

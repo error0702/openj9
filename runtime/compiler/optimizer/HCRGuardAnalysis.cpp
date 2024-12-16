@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 #include <stddef.h>
 #include <stdint.h>
@@ -186,16 +186,18 @@ void TR_HCRGuardAnalysis::initializeGenAndKillSetInfo()
             }
          else
             {
+            TR_ASSERT_FATAL(
+               !comp()->isFearPointPlacementUnrestricted(),
+               "unexpected uninducible OSR yield point");
+
             isGen = true;
             isKill = false;
             }
          }
-      else if (ttNode->isTheVirtualGuardForAGuardedInlinedCall()
-               && TR_FearPointAnalysis::virtualGuardsKillFear()
-               && comp()->cg()->supportsMergingGuards())
+      else if (ttNode->isTheVirtualGuardForAGuardedInlinedCall())
          {
          TR_VirtualGuard *guardInfo = comp()->findVirtualGuardInfo(ttNode);
-         if (guardInfo->getKind() != TR_HCRGuard)
+         if (guardInfo->getKind() != TR_HCRGuard && TR_FearPointAnalysis::virtualGuardKillsFear(comp(), ttNode))
             {
             // Theoretically, the guard should only kill its inlined path. However, making it right require adding
             // complications to the data flow and/or optimizations using the result of the analysis. Based on the

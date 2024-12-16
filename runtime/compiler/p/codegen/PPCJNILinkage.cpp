@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "codegen/PPCJNILinkage.hpp"
@@ -115,14 +115,26 @@ TR::Register *J9::Power::JNILinkage::buildDirectDispatch(TR::Node *callNode)
    uintptr_t targetAddress;
 
    bool crc32m1 = (callSymbol->getRecognizedMethod() == TR::java_util_zip_CRC32_update);
-   bool crc32m2 = (callSymbol->getRecognizedMethod() == TR::java_util_zip_CRC32_updateBytes);
-   bool crc32m3 = (callSymbol->getRecognizedMethod() == TR::java_util_zip_CRC32_updateByteBuffer);
+   bool crc32m2 =
+#if JAVA_SPEC_VERSION >= 9
+                  (callSymbol->getRecognizedMethod() == TR::java_util_zip_CRC32_updateBytes0)
+#else
+                  (callSymbol->getRecognizedMethod() == TR::java_util_zip_CRC32_updateBytes)
+#endif
+                  ;
+   bool crc32m3 =
+#if JAVA_SPEC_VERSION >= 9
+                  (callSymbol->getRecognizedMethod() == TR::java_util_zip_CRC32_updateByteBuffer0)
+#else
+                  (callSymbol->getRecognizedMethod() == TR::java_util_zip_CRC32_updateByteBuffer)
+#endif
+                  ;
 
    // TODO: How to handle discontiguous array?
    // The specialCaseJNI shortcut will mangle register dependencies and use system/C dispatch.
    // The addresses of the optimized helpers in the server process will not necessarily
    // match the client-side addresses, so we can't take this shortcut in JITServer mode.
-   bool specialCaseJNI = (crc32m1 || crc32m2 || crc32m3) && !comp()->requiresSpineChecks();
+   bool specialCaseJNI = (crc32m1 || crc32m2 || crc32m3) && !comp()->requiresSpineChecks() && !TR::Compiler->om.isOffHeapAllocationEnabled();
 
 #ifdef J9VM_OPT_JITSERVER
    specialCaseJNI = specialCaseJNI && !comp()->isOutOfProcessCompilation();
@@ -219,6 +231,7 @@ TR::Register *J9::Power::JNILinkage::buildDirectDispatch(TR::Node *callNode)
       {
       // We need to kill all the non-volatiles so that they'll be in a stack frame in case
       // gc needs to find them.
+      cg()->setSavesNonVolatileGPRsForGC();
       if (comp()->target().is64Bit())
          {
          if (comp()->target().cpu.isAtLeast(OMR_PROCESSOR_PPC_P10))
@@ -304,6 +317,14 @@ TR::Register *J9::Power::JNILinkage::buildDirectDispatch(TR::Node *callNode)
             }
          generateTrg1Src2Instruction(cg(), TR::InstOpCode::add, callNode, addrArg, addrArg, posArg);
 
+         if (crc32m2 || crc32m3)
+            {
+            /* Passing zero for the castagnoli parameter of crc32_vpmsum helper. Here we are re-using
+             * posArg in gr6 after the buffer address has been calculated.
+             */
+            generateTrg1ImmInstruction(cg(), TR::InstOpCode::li, callNode, posArg, 0);
+            }
+
          deps->getPreConditions()->setDependencyInfo(map.getTargetIndex(TR::RealRegister::gr4), addrArg, TR::RealRegister::gr4, UsesDependentRegister);
          deps->getPostConditions()->setDependencyInfo(map.getTargetIndex(TR::RealRegister::gr4), addrArg, TR::RealRegister::gr4, UsesDependentRegister);
 
@@ -318,6 +339,50 @@ TR::Register *J9::Power::JNILinkage::buildDirectDispatch(TR::Node *callNode)
             deps->getPreConditions()->setDependencyInfo(map.getTargetIndex(TR::RealRegister::gr7), wasteArg, TR::RealRegister::gr7, UsesDependentRegister);
             deps->getPostConditions()->setDependencyInfo(map.getTargetIndex(TR::RealRegister::gr7), wasteArg, TR::RealRegister::gr7, UsesDependentRegister);
             }
+         }
+
+      if (comp()->compileRelocatableCode())
+         {
+         TR_RuntimeHelper CRChelperId;
+         if (crc32m1)
+            CRChelperId = TR_PPCcrc32_oneByte;
+         else
+            CRChelperId = (targetAddress == (uintptr_t)crc32_vpmsum)? TR_PPCcrc32_vpmsum : TR_PPCcrc32_no_vpmsum;
+
+
+         TR::SymbolReference * specialCRCSymRef = (comp())->getSymRefTab()->findOrCreateRuntimeHelper(CRChelperId,false,false,false);
+         TR::LabelSymbol *specialCRCSnippetLabel = cg()->lookUpSnippet(TR::Snippet::IsHelperCall, specialCRCSymRef);
+         TR::Register *gr12Reg = deps->searchPreConditionRegister(TR::RealRegister::gr12);
+
+         if (specialCRCSnippetLabel == NULL)
+            {
+            specialCRCSnippetLabel = generateLabelSymbol(cg());
+            cg()->addSnippet(new (cg()->trHeapMemory()) TR::PPCHelperCallSnippet(cg(), callNode, specialCRCSnippetLabel, specialCRCSymRef));
+            }
+
+         callNode->setSymbolReference(specialCRCSymRef);
+         if(comp()->target().isLinux() && comp()->target().is64Bit() && comp()->target().cpu.isLittleEndian())
+            {
+            if (!comp()->getOption(TR_DisableTOC) && !comp()->compilePortableCode())
+               {
+               int32_t helperOffset = (callNode->getSymbolReference()->getReferenceNumber() - 1)*sizeof(intptr_t);
+               generateTrg1MemInstruction(cg(), TR::InstOpCode::Op_load, callNode, gr12Reg,
+                                          TR::MemoryReference::createWithDisplacement(cg(), cg()->getTOCBaseRegister(), helperOffset, TR::Compiler->om.sizeofReferenceAddress()));
+
+               }
+               else
+               {
+               loadAddressConstant(cg(), callNode, (int64_t)runtimeHelperValue((TR_RuntimeHelper)specialCRCSymRef->getReferenceNumber()),
+                                   gr12Reg, NULL, false, TR_AbsoluteHelperAddress);
+               }
+            }
+         else if (comp()->target().isAIX() || (comp()->target().isLinux() && comp()->target().is64Bit()))
+            {
+            generateTrg1MemInstruction(cg(), TR::InstOpCode::Op_load, callNode, gr2Reg,
+                                       TR::MemoryReference::createWithDisplacement(cg(), cg()->getMethodMetaDataRegister(), offsetof(J9VMThread, jitTOC), TR::Compiler->om.sizeofReferenceAddress()));
+            }
+
+            generateDepLabelInstruction(cg(), TR::InstOpCode::bl, callNode, specialCRCSnippetLabel, deps);
          }
       }
 
@@ -424,6 +489,15 @@ TR::Register *J9::Power::JNILinkage::buildDirectDispatch(TR::Node *callNode)
       // if the current method is simply a wrapper for the JNI call, hide the call-out stack frame
       if (resolvedMethod == comp()->getCurrentMethod())
          tagBits |= fej9->constJNICallOutFrameInvisibleTag();
+#if JAVA_SPEC_VERSION >= 19
+      /*
+       * For virtual threads, increment callOutCount. It is safe and most efficient to
+       * do this unconditionally. No need to check for overflow.
+       */
+      generateTrg1MemInstruction(cg(), TR::InstOpCode::Op_load, callNode, gr11Reg, TR::MemoryReference::createWithDisplacement(cg(), metaReg, fej9->thisThreadGetCallOutCountOffset(), TR::Compiler->om.sizeofReferenceAddress()));
+      generateTrg1Src1ImmInstruction(cg(), TR::InstOpCode::addi, callNode, gr11Reg, gr11Reg, 1);
+      generateMemSrc1Instruction(cg(), TR::InstOpCode::Op_st, callNode, TR::MemoryReference::createWithDisplacement(cg(), metaReg, fej9->thisThreadGetCallOutCountOffset(), TR::Compiler->om.sizeofReferenceAddress()), gr11Reg);
+#endif //JAVA_SPEC_VERSION >= 19
       loadConstant(cg(), callNode, tagBits, gr11Reg);
       loadConstant(cg(), callNode, 0, gr12Reg);
 
@@ -486,44 +560,47 @@ TR::Register *J9::Power::JNILinkage::buildDirectDispatch(TR::Node *callNode)
 #endif /* J9VM_INTERP_ATOMIC_FREE_JNI */
       }
 
-   // get the address of the function descriptor
-   // use loadAddressConstantFixed - fixed instruction count 2 32-bit, or 5 64-bit
-   TR::Instruction *current = cg()->getAppendInstruction();
-   if (isGPUHelper)
-      loadConstant(cg(), callNode, (int64_t)targetAddress, gr12Reg);
-   else
-      loadAddressJNI(cg(), callNode, targetAddress, gr12Reg);
-   cg()->getJNICallSites().push_front(new (trHeapMemory()) TR_Pair<TR_ResolvedMethod, TR::Instruction>(resolvedMethod, current->getNext())); // the first instruction generated by loadAddressC...
+   if (!specialCaseJNI || !comp()->compileRelocatableCode())
+      {
+      // get the address of the function descriptor
+      // use loadAddressConstantFixed - fixed instruction count 2 32-bit, or 5 64-bit
+      TR::Instruction *current = cg()->getAppendInstruction();
+      if (isGPUHelper)
+         loadConstant(cg(), callNode, (int64_t)targetAddress, gr12Reg);
+      else
+         loadAddressJNI(cg(), callNode, targetAddress, gr12Reg);
+      cg()->getJNICallSites().push_front(new (trHeapMemory()) TR_Pair<TR_ResolvedMethod, TR::Instruction>(resolvedMethod, current->getNext())); // the first instruction generated by loadAddressC...
 
-   if (aix_style_linkage &&
-      !(comp()->target().is64Bit() && comp()->target().isLinux() && comp()->target().cpu.isLittleEndian()))
-      {
-      // get the target address
-      generateTrg1MemInstruction(cg(),TR::InstOpCode::Op_load, callNode, gr0Reg, TR::MemoryReference::createWithDisplacement(cg(), gr12Reg, 0, TR::Compiler->om.sizeofReferenceAddress()));
-      // put the target address into the count register
-      generateSrc1Instruction(cg(), TR::InstOpCode::mtctr, callNode, gr0Reg);
-      // load the toc register
-      generateTrg1MemInstruction(cg(),TR::InstOpCode::Op_load, callNode, gr2Reg, TR::MemoryReference::createWithDisplacement(cg(), gr12Reg, TR::Compiler->om.sizeofReferenceAddress(), TR::Compiler->om.sizeofReferenceAddress()));
-      // load the environment register
-      generateTrg1MemInstruction(cg(),TR::InstOpCode::Op_load, callNode, gr11Reg, TR::MemoryReference::createWithDisplacement(cg(), gr12Reg, 2*TR::Compiler->om.sizeofReferenceAddress(), TR::Compiler->om.sizeofReferenceAddress()));
-      }
-   else
-      {
-      // put the target address into the count register
-      generateSrc1Instruction(cg(), TR::InstOpCode::mtctr, callNode, gr12Reg);
-      }
+      if (aix_style_linkage &&
+         !(comp()->target().is64Bit() && comp()->target().isLinux() && comp()->target().cpu.isLittleEndian()))
+         {
+         // get the target address
+         generateTrg1MemInstruction(cg(),TR::InstOpCode::Op_load, callNode, gr0Reg, TR::MemoryReference::createWithDisplacement(cg(), gr12Reg, 0, TR::Compiler->om.sizeofReferenceAddress()));
+         // put the target address into the count register
+         generateSrc1Instruction(cg(), TR::InstOpCode::mtctr, callNode, gr0Reg);
+         // load the toc register
+         generateTrg1MemInstruction(cg(),TR::InstOpCode::Op_load, callNode, gr2Reg, TR::MemoryReference::createWithDisplacement(cg(), gr12Reg, TR::Compiler->om.sizeofReferenceAddress(), TR::Compiler->om.sizeofReferenceAddress()));
+         // load the environment register
+         generateTrg1MemInstruction(cg(),TR::InstOpCode::Op_load, callNode, gr11Reg, TR::MemoryReference::createWithDisplacement(cg(), gr12Reg, 2*TR::Compiler->om.sizeofReferenceAddress(), TR::Compiler->om.sizeofReferenceAddress()));
+         }
+      else
+         {
+         // put the target address into the count register
+         generateSrc1Instruction(cg(), TR::InstOpCode::mtctr, callNode, gr12Reg);
+         }
 
-   // call the JNI function
-   if (isJNIGCPoint)
-      {
-      gcPoint = generateInstruction(cg(), TR::InstOpCode::bctrl, callNode);
-      gcPoint->PPCNeedsGCMap(jniLinkageProperties.getPreservedRegisterMapForGC());
-      }
-   else
-      {
-      generateInstruction(cg(), TR::InstOpCode::bctrl, callNode);
-      }
-   generateDepLabelInstruction(cg(), TR::InstOpCode::label, callNode, returnLabel, deps);
+      // call the JNI function
+      if (isJNIGCPoint)
+         {
+         gcPoint = generateInstruction(cg(), TR::InstOpCode::bctrl, callNode);
+         gcPoint->PPCNeedsGCMap(jniLinkageProperties.getPreservedRegisterMapForGC());
+         }
+      else
+         {
+         generateInstruction(cg(), TR::InstOpCode::bctrl, callNode);
+         }
+      generateDepLabelInstruction(cg(), TR::InstOpCode::label, callNode, returnLabel, deps);
+   }
 
    if (dropVMAccess)
       {
@@ -582,6 +659,15 @@ TR::Register *J9::Power::JNILinkage::buildDirectDispatch(TR::Node *callNode)
 
    if (createJNIFrame)
       {
+#if JAVA_SPEC_VERSION >= 19
+      /*
+       * For virtual threads, decrement callOutCount. It is safe and most efficient to
+       * do this unconditionally. No need to check for underflow.
+       */
+      generateTrg1MemInstruction(cg(), TR::InstOpCode::Op_load, callNode, gr12Reg, TR::MemoryReference::createWithDisplacement(cg(), metaReg, fej9->thisThreadGetCallOutCountOffset(), TR::Compiler->om.sizeofReferenceAddress()));
+      generateTrg1Src1ImmInstruction(cg(), TR::InstOpCode::addi, callNode, gr12Reg, gr12Reg, -1);
+      generateMemSrc1Instruction(cg(), TR::InstOpCode::Op_st, callNode, TR::MemoryReference::createWithDisplacement(cg(), metaReg, fej9->thisThreadGetCallOutCountOffset(), TR::Compiler->om.sizeofReferenceAddress()), gr12Reg);
+#endif //JAVA_SPEC_VERSION >= 19
       // restore stack pointer: need to deal with growable stack -- stack may already be moved.
       generateTrg1MemInstruction(cg(),TR::InstOpCode::Op_load, callNode, gr12Reg, TR::MemoryReference::createWithDisplacement(cg(), metaReg, fej9->thisThreadGetJavaLiteralsOffset(), TR::Compiler->om.sizeofReferenceAddress()));
       generateTrg1MemInstruction(cg(),TR::InstOpCode::Op_load, callNode, stackPtr, TR::MemoryReference::createWithDisplacement(cg(), metaReg,fej9->thisThreadGetJavaSPOffset(), TR::Compiler->om.sizeofReferenceAddress()));
@@ -938,9 +1024,6 @@ int32_t J9::Power::JNILinkage::buildJNIArgs(TR::Node *callNode,
                }
             numFloatArgs++;
             break;
-         case TR::VectorDouble:
-            TR_ASSERT(false, "JNI dispatch: VectorDouble argument not expected");
-            break;
          case TR::Aggregate:
             {
             size_t size = child->getSymbolReference()->getSymbol()->getSize();
@@ -955,6 +1038,13 @@ int32_t J9::Power::JNILinkage::buildJNIArgs(TR::Node *callNode,
             }
             break;
          default:
+            if (child->getDataType().isVector() &&
+                child->getDataType().getVectorElementType() == TR::Double)
+               {
+               TR_ASSERT(false, "JNI dispatch: VectorDouble argument not expected");
+               break;
+               }
+
             TR_ASSERT(false, "Argument type %s is not supported\n", child->getDataType().toString());
          }
       }
@@ -1315,9 +1405,13 @@ int32_t J9::Power::JNILinkage::buildJNIArgs(TR::Node *callNode,
 
             }    // end of for loop
             break;
-         case TR::VectorDouble:
-            TR_ASSERT(false, "JNI dispatch: VectorDouble argument not expected");
-            break;
+
+         default:
+            if (childType.isVector() && childType.getVectorElementType() == TR::Double)
+               {
+               TR_ASSERT(false, "JNI dispatch: VectorDouble argument not expected");
+               break;
+               }
          }
       }
 

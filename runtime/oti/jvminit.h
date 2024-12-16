@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #ifndef JVMINIT_H
@@ -107,42 +107,63 @@ extern "C" {
 
 #define FIND_DLL_TABLE_ENTRY(name) vm->internalVMFunctions->findDllLoadInfo(vm->dllLoadTable, name)
 #define FIND_ARG_IN_VMARGS(match, optionName, optionValue) vm->internalVMFunctions->findArgInVMArgs(vm->portLibrary, vm->vmArgsArray, match, optionName, optionValue, FALSE)
-#define FIND_NEXT_ARG_IN_VMARGS(match, optionName, optionValue, lastArgIndex) ((lastArgIndex==0) ? -1 : vm->internalVMFunctions->findArgInVMArgs(vm->portLibrary, vm->vmArgsArray, (match | (lastArgIndex << STOP_AT_INDEX_SHIFT)), optionName, optionValue, FALSE))
-#define FIND_AND_CONSUME_ARG(match, optionName, optionValue) vm->internalVMFunctions->findArgInVMArgs(vm->portLibrary, vm->vmArgsArray, match, optionName, optionValue, TRUE)
+#define FIND_ARG_IN_ARGS(argsArray, match, optionName, optionValue) vm->internalVMFunctions->findArgInVMArgs(vm->portLibrary, (argsArray), (match), optionName, optionValue, FALSE)
+#define FIND_NEXT_ARG_IN_VMARGS(match, optionName, optionValue, lastArgIndex) ((0 == (lastArgIndex)) ? -1 : vm->internalVMFunctions->findArgInVMArgs(vm->portLibrary, vm->vmArgsArray, ((match) | ((lastArgIndex) << STOP_AT_INDEX_SHIFT)), optionName, optionValue, FALSE))
+#define FIND_NEXT_ARG_IN_ARGS(argsArray, match, optionName, optionValue, lastArgIndex) ((0 == (lastArgIndex)) ? -1 : vm->internalVMFunctions->findArgInVMArgs(vm->portLibrary, (argsArray), ((match) | ((lastArgIndex) << STOP_AT_INDEX_SHIFT)), optionName, optionValue, FALSE))
+#define FIND_AND_CONSUME_VMARG(match, optionName, optionValue) vm->internalVMFunctions->findArgInVMArgs(vm->portLibrary, vm->vmArgsArray, (match), optionName, optionValue, TRUE)
+#define FIND_AND_CONSUME_ARG(argsArray, match, optionName, optionValue) vm->internalVMFunctions->findArgInVMArgs(vm->portLibrary, (argsArray), (match), optionName, optionValue, TRUE)
 
-#define FIND_ARG_IN_VMARGS_FORWARD(match, optionName, optionValue) vm->internalVMFunctions->findArgInVMArgs(vm->portLibrary, vm->vmArgsArray, (match | SEARCH_FORWARD), optionName, optionValue, FALSE)
-#define FIND_NEXT_ARG_IN_VMARGS_FORWARD(match, optionName, optionValue, lastArgIndex) vm->internalVMFunctions->findArgInVMArgs(vm->portLibrary, vm->vmArgsArray, ((match | ((lastArgIndex+1) << STOP_AT_INDEX_SHIFT)) | SEARCH_FORWARD), optionName, optionValue, FALSE)
-#define FIND_AND_CONSUME_ARG_FORWARD(match, optionName, optionValue) vm->internalVMFunctions->findArgInVMArgs(vm->portLibrary, vm->vmArgsArray, (match | SEARCH_FORWARD), optionName, optionValue, TRUE)
+#define FIND_ARG_IN_VMARGS_FORWARD(match, optionName, optionValue) vm->internalVMFunctions->findArgInVMArgs(vm->portLibrary, vm->vmArgsArray, ((match) | SEARCH_FORWARD), optionName, optionValue, FALSE)
+#define FIND_ARG_IN_ARGS_FORWARD(argsArray, match, optionName, optionValue) vm->internalVMFunctions->findArgInVMArgs(vm->portLibrary, (argsArray), ((match) | SEARCH_FORWARD), optionName, optionValue, FALSE)
+#define FIND_NEXT_ARG_IN_VMARGS_FORWARD(match, optionName, optionValue, lastArgIndex) vm->internalVMFunctions->findArgInVMArgs(vm->portLibrary, vm->vmArgsArray, (((match) | (((lastArgIndex) + 1) << STOP_AT_INDEX_SHIFT)) | SEARCH_FORWARD), optionName, optionValue, FALSE)
+#define FIND_NEXT_ARG_IN_ARGS_FORWARD(argsArray, match, optionName, optionValue, lastArgIndex) vm->internalVMFunctions->findArgInVMArgs(vm->portLibrary, (argsArray), (((match) | (((lastArgIndex) + 1) << STOP_AT_INDEX_SHIFT)) | SEARCH_FORWARD), optionName, optionValue, FALSE)
+#define FIND_AND_CONSUME_VMARG_FORWARD(match, optionName, optionValue) vm->internalVMFunctions->findArgInVMArgs(vm->portLibrary, vm->vmArgsArray, ((match) | SEARCH_FORWARD), optionName, optionValue, TRUE)
+#define FIND_AND_CONSUME_ARG_FORWARD(argsArray, match, optionName, optionValue) vm->internalVMFunctions->findArgInVMArgs(vm->portLibrary, (argsArray), ((match) | SEARCH_FORWARD), optionName, optionValue, TRUE)
+#define FIND_AND_CONSUME_NEXT_ARG_FORWARD(argsArray, match, optionName, optionValue, lastArgIndex) vm->internalVMFunctions->findArgInVMArgs(vm->portLibrary, (argsArray), (((match) | (((lastArgIndex) + 1) << STOP_AT_INDEX_SHIFT)) | SEARCH_FORWARD), optionName, optionValue, TRUE)
 
 /* REMOVE - FOR BACKWARDS COMPATIBILITY */
-#define FIND_AND_CONSUME_ARG2(match, optionName, optionValue) vm->internalVMFunctions->findArgInVMArgs(vm->portLibrary, vm->vmArgsArray, match, optionName, optionValue, TRUE)
+#define FIND_AND_CONSUME_VMARG2(match, optionName, optionValue) vm->internalVMFunctions->findArgInVMArgs(vm->portLibrary, vm->vmArgsArray, match, optionName, optionValue, TRUE)
+#define FIND_AND_CONSUME_ARG2(argsArray, match, optionName, optionValue) vm->internalVMFunctions->findArgInVMArgs(vm->portLibrary, (argsArray), match, optionName, optionValue, TRUE)
 #define VMARGS_OPTION(element) vm->vmArgsArray->actualVMArgs->options[element].optionString
+#define ARGS_OPTION(argsArray, element) (argsArray)->actualVMArgs->options[element].optionString
 #define GET_OPTION_VALUE2(element, delimChar, resultPtr) vm->internalVMFunctions->optionValueOperations(vm->portLibrary, vm->vmArgsArray, element, GET_OPTION, resultPtr, 0, delimChar, 0, NULL)
+#define GET_OPTION_VALUE2_ARGS(argsArray, element, delimChar, resultPtr) vm->internalVMFunctions->optionValueOperations(vm->portLibrary, (argsArray), element, GET_OPTION, resultPtr, 0, delimChar, 0, NULL)
 /* *** */
 
-#define GET_OPTION_VALUE(element, delimChar, resultPtr) vm->internalVMFunctions->optionValueOperations(vm->portLibrary, vm->vmArgsArray, element, GET_OPTION, (char**)resultPtr, 0, delimChar, 0, NULL)
+#define GET_OPTION_VALUE(element, delimChar, resultPtr) vm->internalVMFunctions->optionValueOperations(vm->portLibrary, vm->vmArgsArray, element, GET_OPTION, (char**)(resultPtr), 0, delimChar, 0, NULL)
+#define GET_OPTION_VALUE_ARGS(argsArray, element, delimChar, resultPtr) vm->internalVMFunctions->optionValueOperations(vm->portLibrary, (argsArray), element, GET_OPTION, (char**)(resultPtr), 0, delimChar, 0, NULL)
 #define COPY_OPTION_VALUE(element, delimChar, buffer, bufSize) vm->internalVMFunctions->optionValueOperations(vm->portLibrary, vm->vmArgsArray, element, GET_OPTION, buffer, bufSize, delimChar, 0, NULL)
+#define COPY_OPTION_VALUE_ARGS(argsArray, element, delimChar, buffer, bufSize) vm->internalVMFunctions->optionValueOperations(vm->portLibrary, (argsArray), element, GET_OPTION, buffer, bufSize, delimChar, 0, NULL)
 #define GET_OPTION_VALUES(element, delimChar, sepChar, buffer, bufSize) vm->internalVMFunctions->optionValueOperations(vm->portLibrary, vm->vmArgsArray, element, GET_OPTIONS, buffer, bufSize, delimChar, sepChar, NULL)
+#define GET_OPTION_VALUES_ARGS(argsArray, element, delimChar, sepChar, buffer, bufSize) vm->internalVMFunctions->optionValueOperations(vm->portLibrary, (argsArray), element, GET_OPTIONS, buffer, bufSize, delimChar, sepChar, NULL)
 #define GET_COMPOUND_VALUE(element, delimChar, buffer, bufSize) vm->internalVMFunctions->optionValueOperations(vm->portLibrary, vm->vmArgsArray, element, GET_COMPOUND, buffer, bufSize, delimChar, 0, NULL)
+#define GET_COMPOUND_VALUE_ARGS(argsArray, element, delimChar, buffer, bufSize) vm->internalVMFunctions->optionValueOperations(vm->portLibrary, (argsArray), element, GET_COMPOUND, buffer, bufSize, delimChar, 0, NULL)
 #define GET_COMPOUND_VALUES(element, delimChar, sepChar, buffer, bufSize) vm->internalVMFunctions->optionValueOperations(vm->portLibrary, vm->vmArgsArray, element, GET_COMPOUND_OPTS, buffer, bufSize, delimChar, sepChar, NULL)
+#define GET_COMPOUND_VALUES_ARGS(argsArray, element, delimChar, sepChar, buffer, bufSize) vm->internalVMFunctions->optionValueOperations(vm->portLibrary, (argsArray), element, GET_COMPOUND_OPTS, buffer, bufSize, delimChar, sepChar, NULL)
 #define GET_MEMORY_VALUE(element, optname, result) vm->internalVMFunctions->optionValueOperations(vm->portLibrary, vm->vmArgsArray, (element), GET_MEM_VALUE, (char **)&(optname), 0, 0, 0, &(result))
+#define GET_MEMORY_VALUE_ARGS(argsArray, element, optname, result) vm->internalVMFunctions->optionValueOperations(vm->portLibrary, (argsArray), (element), GET_MEM_VALUE, (char **)&(optname), 0, 0, 0, &(result))
 #define GET_INTEGER_VALUE(element, optname, result) vm->internalVMFunctions->optionValueOperations(vm->portLibrary, vm->vmArgsArray, (element), GET_INT_VALUE, (char **)&(optname), 0, 0, 0, &(result))
+#define GET_INTEGER_VALUE_ARGS(argsArray, element, optname, result) vm->internalVMFunctions->optionValueOperations(vm->portLibrary, (argsArray), (element), GET_INT_VALUE, (char **)&(optname), 0, 0, 0, &(result))
 #define GET_PERCENT_VALUE(element, optname, result) vm->internalVMFunctions->optionValueOperations(vm->portLibrary, vm->vmArgsArray, (element), GET_PRC_VALUE,(char **) &(optname), 0, 0, 0, &(result))
+#define GET_PERCENT_VALUE_ARGS(argsArray, element, optname, result) vm->internalVMFunctions->optionValueOperations(vm->portLibrary, (argsArray), (element), GET_PRC_VALUE,(char **) &(optname), 0, 0, 0, &(result))
 #define GET_OPTION_OPTION(element, delimChar, delimChar2, resultPtr) vm->internalVMFunctions->optionValueOperations(vm->portLibrary, vm->vmArgsArray, (element), GET_OPTION_OPT, (resultPtr), 0, (delimChar), (delimChar2), NULL)
+#define GET_OPTION_OPTION_ARGS(argsArray, element, delimChar, delimChar2, resultPtr) vm->internalVMFunctions->optionValueOperations(vm->portLibrary, (argsArray), (element), GET_OPTION_OPT, (resultPtr), 0, (delimChar), (delimChar2), NULL)
 #define GET_DOUBLE_VALUE(element, optname, result) vm->internalVMFunctions->optionValueOperations(vm->portLibrary, vm->vmArgsArray, (element), GET_DBL_VALUE, (char **) &(optname), 0, 0, 0, &(result))
-#define HAS_MAPPING(args, element) (args->j9Options[element].mapping!=NULL)
-#define MAPPING_FLAGS(args, element) (args->j9Options[element].mapping->flags)
-#define MAPPING_J9NAME(args, element) (args->j9Options[element].mapping->j9Name)
-#define MAPPING_MAPNAME(args, element) (args->j9Options[element].mapping->mapName)
-#define FROM_ENVVAR(args, element) (args->j9Options[element].fromEnvVar!=NULL)
+#define GET_DOUBLE_VALUE_ARGS(argsArray, element, optname, result) vm->internalVMFunctions->optionValueOperations(vm->portLibrary, (argsArray), (element), GET_DBL_VALUE, (char **) &(optname), 0, 0, 0, &(result))
 
-#define CONSUME_ARG(j9vm_args, element) (j9vm_args->j9Options[element].flags |= ARG_CONSUMED)
-#define IS_CONSUMED(j9vm_args, element) (j9vm_args->j9Options[element].flags & ARG_CONSUMED)
-#define IS_CONSUMABLE(j9vm_args, element) (j9vm_args->j9Options[element].flags & CONSUMABLE_ARG)
-#define REQUIRES_LIBRARY(j9vm_args, element) (j9vm_args->j9Options[element].flags & ARG_REQUIRES_LIBRARY)
+#define HAS_MAPPING(args, element) (NULL != (args)->j9Options[element].mapping)
+#define MAPPING_FLAGS(args, element) ((args)->j9Options[element].mapping->flags)
+#define MAPPING_J9NAME(args, element) ((args)->j9Options[element].mapping->j9Name)
+#define MAPPING_MAPNAME(args, element) ((args)->j9Options[element].mapping->mapName)
+#define FROM_ENVVAR(args, element) (NULL != (args)->j9Options[element].fromEnvVar)
 
-#define COMPLETE_STAGE(flags, stage) (flags |= ((UDATA)1 << stage))
-#define IS_STAGE_COMPLETED(flags, stage) (flags & ((UDATA)1 << stage))
+#define CONSUME_ARG(j9vm_args, element) ((j9vm_args)->j9Options[element].flags |= ARG_CONSUMED)
+#define IS_CONSUMED(j9vm_args, element) J9_ARE_ANY_BITS_SET((j9vm_args)->j9Options[element].flags, ARG_CONSUMED)
+#define IS_CONSUMABLE(j9vm_args, element) J9_ARE_ANY_BITS_SET((j9vm_args)->j9Options[element].flags, CONSUMABLE_ARG)
+#define REQUIRES_LIBRARY(j9vm_args, element) J9_ARE_ANY_BITS_SET((j9vm_args)->j9Options[element].flags, ARG_REQUIRES_LIBRARY)
+
+#define COMPLETE_STAGE(flags, stage) ((flags) |= (((UDATA)1) << (stage)))
+#define IS_STAGE_COMPLETED(flags, stage) ((flags) & (((UDATA)1) << (stage)))
 
 #define J9_ADDRMODE_64 64
 
@@ -192,13 +213,8 @@ enum INIT_STAGE {
 	INTERPRETER_SHUTDOWN,
 	LIBRARIES_ONUNLOAD,
 	HEAP_STRUCTURES_FREED,
-	GC_SHUTDOWN_COMPLETE,
-	/* this stage will only be invoked for the jcl shared library when it is being run remotely */
-	OFFLOAD_JCL_PRECONFIGURE
-
-
+	GC_SHUTDOWN_COMPLETE
 };
-
 
 #define VMOPT_EXIT "exit"
 #define VMOPT_ABORT "abort"
@@ -252,6 +268,7 @@ enum INIT_STAGE {
 #define VMOPT_XFASTRESOLVE "-Xfastresolve"
 #define VMOPT_XSHARECLASSES "-Xshareclasses"
 #define VMOPT_XSHARECLASSES_COLON "-Xshareclasses:"
+#define VMOPT_XSNAPSHOT "-Xsnapshot="
 #define VMOPT_XSERVICE_EQUALS "-Xservice="
 #define VMOPT_XISS "-Xiss"
 #define VMOPT_XSSI "-Xssi"
@@ -264,9 +281,9 @@ enum INIT_STAGE {
 #define VMOPT_XMXCL "-Xmxcl"
 #define VMOPT_XMX "-Xmx"
 #define VMOPT_XMS "-Xms"
-#define VMOPT_XDUMP  "-Xdump"
-#define VMOPT_XDUMP_NONE  "-Xdump:none"
-#define VMOPT_XDUMP_DIRECTORY_EQUALS  "-Xdump:directory="
+#define VMOPT_XDUMP "-Xdump"
+#define VMOPT_XDUMP_NONE "-Xdump:none"
+#define VMOPT_XDUMP_DIRECTORY_EQUALS "-Xdump:directory="
 #define VMOPT_XDUMP_TOOL_OUTOFMEMORYERROR_EXEC_EQUALS "-Xdump:tool:events=systhrow,filter=java/lang/OutOfMemoryError,exec="
 #define VMOPT_XARGENCODING "-Xargencoding"
 #define VMOPT_XARGENCODINGCOLON "-Xargencoding:"
@@ -310,13 +327,19 @@ enum INIT_STAGE {
 #define VMOPT_XXIGNOREUNRECOGNIZEDVMOPTIONSDISABLE "-XX:-IgnoreUnrecognizedVMOptions"
 #define VMOPT_XXIGNOREUNRECOGNIZEDXXCOLONOPTIONSENABLE "-XX:+IgnoreUnrecognizedXXColonOptions"
 #define VMOPT_XXIGNOREUNRECOGNIZEDXXCOLONOPTIONSDISABLE "-XX:-IgnoreUnrecognizedXXColonOptions"
+#define VMOPT_XXIGNOREUNRECOGNIZEDRESTOREOPTIONSENABLE "-XX:+IgnoreUnrecognizedRestoreOptions"
+#define VMOPT_XXIGNOREUNRECOGNIZEDRESTOREOPTIONSDISABLE "-XX:-IgnoreUnrecognizedRestoreOptions"
 #define VMOPT_X142BOOSTGCTHRPRIO "-X142BoostGCThrPrio"
 #define VMOPT_XREALTIME "-Xrealtime"
 #define VMOPT_XNORTSJ "-Xnortsj"
+#define VMOPT_XXNOSHOWCARRIERFRAMES "-XX:-ShowCarrierFrames"
+#define VMOPT_XXSHOWCARRIERFRAMES "-XX:+ShowCarrierFrames"
+#define VMOPT_XXNOSHOWHIDDENFRAMES "-XX:-ShowHiddenFrames"
+#define VMOPT_XXSHOWHIDDENFRAMES "-XX:+ShowHiddenFrames"
 #define VMOPT_XXNOSTACKTRACEINTHROWABLE "-XX:-StackTraceInThrowable"
 #define VMOPT_XXSTACKTRACEINTHROWABLE "-XX:+StackTraceInThrowable"
 #define VMOPT_XXNOPAGEALIGNDIRECTMEMORY "-XX:-PageAlignDirectMemory"
-#define VMOPT_XXPAGEALIGNDIRECTMEMORY   "-XX:+PageAlignDirectMemory"
+#define VMOPT_XXPAGEALIGNDIRECTMEMORY "-XX:+PageAlignDirectMemory"
 #define VMOPT_XXVMLOCKCLASSLOADERENABLE "-XX:+VMLockClassLoader"
 #define VMOPT_XXVMLOCKCLASSLOADERDISABLE "-XX:-VMLockClassLoader"
 #define VMOPT_XXNOVERBOSEVERIFICATION "-XX:-VerboseVerification"
@@ -329,8 +352,12 @@ enum INIT_STAGE {
 #define VMOPT_XXHANDLESIGXFSZ "-XX:+HandleSIGXFSZ"
 #define VMOPT_XXNOHANDLESIGABRT "-XX:-HandleSIGABRT"
 #define VMOPT_XXHANDLESIGABRT "-XX:+HandleSIGABRT"
+#define VMOPT_XXNOHANDLESIGUSR2 "-XX:-HandleSIGUSR2"
+#define VMOPT_XXHANDLESIGUSR2 "-XX:+HandleSIGUSR2"
 #define VMOPT_XXHEAPDUMPONOOM "-XX:+HeapDumpOnOutOfMemoryError"
 #define VMOPT_XXNOHEAPDUMPONOOM "-XX:-HeapDumpOnOutOfMemoryError"
+#define VMOPT_XXKEEPJNIIDS "-XX:+KeepJNIIDs"
+#define VMOPT_XXNOKEEPJNIIDS "-XX:-KeepJNIIDs"
 #define VMOPT_XDUMP_EXIT_OUTOFMEMORYERROR "-Xdump:exit:events=systhrow,filter=java/lang/OutOfMemoryError"
 #define VMOPT_XDUMP_EXIT_OUTOFMEMORYERROR_DISABLE "-Xdump:exit:none:events=systhrow,filter=java/lang/OutOfMemoryError"
 
@@ -389,23 +416,60 @@ enum INIT_STAGE {
 #define VMOPT_XXDISABLEUTFCACHE "-XX:-UTFCache"
 #define VMOPT_XXENABLEENSUREHASHED "-XX:+EnsureHashed:"
 #define VMOPT_XXDISABLEENSUREHASHED "-XX:-EnsureHashed:"
+#define VMOPT_XXOPENJ9COMMANDLINEENV "-XX:+OpenJ9CommandLineEnv"
+#define VMOPT_XXNOOPENJ9COMMANDLINEENV "-XX:-OpenJ9CommandLineEnv"
+#define VMOPT_XXCPULOADCOMPATIBILITY "-XX:+CpuLoadCompatibility"
+#define VMOPT_XXNOCPULOADCOMPATIBILITY "-XX:-CpuLoadCompatibility"
+#define VMOPT_XXENABLEEXTENDEDHCR "-XX:+EnableExtendedHCR"
+#define VMOPT_XXDISABLEEXTENDEDHCR "-XX:-EnableExtendedHCR"
 
 #if defined(J9VM_ZOS_3164_INTEROPERABILITY)
 #define VMOPT_XXENABLE3164INTEROPERABILITY "-XX:+Enable3164Interoperability"
 #define VMOPT_XXDISABLE3164INTEROPERABILITY "-XX:-Enable3164Interoperability"
 #endif /* defined(J9VM_ZOS_3164_INTEROPERABILITY) */
 
-#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
-#define VMOPT_XXENABLEVALHALLA "-XX:+EnableValhalla"
-#define VMOPT_XXDISABLEVALHALLA "-XX:-EnableValhalla"
-#endif /* defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */
-
 #if defined(J9VM_OPT_CRIU_SUPPORT)
 #define VMOPT_XXENABLECRIU "-XX:+EnableCRIUSupport"
 #define VMOPT_XXDISABLECRIU "-XX:-EnableCRIUSupport"
+#define VMOPT_XXENABLECRIUSECPROVIDER "-XX:+CRIUSecProvider"
+#define VMOPT_XXDISABLECRIUSECPROVIDER "-XX:-CRIUSecProvider"
 #define VMOPT_XXENABLECRIUNONPORTABLEMODE "-XX:+CRIURestoreNonPortableMode"
 #define VMOPT_XXDISABLECRIUNONPORTABLEMODE "-XX:-CRIURestoreNonPortableMode"
+#define VMOPT_XXENABLEJVMRESTOREPORTABLEMODE "-XX:+JVMPortableRestoreMode"
+#define VMOPT_XXDISABLEJVMRESTOREPORTABLEMODE "-XX:-JVMPortableRestoreMode"
+#define VMOPT_XSHARECLASSES_DISABLEONRESTORE "-Xshareclasses:disableOnRestore"
+#define VMOPT_XXENABLETHROWONDELAYECHECKPOINTOPERATION "-XX:+ThrowOnDelayedCheckpointOperation"
+#define VMOPT_XXDISABLETHROWONDELAYECHECKPOINTOPERATION "-XX:-ThrowOnDelayedCheckpointOperation"
+#define VMOPT_XXMAXRETRYFORNOTCHECKPOINTSAFE_EQUALS "-XX:maxRetryForNotCheckpointSafe="
+#define VMOPT_XXSLEEPMILLISECONDSFORNOTCHECKPOINTSAFE_EQUALS "-XX:sleepMillisecondsForNotCheckpointSafe="
+#define VMOPT_XXENABLEDEBUGONRESTORE "-XX:+DebugOnRestore"
+#define VMOPT_XXDISABLEDEBUGONRESTORE "-XX:-DebugOnRestore"
 #endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
+
+#if defined(J9VM_OPT_CRAC_SUPPORT)
+#define VMOPT_XXCRACCHECKPOINTTO "-XX:CRaCCheckpointTo="
+#endif /* defined(J9VM_OPT_CRAC_SUPPORT) */
+
+/* Compatibility options. */
+#define VMOPT_XXCOMPATIBILITY_EQUALS "-XX:Compatibility="
+
+/* Options recognized only in combination with -XX:Compatibility=elasticsearch. */
+#define VMOPT_XXCOMPATIBILITY_ENABLEG1GC "-XX:+UseG1GC"
+#define VMOPT_XXCOMPATIBILITY_DISABLEG1GC "-XX:-UseG1GC"
+
+/*
+ * Options to control how much effort is expended
+ * resolving native symbols in java dumps.
+ */
+#define VMOPT_XXNOSHOWNATIVESTACKSYMBOLS "-XX:-ShowNativeStackSymbols" /* don't show any native stack symbols */
+#define VMOPT_XXSHOWNATIVESTACKSYMBOLS_BASIC "-XX:+ShowNativeStackSymbols=basic" /* show only easily acquired native stack symbols */
+#define VMOPT_XXSHOWNATIVESTACKSYMBOLS_ALL "-XX:+ShowNativeStackSymbols=all" /* show all available native stack symbols */
+
+#if JAVA_SPEC_VERSION >= 21
+/* Option to control if unmounted thread stacktraces are shown in java core dumps. */
+#define VMOPT_XXSHOWUNMOUNTEDTHREADSTACKS "-XX:+ShowUnmountedThreadStacks"
+#define VMOPT_XXNOSHOWUNMOUNTEDTHREADSTACKS "-XX:-ShowUnmountedThreadStacks"
+#endif /* JAVA_SPEC_VERSION >= 21 */
 
 /* Option to turn on exception on synchronization on instances of value-based classes */
 #define VMOPT_XXDIAGNOSE_SYNC_ON_VALUEBASED_CLASSES_EQUALS1 "-XX:DiagnoseSyncOnValueBasedClasses=1"
@@ -444,12 +508,18 @@ enum INIT_STAGE {
 #define VMOPT_XXENABLESHAREUNSAFECLASSES "-XX:+ShareUnsafeClasses"
 #define VMOPT_XXDISABLESHAREUNSAFECLASSES "-XX:-ShareUnsafeClasses"
 
+#define VMOPT_XXENABLESHAREORPHANS "-XX:+ShareOrphans"
+#define VMOPT_XXDISABLESHAREORPHANS "-XX:-ShareOrphans"
+
 #define VMOPT_XXFORCECLASSFILEASINTERMEDIATEDATA "-XX:ForceClassfileAsIntermediateData"
 #define VMOPT_XXRECREATECLASSFILEONLOAD "-XX:RecreateClassfileOnload"
 
 #define VMOPT_XXSETHWPREFETCH_NONE "-XXsetHWPrefetch:none"
 #define VMOPT_XXSETHWPREFETCH_OS_DEFAULT "-XXsetHWPrefetch:os-default"
 #define VMOPT_XXSETHWPREFETCH_EQUALS "-XXsetHWPrefetch="
+
+#define VMOPT_XXUSEZLIBNX "-XX:+UseZlibNX"
+#define VMOPT_XXNOUSEZLIBNX "-XX:-UseZlibNX"
 
 #define VMOPT_XXLAZYSYMBOLRESOLUTION "-XX:+LazySymbolResolution"
 #define VMOPT_XXNOLAZYSYMBOLRESOLUTION "-XX:-LazySymbolResolution"
@@ -492,7 +562,7 @@ enum INIT_STAGE {
 #define VMOPT_ENABLE_PREVIEW "--enable-preview"
 
 #define VMOPT_XXNLSMESSAGES "-XX:+NLSMessages"
-#define VMOPT_XXNONLSMESSAGES  "-XX:-NLSMessages"
+#define VMOPT_XXNONLSMESSAGES "-XX:-NLSMessages"
 
 #define VMOPT_XCOMPRESSEDREFS "-Xcompressedrefs"
 #define VMOPT_XNOCOMPRESSEDREFS "-Xnocompressedrefs"
@@ -511,7 +581,20 @@ enum INIT_STAGE {
 #define VMOPT_XXCLASSRELATIONSHIPVERIFIER "-XX:+ClassRelationshipVerifier"
 #define VMOPT_XXNOCLASSRELATIONSHIPVERIFIER "-XX:-ClassRelationshipVerifier"
 
+#define VMOPT_XXDYNAMICHEAPIFICATION "-XX:+DynamicHeapification"
+#define VMOPT_XXNODYNAMICHEAPIFICATION "-XX:-DynamicHeapification"
+
+#define VMOPT_XXFLIGHTRECORDER "-XX:+FlightRecorder"
+#define VMOPT_XXNOFLIGHTRECORDER "-XX:-FlightRecorder"
+
+#define VMOPT_XXCONTINUATIONCACHE "-XX:ContinuationCache:"
+
+#if JAVA_SPEC_VERSION >= 22
+#define VMOPT_XFFIPROTO "-Xffiproto"
+#endif /* JAVA_SPEC_VERSION >= 22 */
+
 #define MAPOPT_AGENTLIB_JDWP_EQUALS "-agentlib:jdwp="
+#define MAPOPT_XRUNJDWP "-Xrunjdwp:"
 
 #define MAPOPT_XCOMP "-Xcomp"
 #define MAPOPT_XDISABLEJAVADUMP "-Xdisablejavadump"
@@ -586,6 +669,9 @@ enum INIT_STAGE {
 #define VMOPT_XSYSLOG_OPT "-Xsyslog"
 #define MAPOPT_XSYSLOG_OPT_COLON "-Xsyslog:"
 
+#define VMOPT_XXENABLEDYNAMICAGENTLOADING "-XX:+EnableDynamicAgentLoading"
+#define VMOPT_XXNOENABLEDYNAMICAGENTLOADING "-XX:-EnableDynamicAgentLoading"
+
 /* Modularity command line options */
 #define VMOPT_MODULE_UPGRADE_PATH "--upgrade-module-path"
 #define VMOPT_MODULE_PATH "--module-path"
@@ -597,9 +683,13 @@ enum INIT_STAGE {
 #define VMOPT_PATCH_MODULE "--patch-module"
 #define VMOPT_ILLEGAL_ACCESS "--illegal-access="
 #define VMOPT_ENABLE_NATIVE_ACCESS "--enable-native-access"
+#define VMOPT_ILLEGAL_NATIVE_ACCESS "--illegal-native-access="
 
 /* JEP 421: Deprecate Finalization for Removal */
 #define VMOPT_DISABLE_FINALIZATION "--finalization="
+
+/* JEP 471: Deprecate the Memory-Access Methods in sun.misc.Unsafe for Removal */
+#define VMOPT_DISABLE_SUN_MISC_UNSAFE_MEMORY_ACCESS "--sun-misc-unsafe-memory-access="
 
 #define ENVVAR_IBM_MIXED_MODE_THRESHOLD "IBM_MIXED_MODE_THRESHOLD"
 #define ENVVAR_JAVA_COMPILER "JAVA_COMPILER"
@@ -630,9 +720,16 @@ enum INIT_STAGE {
 #define SYSPROP_JDK_MODULE_PATCH "jdk.module.patch."
 #define SYSPROP_JDK_MODULE_ILLEGALACCESS "jdk.module.illegalAccess"
 #define SYSPROP_JDK_MODULE_ENABLENATIVEACCESS "jdk.module.enable.native.access."
+#if JAVA_SPEC_VERSION >= 23
+#define SYSPROP_SUN_MISC_UNSAFE_MEMORY_ACCESS "sun.misc.unsafe.memory.access"
+#endif /* JAVA_SPEC_VERSION >= 23 */
+#define SYSPROP_JDK_MODULE_ILLEGALNATIVEACCESS "jdk.module.illegal.native.access"
 #define JAVA_BASE_MODULE "java.base"
 
 #define SYSPROP_COM_SUN_MANAGEMENT "-Dcom.sun.management."
+
+#define VMOPT_XTRACE "-Xtrace"
+
 
 #ifdef J9VM_INTERP_VERBOSE
 
@@ -677,10 +774,8 @@ enum INIT_STAGE {
 #define JVMINIT_VERBOSE_INIT_TRACE_WORKING_SET(vm)
 #endif
 
-
 #ifdef __cplusplus
 }
 #endif
 
 #endif /* JVMINIT_H */
-

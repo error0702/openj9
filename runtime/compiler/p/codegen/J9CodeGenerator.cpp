@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "j9cfg.h"
@@ -77,6 +77,16 @@ J9::Power::CodeGenerator::initialize()
       cg->setSupportsInlineConcurrentLinkedQueue();
       }
 
+   static bool disableInlineVectorizedMismatch = feGetEnv("TR_disableInlineVectorizedMismatch") != NULL;
+   if (cg->getSupportsArrayCmpLen() &&
+#if defined(J9VM_GC_SPARSE_HEAP_ALLOCATION)
+         !TR::Compiler->om.isOffHeapAllocationEnabled() &&
+#endif /* J9VM_GC_SPARSE_HEAP_ALLOCATION */
+         !disableInlineVectorizedMismatch)
+      {
+      cg->setSupportsInlineVectorizedMismatch();
+      }
+
    cg->setSupportsNewInstanceImplOpt();
 
    static char *disableMonitorCacheLookup = feGetEnv("TR_disableMonitorCacheLookup");
@@ -88,8 +98,15 @@ J9::Power::CodeGenerator::initialize()
 
    if (comp->target().cpu.isAtLeast(OMR_PROCESSOR_PPC_P8) && comp->target().cpu.supportsFeature(OMR_FEATURE_PPC_HAS_VSX) &&
       comp->target().is64Bit() && !comp->getOption(TR_DisableFastStringIndexOf) &&
-      !TR::Compiler->om.canGenerateArraylets())
+      !TR::Compiler->om.canGenerateArraylets() && !TR::Compiler->om.isOffHeapAllocationEnabled())
       cg->setSupportsInlineStringIndexOf();
+
+   static bool disableStringInflateIntrinsic = feGetEnv("TR_DisableStringInflateIntrinsic") != NULL;
+   if (comp->target().cpu.isAtLeast(OMR_PROCESSOR_PPC_P8) && comp->target().cpu.supportsFeature(OMR_FEATURE_PPC_HAS_VSX) &&
+      comp->target().is64Bit() &&
+      !TR::Compiler->om.canGenerateArraylets() &&
+      !disableStringInflateIntrinsic)
+      cg->setSupportsInlineStringLatin1Inflate();
 
    if (!comp->getOption(TR_DisableReadMonitors))
       cg->setSupportsReadOnlyLocks();
@@ -353,6 +370,17 @@ bool J9::Power::CodeGenerator::suppressInliningOfRecognizedMethod(TR::Recognized
           }
       }
 
+   /* Need this check for CRC32C update* methods so that this doesn't get inlined.
+    * Unlike CRC32's update* which are JNI methods, CRC32C have Java implementation
+    * and therefore we need to prevent the inliner from eliminating the calls so
+    * we can redirect them to our optimized helpers.
+    */
+   if (method == TR::java_util_zip_CRC32C_updateBytes ||
+       method == TR::java_util_zip_CRC32C_updateDirectByteBuffer)
+      {
+      return true;
+      }
+
    return false;
 }
 
@@ -559,7 +587,7 @@ J9::Power::CodeGenerator::insertPrefetchIfNecessary(TR::Node *node, TR::Register
                      generateTrg1MemInstruction(self(), TR::InstOpCode::lwz, node, temp3Reg, TR::MemoryReference::createWithDisplacement(self(), pointerReg, (int32_t)(TR::Compiler->om.sizeofReferenceField()*2), 4));
                   }
 
-               if (comp->getOptions()->getHeapBase() != NULL)
+               if (comp->getOptions()->getHeapBase() != 0)
                   {
                   loadAddressConstant(self(), comp->compileRelocatableCode(), node, (intptr_t)(comp->getOptions()->getHeapBase()), tempReg);
                   generateTrg1Src2Instruction(self(), TR::InstOpCode::cmpl4, node, condReg, temp3Reg, tempReg);
@@ -622,8 +650,7 @@ J9::Power::CodeGenerator::insertPrefetchIfNecessary(TR::Node *node, TR::Register
             if (!(firstChild &&
                 firstChild->getOpCodeValue() == TR::aiadd &&
                 firstChild->isInternalPointer() &&
-                (strstr(comp->fe()->sampleSignature(node->getOwningMethod(), 0, 0, self()->trMemory()),"java/util/TreeMap$UnboundedValueIterator.next()")
-                || strstr(comp->fe()->sampleSignature(node->getOwningMethod(), 0, 0, self()->trMemory()),"java/util/ArrayList$Itr.next()"))
+                strstr(comp->fe()->sampleSignature(node->getOwningMethod(), 0, 0, self()->trMemory()),"java/util/ArrayList$Itr.next()")
                ))
                {
                optDisabled = true;
@@ -635,8 +662,7 @@ J9::Power::CodeGenerator::insertPrefetchIfNecessary(TR::Node *node, TR::Register
             if (!(firstChild &&
                 firstChild->getOpCodeValue() == TR::aladd &&
                 firstChild->isInternalPointer() &&
-                (strstr(comp->fe()->sampleSignature(node->getOwningMethod(), 0, 0, self()->trMemory()),"java/util/TreeMap$UnboundedValueIterator.next()")
-                || strstr(comp->fe()->sampleSignature(node->getOwningMethod(), 0, 0, self()->trMemory()),"java/util/ArrayList$Itr.next()"))
+                strstr(comp->fe()->sampleSignature(node->getOwningMethod(), 0, 0, self()->trMemory()),"java/util/ArrayList$Itr.next()")
                ))
                {
                optDisabled = true;
@@ -749,7 +775,7 @@ J9::Power::CodeGenerator::deriveCallingLinkage(TR::Node *node, bool isIndirect)
    static char * disableDirectNativeCall = feGetEnv("TR_DisableDirectNativeCall");
 
    // Clean-up: the fej9 checking seemed unnecessary
-   if (!isIndirect && callee->isJNI() && fej9->canRelocateDirectNativeCalls() &&
+   if (!isIndirect && callee->isJNI() &&
        (node->isPreparedForDirectJNI() ||
         (disableDirectNativeCall == NULL && callee->getResolvedMethodSymbol()->canDirectNativeCall())))
       return self()->getLinkage(TR_J9JNILinkage);

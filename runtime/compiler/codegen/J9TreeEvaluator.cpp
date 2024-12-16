@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "codegen/TreeEvaluator.hpp"
@@ -1292,7 +1292,7 @@ uint32_t J9::TreeEvaluator::calculateInstanceOfOrCheckCastSequences(TR::Node *in
 
    // By default maxOnsiteCacheSlotForInstanceOf is set to 0 which means cache is disable.
    // To enable test pass JIT option maxOnsiteCacheSlotForInstanceOf=<number_of_slots>
-   bool createDynamicCacheTests = cg->comp()->getOptions()->getMaxOnsiteCacheSlotForInstanceOf() > 0;
+   bool createDynamicCacheTests = cg->comp()->getOptions()->getMaxOnsiteCacheSlotForInstanceOf() > 0 && isInstanceOf;
 
 
    uint32_t i = 0;
@@ -1340,14 +1340,12 @@ uint32_t J9::TreeEvaluator::calculateInstanceOfOrCheckCastSequences(TR::Node *in
    else if (!OMR::TreeEvaluator::isStaticClassSymRef(castClassSymRef))
       {
       traceMsg(cg->comp(),"Cast Class runtimeVariable\n");
-      TR_ASSERT(isInstanceOf, "Expecting instanceof when cast class is a runtime variable");
       if (mayBeNull)
          sequences[i++] = NullTest;
       sequences[i++] = ClassEqualityTest;
       sequences[i++] = CastClassCacheTest;
       // On Z, We were having support for Super Class Test for dynamic Cast Class so adding it here. It can be guarded if Power/X do not need it.
-      if (cg->supportsInliningOfIsInstance() &&
-         instanceOfOrCheckCastNode->getOpCodeValue() == TR::instanceof &&
+      if ( (cg->supportsInliningOfIsInstance() || instanceOfOrCheckCastNode->getOpCodeValue() == TR::checkcast) &&
          instanceOfOrCheckCastNode->getSecondChild()->getOpCodeValue() != TR::loadaddr)
          sequences[i++] = SuperClassTest;
       if (createDynamicCacheTests)
@@ -1819,63 +1817,6 @@ J9::TreeEvaluator::checkcastShouldOutlineSuperClassTest(TR::Node *node, TR::Code
 
    return false;
     }
-
-
-bool
-J9::TreeEvaluator::loadLookaheadAfterHeaderAccess(TR::Node *node, int32_t &fieldOffset, TR::CodeGenerator *cg)
-   {
-   TR::Node *object = node->getFirstChild();
-
-   TR::TreeTop *currTree = cg->getCurrentEvaluationTreeTop()->getNextTreeTop();
-   while (currTree)
-      {
-      TR::Node *currNode = currTree->getNode();
-      if (currNode->getOpCodeValue() == TR::aloadi || currNode->getOpCodeValue() == TR::iloadi)
-         {
-         if (currNode->getFirstChild() == object)
-            {
-            int displacement = 0;
-            TR::Symbol *sym = currNode->getSymbolReference()->getSymbol();
-            if (sym)
-               {
-               if (sym->isRegisterMappedSymbol() &&
-                   sym->getRegisterMappedSymbol()->getOffset() != 0)
-                  {
-                  displacement = sym->getRegisterMappedSymbol()->getOffset();
-                  }
-               }
-
-
-            fieldOffset = displacement + currNode->getSymbolReference()->getOffset();
-            return true;
-            }
-         }
-      else if (currNode->getNumChildren() > 0 &&
-               currNode->getFirstChild()->getNumChildren() > 0 &&
-               (currNode->getFirstChild()->getOpCodeValue() == TR::aloadi || currNode->getFirstChild()->getOpCodeValue() == TR::iloadi))
-         {
-         if (currNode->getFirstChild()->getFirstChild() == object)
-            {
-            int displacement = 0;
-            TR::Symbol *sym = currNode->getFirstChild()->getSymbolReference()->getSymbol();
-            if (sym)
-               {
-               if (sym->isRegisterMappedSymbol() &&
-                   sym->getRegisterMappedSymbol()->getOffset() != 0)
-                  {
-                  displacement = sym->getRegisterMappedSymbol()->getOffset();
-                  }
-               }
-
-            fieldOffset = displacement + currNode->getFirstChild()->getSymbolReference()->getOffset();
-            return true;
-            }
-         }
-      currTree = currTree->getNextTreeTop();
-      }
-
-   return false;
-   }
 
 
 // only need a helper call if the class is not super and not final, otherwise

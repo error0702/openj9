@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "j9cfg.h"
@@ -66,7 +66,7 @@ J9::Node::Node(TR::Node *originatingByteCodeNode, TR::ILOpCodes op, uint16_t num
        + self()->hasBranchDestinationNode()
        + self()->hasBlock()
        + self()->hasArrayStride()
-       + self()->hasPinningArrayPointer()
+       + (self()->hasPinningArrayPointer() && !self()->supportsPinningArrayPointerInNodeExtension())
        + self()->hasDataType() <= 1,
          "_unionPropertyA union is not disjoint for this node %s (%p):\n"
          "  has({SymbolReference, ...}, ..., DataType) = ({%1d,%1d},%1d,%1d,%1d,%1d,%1d)\n",
@@ -76,7 +76,7 @@ J9::Node::Node(TR::Node *originatingByteCodeNode, TR::ILOpCodes op, uint16_t num
          self()->hasBranchDestinationNode(),
          self()->hasBlock(),
          self()->hasArrayStride(),
-         self()->hasPinningArrayPointer(),
+         (self()->hasPinningArrayPointer() && !self()->supportsPinningArrayPointerInNodeExtension()),
          self()->hasDataType());
 
    // check that _unionPropertyB union is disjoint
@@ -260,11 +260,15 @@ J9::Node::getCloneClassInNode()
    return (TR_OpaqueClassBlock *)_unionBase._children[1];
    }
 
+TR::Node *
+J9::Node::processJNICall(TR::TreeTop *callNodeTreeTop, TR::ResolvedMethodSymbol *owningSymbol)
+   {
+   return self()->processJNICall(callNodeTreeTop, owningSymbol, TR::comp());
+   }
 
 TR::Node *
-J9::Node::processJNICall(TR::TreeTop * callNodeTreeTop, TR::ResolvedMethodSymbol * owningSymbol)
+J9::Node::processJNICall(TR::TreeTop *callNodeTreeTop, TR::ResolvedMethodSymbol *owningSymbol, TR::Compilation *comp)
    {
-   TR::Compilation * comp = TR::comp();
    if (!comp->cg()->getSupportsDirectJNICalls() || comp->getOption(TR_DisableDirectToJNI) || (comp->compileRelocatableCode() && !comp->cg()->supportsDirectJNICallsForAOT()))
       return self();
 
@@ -312,6 +316,13 @@ J9::Node::processJNICall(TR::TreeTop * callNodeTreeTop, TR::ResolvedMethodSymbol
       return self();
       }
 
+   if (methodSymbol->getRecognizedMethod() == TR::java_lang_Thread_onSpinWait)
+      {
+      static char *disableOSW = feGetEnv("TR_noPauseOnSpinWait");
+      if (!disableOSW)
+         return self();
+      }
+
    if (methodSymbol->canReplaceWithHWInstr())
       return self();
 
@@ -331,16 +342,46 @@ J9::Node::processJNICall(TR::TreeTop * callNodeTreeTop, TR::ResolvedMethodSymbol
       return self();
       }
 
+#if defined(TR_TARGET_ARM64) && !defined(OSX)
+   /*
+    * On Apple Silicon Mac, zlib implementation of CRC32 is faster.
+    * See OpenJ9 issue #16584.
+    */
+   static const bool disableCRC32 = feGetEnv("TR_aarch64DisableCRC32") != NULL;
+   // Recognizing these methods on AArch46 allows us to accelerate CRC32 calculation
+   // by inlining these methods using CRC32 instructions.
+   if (comp->target().cpu.supportsFeature(OMR_FEATURE_ARM64_CRC32) && (!disableCRC32) &&
+        ((methodSymbol->getRecognizedMethod() == TR::java_util_zip_CRC32_update) ||
+         (
+#if JAVA_SPEC_VERSION <= 8
+          ((methodSymbol->getRecognizedMethod() == TR::java_util_zip_CRC32_updateBytes) ||
+           (methodSymbol->getRecognizedMethod() == TR::java_util_zip_CRC32_updateByteBuffer)) &&
+#else
+          ((methodSymbol->getRecognizedMethod() == TR::java_util_zip_CRC32_updateBytes0) ||
+           (methodSymbol->getRecognizedMethod() == TR::java_util_zip_CRC32_updateByteBuffer0)) &&
+#endif
+          (!TR::Compiler->om.canGenerateArraylets() && !TR::Compiler->om.isOffHeapAllocationEnabled()))))
+      {
+      return self();
+      }
+#endif
+
 #if defined(TR_TARGET_POWER)
-   // Recognizing these methods on Power allows us to take a shortcut 
-   // in the JNI dispatch where we mangle the register dependencies and call 
+   // Recognizing these methods on Power allows us to take a shortcut
+   // in the JNI dispatch where we mangle the register dependencies and call
    // optimized helpers in the JIT library using what amounts to system/C dispatch.
    // The addresses of the optimized helpers in the server process will not necessarily
    // match the client-side addresses, so we can't take this shortcut in JITServer mode.
    if (((methodSymbol->getRecognizedMethod() == TR::java_util_zip_CRC32_update) ||
+#if JAVA_SPEC_VERSION <= 8
         (methodSymbol->getRecognizedMethod() == TR::java_util_zip_CRC32_updateBytes) ||
         (methodSymbol->getRecognizedMethod() == TR::java_util_zip_CRC32_updateByteBuffer)) &&
-       !comp->requiresSpineChecks() 
+#else
+        (methodSymbol->getRecognizedMethod() == TR::java_util_zip_CRC32_updateBytes0) ||
+        (methodSymbol->getRecognizedMethod() == TR::java_util_zip_CRC32_updateByteBuffer0)) &&
+#endif
+       !comp->requiresSpineChecks() &&
+       !TR::Compiler->om.isOffHeapAllocationEnabled()
       #ifdef J9VM_OPT_JITSERVER
          && !comp->isOutOfProcessCompilation()
       #endif
@@ -389,7 +430,7 @@ J9::Node::processJNICall(TR::TreeTop * callNodeTreeTop, TR::ResolvedMethodSymbol
       TR::Node * n = self()->getChild(i);
       if (n->getDataType() == TR::Address)
          {
-         if (n->getOpCode().hasSymbolReference() && n->getSymbol()->isAutoOrParm())
+         if (n->getOpCode().hasSymbolReference() && n->getSymbol()->isAutoOrParm() && n->getReferenceCount() == 1)
             {
             n->decReferenceCount();
             self()->setAndIncChild(i, TR::Node::createWithSymRef(n, TR::loadaddr, 0, n->getSymbolReference()));
@@ -470,11 +511,19 @@ J9::Node::processJNICall(TR::TreeTop * callNodeTreeTop, TR::ResolvedMethodSymbol
 void
 J9::Node::devirtualizeCall(TR::TreeTop *treeTop)
    {
+   return self()->devirtualizeCall(treeTop, TR::comp());
+   }
+
+void
+J9::Node::devirtualizeCall(TR::TreeTop *treeTop, TR::Compilation *comp)
+   {
    OMR::NodeConnector::devirtualizeCall(treeTop);
    TR::ResolvedMethodSymbol *methodSymbol = self()->getSymbol()->castToResolvedMethodSymbol();
 
    if (methodSymbol->isJNI())
-      self()->processJNICall(treeTop, TR::comp()->getMethodSymbol());
+      {
+      self()->processJNICall(treeTop, comp->getMethodSymbol(), comp);
+      }
    }
 
 bool
@@ -847,16 +896,15 @@ J9::Node::alwaysGeneratesAKnownPositiveCleanSign()
 
 #ifdef TR_TARGET_S390
 int32_t
-J9::Node::getStorageReferenceSize()
+J9::Node::getStorageReferenceSize(TR::Compilation *comp)
    {
-   TR::Compilation *comp = TR::comp();
    if (self()->getType().isAggregate())
       {
       return self()->getSize();
       }
    else if (self()->getOpCode().isBCDToNonBCDConversion())
       {
-      return self()->getStorageReferenceSourceSize();
+      return self()->getStorageReferenceSourceSize(comp);
       }
    else
       {
@@ -899,9 +947,8 @@ J9::Node::getStorageReferenceSize()
    }
 
 int32_t
-J9::Node::getStorageReferenceSourceSize()
+J9::Node::getStorageReferenceSourceSize(TR::Compilation *comp)
    {
-   TR::Compilation *comp = TR::comp();
    int32_t size = 0;
    switch (self()->getOpCodeValue())
       {
@@ -1114,9 +1161,8 @@ J9::Node::referencesSymbolInSubTree(TR::SymbolReference* symRef, vcount_t visitC
    }
 
 bool
-J9::Node::referencesMayKillAliasInSubTree(TR::Node * rootNode, vcount_t visitCount)
+J9::Node::referencesMayKillAliasInSubTree(TR::Node * rootNode, vcount_t visitCount, TR::Compilation *comp)
    {
-   TR::Compilation * comp = TR::comp();
    TR::SparseBitVector  references (comp->allocator());
    self()->getSubTreeReferences(references, visitCount);
 
@@ -1144,42 +1190,6 @@ J9::Node::getSubTreeReferences(TR::SparseBitVector &references, vcount_t visitCo
     self()->getChild(i)->getSubTreeReferences(references, visitCount);
 }
 
-TR_ParentOfChildNode*
-J9::Node::referencesSymbolExactlyOnceInSubTree(
-   TR::Node* parent, int32_t childNum, TR::SymbolReference* symRef, vcount_t visitCount)
-   {
-   // The visit count in the node must be maintained by this method.
-   //
-   TR::Compilation * comp = TR::comp();
-   vcount_t oldVisitCount = self()->getVisitCount();
-   if (oldVisitCount == visitCount)
-      return NULL;
-   self()->setVisitCount(visitCount);
-
-   if (self()->getOpCode().hasSymbolReference() && (self()->getSymbolReference()->getReferenceNumber() == symRef->getReferenceNumber()))
-      {
-      TR_ParentOfChildNode* pNode = new (comp->trStackMemory()) TR_ParentOfChildNode(parent, childNum);
-      return pNode;
-      }
-
-   // For all other subtrees, see if any has a ref. If exactly one does, return it
-   TR_ParentOfChildNode* matchNode=NULL;
-   for (int32_t i = self()->getNumChildren()-1; i >= 0; i--)
-      {
-      TR::Node * child = self()->getChild(i);
-      TR_ParentOfChildNode* curr = child->referencesSymbolExactlyOnceInSubTree(self(), i, symRef, visitCount);
-      if (curr)
-         {
-         if (matchNode)
-            {
-            return NULL;
-            }
-         matchNode = curr;
-         }
-      }
-
-   return matchNode;
-   }
 
 /**
  * Node field functions
@@ -2055,11 +2065,10 @@ J9::Node::isSpineCheckWithArrayElementChild()
    }
 
 void
-J9::Node::setSpineCheckWithArrayElementChild(bool v)
+J9::Node::setSpineCheckWithArrayElementChild(bool v, TR::Compilation *comp)
    {
-   TR::Compilation * c = TR::comp();
    TR_ASSERT(self()->getOpCode().isSpineCheck(), "assertion failure");
-   if (performNodeTransformation2(c, "O^O NODE FLAGS: Setting spineCHKWithArrayElementChild flag on node %p to %d\n", self(), v))
+   if (performNodeTransformation2(comp, "O^O NODE FLAGS: Setting spineCHKWithArrayElementChild flag on node %p to %d\n", self(), v))
       _flags.set(spineCHKWithArrayElementChild, v);
    }
 
@@ -2068,14 +2077,6 @@ J9::Node::chkSpineCheckWithArrayElementChild()
    {
    return self()->getOpCode().isSpineCheck() && _flags.testAny(spineCHKWithArrayElementChild);
    }
-
-const char *
-J9::Node::printSpineCheckWithArrayElementChild()
-   {
-   return self()->chkSpineCheckWithArrayElementChild() ? "spineCHKWithArrayElementChild " : "";
-   }
-
-
 
 bool
 J9::Node::isUnsafePutOrderedCall()
@@ -2119,16 +2120,15 @@ J9::Node::isDontInlinePutOrderedCall()
    }
 
 void
-J9::Node::setDontInlinePutOrderedCall()
+J9::Node::setDontInlinePutOrderedCall(TR::Compilation *comp)
    {
-   TR::Compilation * c = TR::comp();
    TR_ASSERT(self()->getOpCode().isCall(), " Can only call this routine for a call node \n");
    bool isPutOrdered = self()->isUnsafePutOrderedCall();
 
    TR_ASSERT(isPutOrdered, "attempt to set dontInlinePutOrderedCall flag and not a putOrdered call");
    if (isPutOrdered)
       {
-      if (performNodeTransformation1(c, "O^O NODE FLAGS: Setting dontInlineUnsafePutOrderedCall flag on node %p\n", self()))
+      if (performNodeTransformation1(comp, "O^O NODE FLAGS: Setting dontInlineUnsafePutOrderedCall flag on node %p\n", self()))
          _flags.set(dontInlineUnsafePutOrderedCall);
       }
 
@@ -2162,14 +2162,6 @@ J9::Node::chkDontInlineUnsafePutOrderedCall()
    return isPutOrdered && _flags.testAny(dontInlineUnsafePutOrderedCall);
    }
 
-const char *
-J9::Node::printIsDontInlineUnsafePutOrderedCall()
-   {
-   return self()->chkDontInlineUnsafePutOrderedCall() ? "dontInlineUnsafePutOrderedCall " : "";
-   }
-
-
-
 bool
 J9::Node::isUnsafeGetPutCASCallOnNonArray()
    {
@@ -2179,7 +2171,6 @@ J9::Node::isUnsafeGetPutCASCallOnNonArray()
    if (!symbol)
       return false;
 
-   //TR_ASSERT(symbol->castToResolvedMethodSymbol()->getResolvedMethod()->isUnsafeWithObjectArg(), "Attempt to check flag on a method that is not JNI Unsafe that needs special care for arraylets\n");
    TR_ASSERT(symbol->getMethod()->isUnsafeWithObjectArg() || symbol->getMethod()->isUnsafeCAS(),"Attempt to check flag on a method that is not JNI Unsafe that needs special care for arraylets\n");
    return _flags.testAny(unsafeGetPutOnNonArray);
    }
@@ -2187,12 +2178,17 @@ J9::Node::isUnsafeGetPutCASCallOnNonArray()
 void
 J9::Node::setUnsafeGetPutCASCallOnNonArray()
    {
-   TR::Compilation * c = TR::comp();
+   self()->setUnsafeGetPutCASCallOnNonArray(TR::comp());
+   }
+
+void
+J9::Node::setUnsafeGetPutCASCallOnNonArray(TR::Compilation *comp)
+   {
    TR_ASSERT(self()->getSymbol()->isMethod() && self()->getSymbol()->getMethodSymbol(), "setUnsafeGetPutCASCallOnNonArray called on node which is not a call");
 
-   //TR_ASSERT(getSymbol()->getMethodSymbol()->castToResolvedMethodSymbol()->getResolvedMethod()->isUnsafeWithObjectArg(),"Attempt to change flag on a method that is not JNI Unsafe that needs special care for arraylets\n");
    TR_ASSERT(self()->getSymbol()->getMethodSymbol()->getMethod()->isUnsafeWithObjectArg() || self()->getSymbol()->getMethodSymbol()->getMethod()->isUnsafeCAS(),"Attempt to check flag on a method that is not JNI Unsafe that needs special care for arraylets\n");
-   if (performNodeTransformation1(c, "O^O NODE FLAGS: Setting unsafeGetPutOnNonArray flag on node %p\n", self()))
+
+   if (performNodeTransformation1(comp, "O^O NODE FLAGS: Setting unsafeGetPutOnNonArray flag on node %p\n", self()))
       _flags.set(unsafeGetPutOnNonArray);
    }
 
@@ -2279,12 +2275,6 @@ J9::Node::chkCleanSignDuringPackedLeftShift()
       _flags.testAny(CleanSignDuringPackedLeftShift);
    }
 
-const char *
-J9::Node::printCleanSignDuringPackedLeftShift()
-   {
-   return self()->chkCleanSignDuringPackedLeftShift() ? "cleanSignDuringPackedLeftShift " : "";
-   }
-
 bool
 J9::Node::chkOpsSkipCopyOnLoad()
    {
@@ -2316,14 +2306,6 @@ J9::Node::chkSkipCopyOnLoad()
    {
    return self()->chkOpsSkipCopyOnLoad() && _flags.testAny(SkipCopyOnLoad);
    }
-
-const char *
-J9::Node::printSkipCopyOnLoad()
-   {
-   return self()->chkSkipCopyOnLoad() ? "skipCopyOnLoad " : "";
-   }
-
-
 
 bool
 J9::Node::chkOpsSkipCopyOnStore()
@@ -2359,14 +2341,6 @@ J9::Node::chkSkipCopyOnStore()
    return self()->chkOpsSkipCopyOnStore() && _flags.testAny(SkipCopyOnStore);
    }
 
-const char *
-J9::Node::printSkipCopyOnStore()
-   {
-   return self()->chkSkipCopyOnStore() ? "skipCopyOnStore " : "";
-   }
-
-
-
 bool
 J9::Node::chkOpsCleanSignInPDStoreEvaluator()
    {
@@ -2398,14 +2372,6 @@ J9::Node::chkCleanSignInPDStoreEvaluator()
    {
    return self()->chkOpsCleanSignInPDStoreEvaluator() && _flags.testAny(cleanSignInPDStoreEvaluator);
    }
-
-const char *
-J9::Node::printCleanSignInPDStoreEvaluator()
-   {
-   return self()->chkCleanSignInPDStoreEvaluator() ? "cleanSignInPDStoreEvaluator " : "";
-   }
-
-
 
 bool
 J9::Node::chkOpsUseStoreAsAnAccumulator()
@@ -2441,14 +2407,6 @@ J9::Node::chkUseStoreAsAnAccumulator()
    return self()->chkOpsUseStoreAsAnAccumulator() && _flags.testAny(UseStoreAsAnAccumulator);
    }
 
-const char *
-J9::Node::printUseStoreAsAnAccumulator()
-   {
-   return self()->chkUseStoreAsAnAccumulator() ? "useStoreAsAnAccumulator " : "";
-   }
-
-
-
 bool
 J9::Node::canSkipPadByteClearing()
    {
@@ -2477,14 +2435,6 @@ J9::Node::chkSkipPadByteClearing()
    return self()->getType().isAnyPacked() && !self()->getOpCode().isStore() &&
       _flags.testAny(skipPadByteClearing);
    }
-
-const char *
-J9::Node::printSkipPadByteClearing()
-   {
-   return self()->chkSkipPadByteClearing() ? "skipPadByteClearing " : "";
-   }
-
-
 
 bool
 J9::Node::chkOpsIsInMemoryCopyProp()
@@ -2517,14 +2467,6 @@ J9::Node::chkIsInMemoryCopyProp()
    return self()->chkOpsIsInMemoryCopyProp() && _flags.testAny(IsInMemoryCopyProp);
    }
 
-const char *
-J9::Node::printIsInMemoryCopyProp()
-   {
-   return self()->chkIsInMemoryCopyProp() ? "IsInMemoryCopyProp " : "";
-   }
-
-
-
 bool
 J9::Node::chkSharedMemory()
    {
@@ -2537,12 +2479,6 @@ J9::Node::setSharedMemory(bool v)
    {
    TR_ASSERT(self()->getType().isAddress(), "flag only valid for addresses\n");
    _flags.set(sharedMemory, v);
-   }
-
-const char *
-J9::Node::printSharedMemory()
-   {
-   return self()->getType().isAddress() ? "sharedMemory " : "";
    }
 
 /**
@@ -2597,7 +2533,12 @@ J9::Node::requiresRegisterPair(TR::Compilation *comp)
 bool
 J9::Node::canGCandReturn()
    {
-   TR::Compilation * comp = TR::comp();
+   return self()->canGCandReturn(TR::comp());
+   }
+
+bool
+J9::Node::canGCandReturn(TR::Compilation *comp)
+   {
    if (comp->getOption(TR_EnableFieldWatch))
       {
       if (self()->getOpCodeValue() == TR::treetop || self()->getOpCode().isNullCheck() || self()->getOpCode().isAnchor())
@@ -2608,4 +2549,13 @@ J9::Node::canGCandReturn()
          }
       }
    return OMR::NodeConnector::canGCandReturn();
+   }
+
+bool
+J9::Node::isJitDispatchJ9MethodCall(TR::Compilation *comp)
+   {
+   return self()->getOpCode().isCallDirect()
+      && comp->getSymRefTab()->isNonHelper(
+            self()->getSymbolReference(),
+            TR::SymbolReferenceTable::jitDispatchJ9MethodSymbol);
    }

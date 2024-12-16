@@ -1,5 +1,5 @@
-/*******************************************************************************
- * Copyright (c) 2009, 2014 IBM Corp. and others
+/*
+ * Copyright IBM Corp. and others 2009
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,13 +15,14 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
 package com.ibm.j9ddr.vm29.j9;
 
 import java.util.Arrays;
+import com.ibm.j9ddr.vm29.pointer.helper.J9ClassHelper;
 
 /**
  * @author andhall
@@ -49,7 +50,7 @@ public class ArgBits
 		/* Parse the signature inside the ()'s */
 		char thisChar;
 		while ((thisChar = signature.charAt(++stringPtr)) != ')') {
-			if ((thisChar == '[') || (thisChar == 'L')) {
+			if ((thisChar == '[') || J9ClassHelper.isClassSignature(thisChar)) {
 				/* Mark a bit for objects or arrays */
 				resultArray[writePtr] |= argBit;
 				
@@ -58,7 +59,7 @@ public class ArgBits
 					stringPtr++;
 				}
 
-				if (thisChar == 'L' ) {
+				if (J9ClassHelper.isClassSignature(thisChar)) {
 					/* Walk past the name of the object class */
 					while ((thisChar = signature.charAt(stringPtr)) != ';') {
 						stringPtr++;

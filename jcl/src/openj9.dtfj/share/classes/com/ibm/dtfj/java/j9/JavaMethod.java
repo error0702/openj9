@@ -1,6 +1,6 @@
 /*[INCLUDE-IF Sidecar18-SE]*/
-/*******************************************************************************
- * Copyright (c) 2004, 2017 IBM Corp. and others
+/*
+ * Copyright IBM Corp. and others 2004
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,10 +16,10 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
 package com.ibm.dtfj.java.j9;
 
 import java.util.Iterator;
@@ -45,7 +45,7 @@ public class JavaMethod implements com.ibm.dtfj.java.JavaMethod
 	private JavaClass _declaringClass;
 	private Vector _compiledSections = new Vector();
 	private Vector _bytecodeSections = new Vector();
-	
+
 	public JavaMethod(ImagePointer methodID, String name, String signature, int modifiers, JavaClass declaringClass)
 	{
 		if (null == methodID) {
@@ -113,7 +113,7 @@ public class JavaMethod implements com.ibm.dtfj.java.JavaMethod
 	public boolean equals(Object obj)
 	{
 		boolean isEqual = false;
-		
+
 		if (obj instanceof JavaMethod) {
 			JavaMethod local = (JavaMethod) obj;
 			isEqual = (_declaringClass.equals(local._declaringClass) && _methodID.equals(local._methodID));

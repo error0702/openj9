@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2018, 2021 IBM Corp. and others
+# Copyright IBM Corp. and others 2018
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
 # OpenJDK Assembly Exception [2].
 #
 # [1] https://www.gnu.org/software/classpath/license.html
-# [2] http://openjdk.java.net/legal/assembly-exception.html
+# [2] https://openjdk.org/legal/assembly-exception.html
 #
-# SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+# SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
 ################################################################################
 
 set(OMR_ENHANCED_WARNINGS OFF)
@@ -105,11 +105,13 @@ j9vm_add_library(jvmti_test_src STATIC
 	com/ibm/jvmti/tests/getStackTrace/gst002.c
 
 	com/ibm/jvmti/tests/getStackTraceExtended/gste001.c
+	com/ibm/jvmti/tests/getStackTraceExtended/gste002.c
 
 	com/ibm/jvmti/tests/getThreadGroupChildren/gtgc001.c
 	com/ibm/jvmti/tests/getThreadGroupChildren/gtgc002.c
 
 	com/ibm/jvmti/tests/getThreadListStackTracesExtended/gtlste001.c
+	com/ibm/jvmti/tests/getThreadListStackTracesExtended/gtlste002.c
 
 	com/ibm/jvmti/tests/getThreadState/gts001.c
 
@@ -198,5 +200,9 @@ target_link_libraries(jvmti_test_src
 )
 
 if(OMR_OS_ZOS)
-	target_compile_options(jvmti_test_src PRIVATE -Wc,DLL,EXPORTALL)
+	if(OMR_TOOLCONFIG STREQUAL "openxl")
+		target_compile_options(jvmti_test_src PRIVATE -fvisibility=default)
+	else()
+		target_compile_options(jvmti_test_src PRIVATE -Wc,DLL,EXPORTALL)
+	endif()
 endif()

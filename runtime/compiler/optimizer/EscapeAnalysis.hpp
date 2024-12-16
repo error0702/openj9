@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #ifndef ESCAPEANALYSIS_INCL
@@ -58,9 +58,9 @@ template <class T> class TR_Array;
 typedef TR::typed_allocator<TR::Node *, TR::Region &> NodeDequeAllocator;
 typedef std::deque<TR::Node *, NodeDequeAllocator> NodeDeque;
 
-typedef TR::typed_allocator<std::pair<TR::Node* const, std::pair<TR_BitVector *, NodeDeque*> >, TR::Region&> CallLoadMapAllocator;
+typedef TR::typed_allocator<std::pair<TR::Node* const, std::pair<TR_BitVector *, TR_BitVector*> >, TR::Region&> CallLoadMapAllocator;
 typedef std::less<TR::Node *> CallLoadMapComparator;
-typedef std::map<TR::Node *, std::pair<TR_BitVector *, NodeDeque *>, CallLoadMapComparator, CallLoadMapAllocator> CallLoadMap;
+typedef std::map<TR::Node *, std::pair<TR_BitVector *, TR_BitVector *>, CallLoadMapComparator, CallLoadMapAllocator> CallLoadMap;
 
 typedef TR::typed_allocator<std::pair<TR::Node *const, int32_t>, TR::Region&> RemainingUseCountMapAllocator;
 typedef std::less<TR::Node *> RemainingUseCountMapComparator;
@@ -119,7 +119,8 @@ struct FieldInfo
    TR_ScratchList<TR::SymbolReference> *_badFieldSymrefs;
    char                                  _vectorElem;
 
-   void                rememberFieldSymRef(TR::Node *node, int32_t fieldOffset, Candidate *candidate, TR_EscapeAnalysis *ea);
+   void                rememberFieldSymRef(TR::Node *node, Candidate *candidate, TR_EscapeAnalysis *ea);
+   void                rememberFieldSymRef(TR::SymbolReference *symRef, TR_EscapeAnalysis *ea);
    bool                symRefIsForFieldInAllocatedClass(TR::SymbolReference *symRef);
    bool                hasBadFieldSymRef();
    TR::SymbolReference *fieldSymRef(); // Any arbitrary good field symref
@@ -133,6 +134,7 @@ class Candidate : public TR_Link<Candidate>
       : _kind(node->getOpCodeValue()), _node(node), _treeTop(treeTop), _origKind(node->getOpCodeValue()), _stringCopyNode(NULL), _stringCopyCallTree(NULL),
         _block(block),
         _class(classInfo),
+        _origClass(classInfo),
         _size(size), _fieldSize(0), _valueNumbers(0), _fields(0), _origSize(size),
         _initializedWords(0),
         _maxInlineDepth(0), _inlineBytecodeSize(0), _seenFieldStore(false), _seenSelfStore(false), _seenStoreToLocalObject(false), _seenArrayCopy(false), _argToCall(false), _usedInNonColdBlock(false), _lockedInNonColdBlock(false),_isImmutable(false),
@@ -248,6 +250,8 @@ class Candidate : public TR_Link<Candidate>
          }
       }
 
+     FieldInfo & findOrSetFieldInfo(TR::Node *fieldRefNode, TR::SymbolReference *symRef, int32_t fieldOffset, int32_t fieldSize, TR::DataType fieldStoreType, TR_EscapeAnalysis *ea);
+
      void print();
 
      TR::ILOpCodes            _kind;
@@ -259,6 +263,7 @@ class Candidate : public TR_Link<Candidate>
      TR_Array<FieldInfo>    *_fields;
      TR_BitVector           *_initializedWords;
      void                   *_class;
+     void                   *_origClass;
      TR::Node                *_originalAllocationNode;
      TR::Compilation *        _comp;
      TR_Memory *             _trMemory;
@@ -341,7 +346,7 @@ class FlushCandidate : public TR_Link<FlushCandidate>
    {
    public:
    FlushCandidate(TR::TreeTop *flushNode, TR::Node *node, int32_t blockNum, Candidate *candidate = 0)
-     : _flushNode(flushNode), _node(node), _blockNum(blockNum), _candidate(candidate), _isKnownToLackCandidate(false)
+     : _flushNode(flushNode), _node(node), _blockNum(blockNum), _candidate(candidate), _isKnownToLackCandidate(false), _optimallyPlaced(false)
      {
      }
 
@@ -380,12 +385,33 @@ class FlushCandidate : public TR_Link<FlushCandidate>
     */
    void setIsKnownToLackCandidate(bool setting) {_isKnownToLackCandidate = setting;}
 
+    /**
+    * \brief Indicates whether this \c FlushCandidate is known to be
+    * optimally placed above a volatile access node and therefor should
+    * not be be considered for further optimization.
+    *
+    * \return \c true if this \c FlushCandidate is known be already optimally placed;
+    * \c false if this \c FlushCandidate can be considered for further optimization,
+    * or if it has not yet been determined whether it is optimally placed.
+    */
+   bool isOptimallyPlaced() { return _optimallyPlaced;}
+
+   /**
+    * \brief Sets the status of this \c FlushCandidate, indicating whether
+    * it is known to be optimally placed above a volatile access node.
+    *
+    * \param setting The updated status indicating whether this \c FlushCandidate
+    * is known to be optimally placed.
+    */
+   void setOptimallyPlaced(bool setting) {_optimallyPlaced = setting;}
+
    private:
    TR::Node *_node;
    TR::TreeTop *_flushNode;
    int32_t _blockNum;
    Candidate *_candidate;
    bool _isKnownToLackCandidate;
+   bool _optimallyPlaced;
    };
 
 
@@ -481,14 +507,22 @@ class TR_EscapeAnalysis : public TR::Optimization
    virtual int32_t perform();
    virtual const char * optDetailString() const throw();
 
+   /**
+    * Indicates whether stack allocation of \c newvalue operations may be
+    * performed.  If the value is set to \c true, \c newvalue operations
+    * will not be considered as candidates for stack allocation; otherwise,
+    * they will be considered as candidates.
+    */
+   bool                       _disableValueTypeStackAllocation;
+
    protected:
 
    enum restrictionType { MakeNonLocal, MakeContiguous, MakeObjectReferenced };
 
    int32_t  performAnalysisOnce();
    void     findCandidates();
-   void     findIgnoreableUses();
-   void     findIgnoreableUses(TR::Node *node, TR::NodeChecklist& visited);
+   void     findIgnorableUses();
+   void     markUsesAsIgnorable(TR::Node *node, TR::NodeChecklist& visited);
    void     findLocalObjectsValueNumbers();
    void     findLocalObjectsValueNumbers(TR::Node *node, TR::NodeChecklist& visited);
 
@@ -564,7 +598,6 @@ class TR_EscapeAnalysis : public TR::Optimization
     */
    void     collectAliasesOfAllocations(TR::Node *node, TR::Node *allocNode);
 
-   bool     checkAllNewsOnRHSInLoop(TR::Node *defNode, TR::Node *useNode, Candidate *candidate);
    bool     checkAllNewsOnRHSInLoopWithAliasing(int32_t defIndex, TR::Node *useNode, Candidate *candidate);
    bool     usesValueNumber(Candidate *candidate, int32_t valueNumber);
    Candidate *findCandidate(int32_t valueNumber);
@@ -614,6 +647,7 @@ class TR_EscapeAnalysis : public TR::Optimization
 
    void     makeContiguousLocalAllocation(Candidate *candidate);
    void     makeNonContiguousLocalAllocation(Candidate *candidate);
+   void     makeNewValueLocalAllocation(Candidate *candidate);
    void     heapifyForColdBlocks(Candidate *candidate);
 
    /**
@@ -639,7 +673,7 @@ class TR_EscapeAnalysis : public TR::Optimization
    void     setHasFlushOnEntry(int32_t blockNum) {_blocksWithFlushOnEntry->set(blockNum);}
    void     rememoize(Candidate *c, bool mayDememoizeNextTime=false);
 
-   void     printCandidates(char *);
+   void     printCandidates(const char *);
 
    char *getClassName(TR::Node *classNode);
 
@@ -683,18 +717,20 @@ class TR_EscapeAnalysis : public TR::Optimization
    bool findCallSiteFixed(TR::TreeTop * virtualCallSite);
 
    TR::SymbolReference        *_newObjectNoZeroInitSymRef;
+   TR::SymbolReference        *_newValueSymRef;
    TR::SymbolReference        *_newArrayNoZeroInitSymRef;
    TR::SymbolReference        *_aNewArrayNoZeroInitSymRef;
    TR_UseDefInfo             *_useDefInfo;
    bool                      _invalidateUseDefInfo;
    TR_BitVector              *_otherDefsForLoopAllocation;
-   TR_BitVector              *_ignoreableUses;
+   TR_BitVector              *_ignorableUses;
    TR_BitVector              *_nonColdLocalObjectsValueNumbers;
    TR_BitVector              *_allLocalObjectsValueNumbers;
    TR_BitVector              *_notOptimizableLocalObjectsValueNumbers;
    TR_BitVector              *_notOptimizableLocalStringObjectsValueNumbers;
    TR_BitVector              *_blocksWithFlushOnEntry;
    TR_BitVector              *_visitedNodes;
+   TR_BitVector              *_initializedHeapifiedTemps;
 
    CallLoadMap               *_callsToProtect;
 
@@ -748,7 +784,6 @@ class TR_EscapeAnalysis : public TR::Optimization
 #endif
    bool                       _repeatAnalysis;
    bool                       _somethingChanged;
-   bool                       _doLoopAllocationAliasChecking;
    TR_ScratchList<TR_DependentAllocations> _dependentAllocations;
    TR_BitVector *             _vnTemp;
    TR_BitVector *             _vnTemp2;
@@ -769,6 +804,7 @@ class TR_EscapeAnalysis : public TR::Optimization
    friend class TR_FlowSensitiveEscapeAnalysis;
    friend class TR_LocalFlushElimination;
    friend struct FieldInfo;
+   friend class Candidate;
    };
 
 //class Candidate;
@@ -782,7 +818,7 @@ class TR_LocalFlushElimination
    TR_LocalFlushElimination(TR_EscapeAnalysis *, int32_t numAllocations);
 
    virtual int32_t perform();
-   bool examineNode(TR::Node *, TR::NodeChecklist& visited);
+   bool examineNode(TR::Node *, TR::TreeTop *, TR::Block *, TR::NodeChecklist& visited);
 
    TR::Optimizer *        optimizer()                     { return _escapeAnalysis->optimizer(); }
    TR::Compilation *        comp()                          { return _escapeAnalysis->comp(); }
@@ -825,12 +861,3 @@ class TR_MonitorStructureChecker
 
 #endif
 #endif
-
-
-
-
-
-
-
-
-

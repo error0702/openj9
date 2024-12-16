@@ -1,6 +1,6 @@
 /*[INCLUDE-IF Sidecar17]*/
-/*******************************************************************************
- * Copyright (c) 2018, 2020 IBM Corp. and others
+/*
+ * Copyright IBM Corp. and others 2018
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,11 +16,10 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
-
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
 
 package openj9.lang.management;
 
@@ -30,11 +29,10 @@ import java.lang.management.PlatformManagedObject;
  * <p>
  * This interface provides APIs to dynamically trigger dump agents. APIs are also available to
  * configure dump options.
- * This MXBean reuses the methods in com.ibm.jvm.Dump API 
+ * This MXBean reuses the methods in com.ibm.jvm.Dump API.
+ * </p>
  * <br>
- * <table border="1">
- * <caption><b>Usage example for the {@link OpenJ9DiagnosticsMXBean}</b></caption>
- * <tr> <td>
+ * <b>Usage example for the {@link OpenJ9DiagnosticsMXBean}</b>
  * <pre>
  * {@code
  *   ...
@@ -53,14 +51,13 @@ import java.lang.management.PlatformManagedObject;
  *      // Exception Handling
  *   }
  * }
- * </pre></td></tr>
- * </table>
+ * </pre>
  */
 public interface OpenJ9DiagnosticsMXBean extends PlatformManagedObject {
 	/**
 	 * Reset the JVM dump options to the settings specified when the JVM was started removing any additional
-	 * configuration done since then. This method may throw a ConfigurationUnavailableException if the dump 
-	 * configuration cannot be altered. If this occurs it will usually be because a dump event is currently being 
+	 * configuration done since then. This method may throw a ConfigurationUnavailableException if the dump
+	 * configuration cannot be altered. If this occurs it will usually be because a dump event is currently being
 	 * handled.
 	 *
 	 * @throws ConfigurationUnavailableException if the configuration cannot be changed because a dump is already in progress
@@ -74,14 +71,28 @@ public interface OpenJ9DiagnosticsMXBean extends PlatformManagedObject {
 	 * with the initial -Xdump: omitted. See the -Xdump option section on dump agents in
 	 * the documentation for the OpenJ9 JVM.
 	 *
+	 * @return the dump configuration as an array of Strings
 	 * @throws SecurityException if there is a security manager and it doesn't allow the checks required to read the dump settings
 	 */
 	public String[] queryDumpOptions();
 
 	/**
+	 * Returns the current dump configuration as a String, with multiple options separated by
+	 * a vertical bar, or null if an internal error occurs.
+	 * The syntax of the option String is the same as the -Xdump command-line option,
+	 * with the initial -Xdump: omitted. See the -Xdump option section on dump agents in
+	 * the documentation for the OpenJ9 JVM.
+	 *
+	 * @return the dump configuration as a String, with multiple options separated by
+	 * a vertical bar
+	 * @throws SecurityException if there is a security manager and it doesn't allow the checks required to read the dump settings
+	 */
+	public String getDumpOptions();
+
+	/**
 	 * This function sets options for the dump subsystem.
-	 * The dump option is passed in as a String. Use the same syntax as the -Xdump command-line option, with the 
-	 * initial -Xdump: omitted. See the -Xdump option section on dump agents in the 
+	 * The dump option is passed in as a String. Use the same syntax as the -Xdump command-line option, with the
+	 * initial -Xdump: omitted. See the -Xdump option section on dump agents in the
 	 * documentation for the OpenJ9 JVM. This method may throw a ConfigurationUnavailableException if the dump
 	 * configuration cannot be altered.
 	 *
@@ -98,7 +109,7 @@ public interface OpenJ9DiagnosticsMXBean extends PlatformManagedObject {
 	 * A java dump is in a human-readable format, and summarizes the state of the JVM.
 	 * The default heap dump format (a phd file) is not human-readable.
 	 * A system dump is a platform-specific file that contains information about the active processes, threads, and
-	 * system memory. System dumps are usually large. 
+	 * system memory. System dumps are usually large.
 	 * The snap dump format is not human-readable and must be processed using the trace formatting tool supplied  with the OpenJ9 JVM.
 	 *
 	 * @param dumpAgent the dump agent to be triggered
@@ -114,7 +125,7 @@ public interface OpenJ9DiagnosticsMXBean extends PlatformManagedObject {
 	 * The JVM will attempt to write the file to the specified file name. This may
 	 * include replacement tokens as documented in the section on dump agents
 	 * in the documentation for the OpenJ9 JVM.
-	 * 
+	 *
 	 * A string containing the actual filename written to is returned. This may not
 	 * be the same as the requested filename for several reasons:
 	 * <ul>
@@ -129,11 +140,11 @@ public interface OpenJ9DiagnosticsMXBean extends PlatformManagedObject {
 	 *  to write the dump to another location, unless -Xdump:nofailover was specified on
 	 *  the command line.</li>
 	 * </ul>
-	 * 
+	 *
 	 * If a security manager exists a permission check for com.ibm.jvm.DumpPermission will be
 	 * made, if this fails a SecurityException will be thrown.
 	 *
-	 * @return the file name that the dump was actually written to 
+	 * @return the file name that the dump was actually written to
 	 * @param dumpAgent the dump agent to be triggered
 	 * @param fileNamePattern the filename to write to, which may be null, empty or include replacement tokens
 	 * @throws InvalidOptionException if the fileNamePattern was invalid
@@ -146,7 +157,7 @@ public interface OpenJ9DiagnosticsMXBean extends PlatformManagedObject {
 	/**
 	 * This function triggers the heap dump agent and requests for a heap dump in CLASSIC format.
 	 *
-	 * @return The file name of the dump that was created
+	 * @return the file name of the dump that was created
 	 * @throws InvalidOptionException if the dump operation fails
 	 * @throws RuntimeException if the JVM does not contain RAS dump support
 	 * @throws SecurityException if there is a security manager and it doesn't allow the checks required to trigger this dump

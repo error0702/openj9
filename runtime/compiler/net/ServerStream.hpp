@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2018
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #ifndef SERVER_STREAM_H
@@ -29,9 +29,6 @@
 #include "control/CompilationThread.hpp" // for TR::compInfoPT->getCompThreadId()
 #include "control/Options.hpp"
 #include "runtime/JITClientSession.hpp"
-
-class SSLOutputStream;
-class SSLInputStream;
 
 namespace JITServer
 {
@@ -164,7 +161,7 @@ public:
       readMessage(_cMsg);
       if (_cMsg.fullVersion() != 0 && _cMsg.fullVersion() != getJITServerFullVersion())
          {
-         throw StreamVersionIncompatible(getJITServerFullVersion(), _cMsg.fullVersion());
+         throw StreamVersionIncompatible(showFullVersionIncompatibility(getJITServerFullVersion(), _cMsg.fullVersion()));
          }
 
       switch (_cMsg.type())
@@ -181,6 +178,11 @@ public:
          case MessageType::compilationRequest:
             {
             return getArgsRaw<T...>(_cMsg);
+            }
+         case MessageType::AOTCacheMap_request:
+            {
+            std::string cacheName = std::get<0>(getArgsRaw<std::string>(_cMsg));
+            throw StreamAotCacheMapRequest(cacheName);
             }
          default:
             {
@@ -210,6 +212,25 @@ public:
       try
          {
          write(MessageType::compilationCode, args...);
+         }
+      catch (std::exception &e)
+         {
+         if (TR::Options::getVerboseOption(TR_VerboseJITServer))
+            TR_VerboseLog::writeLineLocked(TR_Vlog_JITServer, "Could not finish compilation: %s", e.what());
+         }
+      }
+   /**
+      @brief Function invoked by server when AOT cache store ignoring local SCC is completed successfully
+
+      This should be the last message sent by a server as a response to a compilation request.
+      It includes a variable number of parameters with compilation artifacts (including the serialized method).
+   */
+   template <typename... T>
+   void finishAotStoreCompilation(T... args)
+      {
+      try
+         {
+         write(MessageType::AOTCache_storedAOTMethod, args...);
          }
       catch (std::exception &e)
          {
@@ -264,6 +285,13 @@ public:
    // Statistics
    static int getNumConnectionsOpened() { return _numConnectionsOpened; }
    static int getNumConnectionsClosed() { return _numConnectionsClosed; }
+
+   /**
+      @brief Create an SSL_CTX suitable for a server
+   */
+   static bool createSSLContext(SSL_CTX *&ctx, const char *sessionContextID, size_t sessionContextIDLen,
+                                const PersistentVector<std::string> &sslKeys, const PersistentVector<std::string> &sslCerts,
+                                const std::string &sslRootCerts);
 
 private:
    static int _numConnectionsOpened;

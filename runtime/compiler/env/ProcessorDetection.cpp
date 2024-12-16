@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #define J9_EXTERNAL_TO_VM
@@ -312,8 +312,10 @@ TR_J9VM::initializeProcessorType()
          processorDescription.processor = OMR_PROCESSOR_S390_Z13;
       else if (processorDescription.processor >= OMR_PROCESSOR_S390_Z15 && TR::Options::getCmdLineOptions()->getOption(TR_DisableZ15))
          processorDescription.processor = OMR_PROCESSOR_S390_Z14;
-      else if (processorDescription.processor >= OMR_PROCESSOR_S390_ZNEXT && TR::Options::getCmdLineOptions()->getOption(TR_DisableZNext))
+      else if (processorDescription.processor >= OMR_PROCESSOR_S390_Z16 && TR::Options::getCmdLineOptions()->getOption(TR_DisableZ16))
          processorDescription.processor = OMR_PROCESSOR_S390_Z15;
+      else if (processorDescription.processor >= OMR_PROCESSOR_S390_ZNEXT && TR::Options::getCmdLineOptions()->getOption(TR_DisableZNext))
+         processorDescription.processor = OMR_PROCESSOR_S390_Z16;
 
       TR::Compiler->target.cpu = TR::CPU::customize(processorDescription);
 #if defined(J9ZOS390)
@@ -331,7 +333,8 @@ TR_J9VM::initializeProcessorType()
       {
       OMRProcessorDesc processorDescription = TR::Compiler->target.cpu.getProcessorDescription();
       OMRPORT_ACCESS_FROM_OMRPORT(TR::Compiler->omrPortLib);
-      if (feGetEnv("TR_DisableAVX"))
+      static const bool disableAVX = feGetEnv("TR_DisableAVX") != NULL;
+      if (disableAVX)
          {
          omrsysinfo_processor_set_feature(&processorDescription, OMR_FEATURE_X86_OSXSAVE, FALSE);
          }

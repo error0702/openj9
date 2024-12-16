@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "j9.h"
@@ -26,6 +26,7 @@
 #include "codegen/PrivateLinkage.hpp"
 #include "env/jittypes.h"
 #include "env/CompilerEnv.hpp"
+#include "env/ObjectModel.hpp"
 #include "runtime/CodeCacheManager.hpp"
 #include "runtime/CodeCache.hpp"
 #include "runtime/CodeRuntime.hpp"
@@ -955,6 +956,8 @@ void arm64CodeCacheConfig(int32_t ccSizeInByte, int32_t *numTempTrampolines)
 void arm64CreateHelperTrampolines(void *trampPtr, int32_t numHelpers)
    {
    uint32_t *buffer = (uint32_t *)((uint8_t *)trampPtr + TRAMPOLINE_SIZE);
+   omrthread_jit_write_protect_disable();
+
    for (int32_t i=1; i<numHelpers; i++)
       {
       *((int32_t *)buffer) = 0x58000050; //LDR R16 PC+8
@@ -968,6 +971,7 @@ void arm64CreateHelperTrampolines(void *trampPtr, int32_t numHelpers)
 #if defined(TR_HOST_ARM64)
    arm64CodeSync((uint8_t*)trampPtr, TRAMPOLINE_SIZE * numHelpers);
 #endif
+   omrthread_jit_write_protect_enable();
    }
 
 void arm64CreateMethodTrampoline(void *trampPtr, void *startPC, void *method)
@@ -976,6 +980,7 @@ void arm64CreateMethodTrampoline(void *trampPtr, void *startPC, void *method)
    J9::PrivateLinkage::LinkageInfo *linkInfo = J9::PrivateLinkage::LinkageInfo::get(startPC);
    intptr_t dispatcher = (intptr_t)((uint8_t *)startPC + linkInfo->getReservedWord());
 
+   omrthread_jit_write_protect_disable();
    *buffer = 0x58000050; //LDR R16 PC+8
    buffer += 1;
    *buffer = 0xD61F0200; //BR R16
@@ -985,6 +990,126 @@ void arm64CreateMethodTrampoline(void *trampPtr, void *startPC, void *method)
 #if defined(TR_HOST_ARM64)
    arm64CodeSync((uint8_t*)trampPtr, TRAMPOLINE_SIZE);
 #endif
+   omrthread_jit_write_protect_enable();
+   }
+
+#define ARM64_INSTRUCTION_LENGTH 4
+
+/**
+ * @brief Answers if the callSite is interface call via cache slots
+ *
+ * @param[in]  callSite:             address of the branch instruction at the caller method
+ * @param[out] addrOfFirstClassSlot: address of the first class cache slot
+ * @return true if the callSite is interface call via cache slots
+ */
+static bool isInterfaceCallSite(uint8_t *callSite, intptr_t& addrOfFirstClassSlot)
+   {
+   /*
+    *  Following instruction sequence is used for interface call.
+    *  We can assume tmpReg is x10.
+    *  Searching for the last 4 instructions
+    *
+    *  If the instruction before `blr tmpReg` is `ldr tmpReg, label`,
+    *  then the lastITable cache is not used.
+    *  In that case, we expect the below instructions before the call site.
+    *  We obtain the address of the secondBranchAddressCacheSlot from `ldrx` instruction.
+    *
+    *      cmpx vftReg, tmpReg
+    *      bne  snippetLabel
+    *      ldrx tmpReg, L_secondBranchAddressCacheSlot
+    *     hitLabel:
+    *      blr  tmpReg
+    *     doneLabel:
+    *
+    *  If the instruction before `blr tmpReg` is `ldr tmpReg, [vftReg, x9]`,
+    *  then the lastITable cache is used.
+    *  In that case, we expect the below instructions before the call site.
+    *  We get the address of the interface call snippet from `bal snippetLabel` instruction.
+    *
+    *      bal  snippetLabel                           ; probably already patched to bne
+    *      mov  w9, sizeof(J9Class)
+    *      ldr  tmp2Reg, [tmpReg, iTableOffset]        ; load vTableOffset
+    *      sub  x9, x9, tmp2Reg                        ; icallVMprJavaSendPatchupVirtual expects x9 to hold vTable index
+    *      ldr  tmpReg, [vftReg, x9]
+    *     hitLabel:
+    *      blr  tmpReg
+    *     doneLabel:
+    */
+
+   int32_t blrInstr = *reinterpret_cast<int32_t *>(callSite);
+   /* Check if the instruction at the callSite is 'blr x10' */
+   if (blrInstr != 0xd63f0140)
+      {
+      return false;
+      }
+
+   intptr_t ldrInstAddr = reinterpret_cast<intptr_t>(callSite) - ARM64_INSTRUCTION_LENGTH;
+   int32_t ldrInst = *reinterpret_cast<int32_t *>(ldrInstAddr);
+   /* Check if the instruction before blr is 'ldrx x10, label' */
+   if ((ldrInst & 0xff00001f) == 0x5800000a)
+      {
+      /* distance is encoded in bit 5-23 */
+      int64_t distance = ((ldrInst << 8) >> 13) * 4;
+      intptr_t secondBranchAddressSlotAddr = ldrInstAddr + distance;
+      //     The layout of the cache slots is as follows:
+      //     +---------+---------------+---------+---------------+
+      //     |  class1 |method address1|  class2 |method address2|
+      //     +---------+---------------+---------+---------------+
+      addrOfFirstClassSlot = secondBranchAddressSlotAddr - sizeof(intptr_t) * 3;
+
+      int32_t bneInst = *reinterpret_cast<int32_t *>(ldrInstAddr - ARM64_INSTRUCTION_LENGTH);
+      /* Check if the instruction before ldr is 'bne' */
+      if ((bneInst & 0xff00001f) != 0x54000001)
+         {
+         return false;
+         }
+
+      int32_t cmpInst = *reinterpret_cast<int32_t *>(ldrInstAddr - ARM64_INSTRUCTION_LENGTH * 2);
+      /* Check if the instruction before bne is 'cmp vftReg, x10' */
+      if ((cmpInst & 0xfffffc1f) != 0xeb0a001f)
+         {
+         return false;
+         }
+
+      return true;
+      }
+   else if ((ldrInst & 0xfffffc1f) == 0xf869680a) /* Check if lastITable cache sequence is generated. The instruction before blr should be `ldr x10, [vftReg, x9]` */
+      {
+      int32_t subInst = *reinterpret_cast<int32_t *>(callSite - ARM64_INSTRUCTION_LENGTH * 2);
+      /* Check if the instruction before ldr is `sub x9, x9, x11` */
+      if (subInst != 0xcb0b0129)
+         {
+         return false;
+         }
+      ldrInst = *reinterpret_cast<int32_t *>(callSite - ARM64_INSTRUCTION_LENGTH * 3);
+      /* Check if the instruction before sub is `ldr x11, [x10, #offset]` */
+      if ((ldrInst & 0xffc003ff) != 0xf940014b)
+         {
+         return false;
+         }
+      int32_t movInst = *reinterpret_cast<int32_t *>(callSite - ARM64_INSTRUCTION_LENGTH * 4);
+      /* Check if the instruction before ldr is `mov w9, sizeof(J9Class)` */
+      if ((movInst & 0xffe0001f) != 0x52800009)
+         {
+         return false;
+         }
+      intptr_t bcondInstAddr = reinterpret_cast<intptr_t>(callSite - ARM64_INSTRUCTION_LENGTH * 5);
+      int32_t bcondInst = *reinterpret_cast<int32_t *>(bcondInstAddr);
+      /* check if the instruction before mov is `b.cond snippetLabel` */
+      if ((bcondInst & 0xff000010) != 0x54000000)
+         {
+         return false;
+         }
+      /* distance is encoded in bit 5-23 */
+      int64_t distance = ((bcondInst << 8) >> 13) * 4;
+      /* offset of the fist class slot in interface call snippet */
+      static const int64_t firstClassSlotOffset = 44;
+      addrOfFirstClassSlot = bcondInstAddr + distance + firstClassSlotOffset;
+
+      return true;
+      }
+
+   return false;
    }
 
 bool arm64CodePatching(void *callee, void *callSite, void *currentPC, void *currentTramp, void *newAddrOfCallee, void *extra)
@@ -995,53 +1120,78 @@ bool arm64CodePatching(void *callee, void *callSite, void *currentPC, void *curr
    int32_t         currentDistance;
    int32_t         branchInstr = *(int32_t *)callSite;
    void           *newTramp;
+   intptr_t       addrOfFirstClassSlot;
 
    distance = entryAddress - (uint8_t *)callSite;
    currentDistance = (branchInstr << 6) >> 4;
    branchInstr &= 0xfc000000;
 
-   if (branchInstr != 0x94000000)
+   if (branchInstr == 0x94000000)
       {
-      // This is not a 'bl' instruction -- Don't patch
-      return true;
-      }
-
-   if (TR::Options::getCmdLineOptions()->getOption(TR_StressTrampolines)
-            || distance>(intptr_t)TR::Compiler->target.cpu.maxUnconditionalBranchImmediateForwardOffset()
-            || distance<(intptr_t)TR::Compiler->target.cpu.maxUnconditionalBranchImmediateBackwardOffset()
-   )  {
-      if (currentPC == newAddrOfCallee)
-         {
-         newTramp = currentTramp;
-         }
-      else
-         {
-         newTramp = mcc_replaceTrampoline(reinterpret_cast<TR_OpaqueMethodBlock *>(callee), callSite, currentTramp, currentPC, newAddrOfCallee, false);
-         TR_ASSERT_FATAL(newTramp != NULL, "Internal error: Could not replace trampoline.\n");
-
-         if (currentTramp == NULL)
+      /* bl instruction */
+      if (TR::Options::getCmdLineOptions()->getOption(TR_StressTrampolines)
+               || distance>(intptr_t)TR::Compiler->target.cpu.maxUnconditionalBranchImmediateForwardOffset()
+               || distance<(intptr_t)TR::Compiler->target.cpu.maxUnconditionalBranchImmediateBackwardOffset()
+      )  {
+         if (currentPC == newAddrOfCallee)
             {
-            arm64CreateMethodTrampoline(newTramp, newAddrOfCallee, callee);
+            newTramp = currentTramp;
             }
          else
             {
-            *((uint64_t*)currentTramp+1) = (uint64_t)entryAddress;
+            newTramp = mcc_replaceTrampoline(reinterpret_cast<TR_OpaqueMethodBlock *>(callee), callSite, currentTramp, currentPC, newAddrOfCallee, false);
+            TR_ASSERT_FATAL(newTramp != NULL, "Internal error: Could not replace trampoline.\n");
+
+            if (currentTramp == NULL)
+               {
+               arm64CreateMethodTrampoline(newTramp, newAddrOfCallee, callee);
+               }
+            else
+               {
+               omrthread_jit_write_protect_disable();
+               *((uint64_t*)currentTramp+1) = (uint64_t)entryAddress;
 #if defined(TR_HOST_ARM64)
-            arm64CodeSync((uint8_t*)currentTramp+8, 8);
+               arm64CodeSync((uint8_t*)currentTramp+8, 8);
 #endif
+               omrthread_jit_write_protect_enable();
+               }
             }
+
+         distance = (uint8_t *)newTramp - (uint8_t *)callSite;
          }
 
-      distance = (uint8_t *)newTramp - (uint8_t *)callSite;
-      }
-
-   if (currentDistance != distance)
-      {
-      branchInstr |= (distance >> 2) & 0x03ffffff;
-      *(int32_t *)callSite = branchInstr;
+      if (currentDistance != distance)
+         {
+         branchInstr |= (distance >> 2) & 0x03ffffff;
+         omrthread_jit_write_protect_disable();
+         *(int32_t *)callSite = branchInstr;
 #if defined(TR_HOST_ARM64)
-      arm64CodeSync((uint8_t*)callSite, 4);
+         arm64CodeSync((uint8_t*)callSite, 4);
 #endif
+         omrthread_jit_write_protect_enable();
+         }
+      }
+   else if (isInterfaceCallSite(static_cast<uint8_t *>(callSite), addrOfFirstClassSlot))
+      {
+      /* extra contains the java stack address where registers are saved. See _samplingPatchCallSite. */
+
+      const intptr_t *obj = *reinterpret_cast<intptr_t **>(extra);
+      const void *classslot = reinterpret_cast<const int8_t *>(obj) + TR::Compiler->om.offsetOfObjectVftField();
+
+      intptr_t currentReceiverJ9Class = TR::Compiler->om.compressObjectReferences() ? *static_cast<const uint32_t *>(classslot) : *static_cast<const intptr_t *>(classslot);
+      // Throwing away the flag bits in CLASS slot
+      currentReceiverJ9Class &= TR::Compiler->om.maskOfObjectVftField();
+
+      omrthread_jit_write_protect_disable();
+      if (*reinterpret_cast<intptr_t *>(addrOfFirstClassSlot) == currentReceiverJ9Class)
+         {
+         *reinterpret_cast<intptr_t *>(addrOfFirstClassSlot + sizeof(intptr_t)) = reinterpret_cast<intptr_t>(entryAddress);
+         }
+      else if (*reinterpret_cast<intptr_t *>(addrOfFirstClassSlot + sizeof(intptr_t) * 2) == currentReceiverJ9Class) /* Checking the second cache slot */
+         {
+         *reinterpret_cast<intptr_t *>(addrOfFirstClassSlot + sizeof(intptr_t) * 3) = reinterpret_cast<intptr_t>(entryAddress);
+         }
+      omrthread_jit_write_protect_enable();
       }
 
    return true;

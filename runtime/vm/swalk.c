@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "j9.h"
@@ -91,9 +91,40 @@ static void dropToCurrentFrame (J9StackWalkState * walkState);
 /* The minimum number of stack slots that a stack frame can occupy */
 #define J9_STACKWALK_MIN_FRAME_SLOTS (OMR_MIN(sizeof(J9JITFrame), sizeof(J9SFStackFrame)) / sizeof(UDATA))
 
+static VMINLINE UDATA
+maxFramesOnStack(J9StackWalkState *walkState)
+{
+	J9VMThread *walkThread = walkState->walkThread;
+	J9JITConfig *jitConfig = walkThread->javaVM->jitConfig;
+	UDATA * endOfStack = walkThread->stackObject->end;
+	UDATA * sp = walkState->walkThread->sp;
+	UDATA maxFrames = (endOfStack - sp) / J9_STACKWALK_MIN_FRAME_SLOTS;
+
+	if (NULL != jitConfig) {
+		if (J9_ARE_NO_BITS_SET(walkState->flags, J9_STACKWALK_SKIP_INLINES)) {
+			/* It's possible every frame on the stack is a fully inlined JIT frame */
+			maxFrames *= (jitConfig->maxInlineDepth + 1);
+		}
+	}
+
+	if (J9_ARE_NO_BITS_SET(walkState->flags, J9_STACKWALK_NO_ERROR_REPORT)) {
+		UDATA * stackStart = J9_LOWEST_STACK_SLOT(walkState->walkThread);
+#if defined(J9VM_INTERP_STACKWALK_TRACING)
+		Assert_VRB_true(sp >= stackStart);
+		Assert_VRB_true(sp <= endOfStack);
+#else /* J9VM_INTERP_STACKWALK_TRACING */
+		Assert_VM_true(sp >= stackStart);
+		Assert_VM_true(sp <= endOfStack);
+#endif /* J9VM_INTERP_STACKWALK_TRACING */
+	}
+
+	return maxFrames;
+}
+
 UDATA  walkStackFrames(J9VMThread *currentThread, J9StackWalkState *walkState)
 {
-	UDATA rc = (walkState->walkThread->privateFlags & J9_PRIVATE_FLAGS_STACK_CORRUPT) ? J9_STACKWALK_RC_STACK_CORRUPT : J9_STACKWALK_RC_NONE;
+	UDATA rc = J9_STACKWALK_RC_NONE;
+	UDATA walkRC = 0;
 	J9Method * nextLiterals;
 	UDATA * nextA0;
 	UDATA savedFlags = walkState->flags;
@@ -120,11 +151,18 @@ UDATA  walkStackFrames(J9VMThread *currentThread, J9StackWalkState *walkState)
 		walkState->flags &= ~J9_STACKWALK_RESUME;
 		goto resumeInterpreterWalk;
 	}
-	if (currentThread != NULL) {
+
+	walkState->loopBreaker = 0;
+	if (NULL != currentThread) {
 		oldState = currentThread->activeWalkState;
 		currentThread->activeWalkState = walkState;
+		if (J9_ARE_ANY_BITS_SET(currentThread->privateFlags2, J9_PRIVATE_FLAGS2_ASYNC_GET_CALL_TRACE)) {
+			/* Add one because walkFrames decrements loopBreaker and bails when it reaches 0 */
+			walkState->loopBreaker = maxFramesOnStack(walkState) + 1;
+		}
 	}
 
+	walkState->javaVM = walkState->walkThread->javaVM;
 	walkState->currentThread = currentThread;
 	walkState->cache = NULL;
 	walkState->framesWalked = 0;
@@ -164,8 +202,8 @@ UDATA  walkStackFrames(J9VMThread *currentThread, J9StackWalkState *walkState)
 	if (walkState->flags & J9_STACKWALK_START_AT_JIT_FRAME) swPrintf(walkState, 2, "\tSTART_AT_JIT_FRAME\n");
 	if (walkState->flags & J9_STACKWALK_CACHE_CPS) swPrintf(walkState, 2, "\tCACHE_CPS\n");
 	if (walkState->flags & J9_STACKWALK_CACHE_PCS) swPrintf(walkState, 2, "\tCACHE_PCS\n");
+	if (walkState->flags & J9_STACKWALK_SKIP_HIDDEN_FRAMES) swPrintf(walkState, 2, "\tSKIP_HIDDEN_FRAME\n");
 	if (walkState->flags & J9_STACKWALK_COUNT_SPECIFIED) swPrintf(walkState, 2, "\tCOUNT_SPECIFIED\n");
-	if (walkState->flags & J9_STACKWALK_INCLUDE_ARRAYLET_LEAVES) swPrintf(walkState, 2, "\tINCLUDE_ARRAYLET_LEAVES\n");
 	if (walkState->flags & J9_STACKWALK_INCLUDE_NATIVES) swPrintf(walkState, 2, "\tINCLUDE_NATIVES\n");
 	if (walkState->flags & J9_STACKWALK_INCLUDE_CALL_IN_FRAMES) swPrintf(walkState, 2, "\tINCLUDE_CALL_IN_FRAMES\n");
 	if (walkState->flags & J9_STACKWALK_ITERATE_FRAMES) swPrintf(walkState, 2, "\tITERATE_FRAMES\n");
@@ -182,19 +220,23 @@ UDATA  walkStackFrames(J9VMThread *currentThread, J9StackWalkState *walkState)
 	if (walkState->flags & J9_STACKWALK_CHECK_I_SLOTS_FOR_OBJECTS) swPrintf(walkState, 2, "\tCHECK_I_SLOTS_FOR_OBJECTS\n");
 	if (walkState->flags & J9_STACKWALK_SAVE_STACKED_REGISTERS) swPrintf(walkState, 2, "\tSAVE_STACKED_REGISTERS\n");
 
-	if ((walkState->flags & (J9_STACKWALK_MAINTAIN_REGISTER_MAP | J9_STACKWALK_INCLUDE_CALL_IN_FRAMES)) == (J9_STACKWALK_MAINTAIN_REGISTER_MAP | J9_STACKWALK_INCLUDE_CALL_IN_FRAMES)) {
-		PORT_ACCESS_FROM_WALKSTATE(walkState);
-		J9UTF8 * className = J9ROMCLASS_CLASSNAME(((J9Class *) walkState->userData4)->romClass);
-		char detailStackBuffer[J9VM_PACKAGE_NAME_BUFFER_LENGTH];
-		char * detail = NULL;
-		j9object_t detailMessage = J9VMJAVALANGTHROWABLE_DETAILMESSAGE(currentThread, walkState->restartException);
+	if (J9_ARE_ALL_BITS_SET(walkState->flags, J9_STACKWALK_MAINTAIN_REGISTER_MAP | J9_STACKWALK_INCLUDE_CALL_IN_FRAMES)) {
+		J9Class * clazz = (J9Class *) walkState->userData4;
 
-		if (NULL != detailMessage) {
-			detail = walkState->walkThread->javaVM->internalVMFunctions->copyStringToUTF8WithMemAlloc(currentThread, detailMessage, J9_STR_NULL_TERMINATE_RESULT, ": ", 2, detailStackBuffer, J9VM_PACKAGE_NAME_BUFFER_LENGTH, NULL);
-		}
-		swPrintf(walkState, 2, "\tThrowing exception: %.*s%s\n", J9UTF8_LENGTH(className), J9UTF8_DATA(className), detail ? detail : "");
-		if (detailStackBuffer != detail) {
-			j9mem_free_memory(detail);
+		if (NULL != clazz) {
+			PORT_ACCESS_FROM_WALKSTATE(walkState);
+			J9UTF8 * className = J9ROMCLASS_CLASSNAME(clazz->romClass);
+			char detailStackBuffer[J9VM_PACKAGE_NAME_BUFFER_LENGTH];
+			char * detail = NULL;
+			j9object_t detailMessage = J9VMJAVALANGTHROWABLE_DETAILMESSAGE(currentThread, walkState->restartException);
+
+			if (NULL != detailMessage) {
+				detail = walkState->walkThread->javaVM->internalVMFunctions->copyStringToUTF8WithMemAlloc(currentThread, detailMessage, J9_STR_NULL_TERMINATE_RESULT, ": ", 2, detailStackBuffer, J9VM_PACKAGE_NAME_BUFFER_LENGTH, NULL);
+			}
+			swPrintf(walkState, 2, "\tThrowing exception: %.*s%s\n", J9UTF8_LENGTH(className), J9UTF8_DATA(className), detail ? detail : "");
+			if (detailStackBuffer != detail) {
+				j9mem_free_memory(detail);
+			}
 		}
 	}
 
@@ -329,7 +371,9 @@ UDATA  walkStackFrames(J9VMThread *currentThread, J9StackWalkState *walkState)
 
 		/* Walk the frame */
 
-		if (walkFrame(walkState) != J9_STACKWALK_KEEP_ITERATING) {
+		walkRC = walkFrame(walkState);
+		if (J9_STACKWALK_KEEP_ITERATING != walkRC) {
+			rc = walkRC;
 			goto terminationPoint;
 		}
 resumeInterpreterWalk:
@@ -341,7 +385,9 @@ resumeInterpreterWalk:
 #ifdef J9VM_INTERP_NATIVE_SUPPORT
 		if (walkState->frameFlags & J9_STACK_FLAGS_JIT_TRANSITION_TO_INTERPRETER_MASK) {
 resumeJitWalk:
-			if (jitWalkStackFrames(walkState) != J9_STACKWALK_KEEP_ITERATING) {
+			walkRC = jitWalkStackFrames(walkState);
+			if (J9_STACKWALK_KEEP_ITERATING != walkRC) {
+				rc = walkRC;
 				goto terminationPoint;
 			}
 			walkState->decompilationRecord = NULL;
@@ -405,6 +451,13 @@ terminationPoint:
 
 UDATA walkFrame(J9StackWalkState * walkState)
 {
+	if (0 != walkState->loopBreaker) {
+		walkState->loopBreaker -= 1;
+		if (0 == walkState->loopBreaker) {
+			return J9_STACKWALK_RC_STACK_CORRUPT;
+		}
+	}
+
 	if (walkState->flags & J9_STACKWALK_VISIBLE_ONLY) {
 
 		if ((((UDATA) walkState->pc == J9SF_FRAME_TYPE_NATIVE_METHOD) || ((UDATA) walkState->pc == J9SF_FRAME_TYPE_JNI_NATIVE_METHOD)) && !(walkState->flags & J9_STACKWALK_INCLUDE_NATIVES)) {
@@ -422,6 +475,11 @@ UDATA walkFrame(J9StackWalkState * walkState)
 #ifdef J9VM_INTERP_NATIVE_SUPPORT
 		}
 #endif
+
+		/* Process hidden method frames */
+		if (J9_ARE_ALL_BITS_SET(walkState->flags, J9_STACKWALK_SKIP_HIDDEN_FRAMES) && J9_IS_HIDDEN_METHOD(walkState->method)) {
+			return J9_STACKWALK_KEEP_ITERATING;
+		}
 
 		if (walkState->skipCount) {
 			--walkState->skipCount;
@@ -513,38 +571,17 @@ walkIt:
 static UDATA allocateCache(J9StackWalkState * walkState)
 {
 	PORT_ACCESS_FROM_WALKSTATE(walkState);
-	UDATA * endOfStack = walkState->walkThread->stackObject->end;
-	UDATA framesPresent = 0;
+	UDATA framesPresent = maxFramesOnStack(walkState);
 	UDATA cacheElementSize = 0;
 	UDATA cacheSize = 0;
 	UDATA * stackStart = J9_LOWEST_STACK_SLOT(walkState->walkThread);
 	UDATA * sp = walkState->walkThread->sp;
-
-	if (J9_ARE_NO_BITS_SET(walkState->flags, J9_STACKWALK_NO_ERROR_REPORT)) {
-#if defined(J9VM_INTERP_STACKWALK_TRACING)
-		Assert_VRB_true(sp >= stackStart);
-		Assert_VRB_true(sp <= endOfStack);
-#else /* J9VM_INTERP_STACKWALK_TRACING */
-		Assert_VM_true(sp >= stackStart);
-		Assert_VM_true(sp <= endOfStack);
-#endif /* J9VM_INTERP_STACKWALK_TRACING */
-	}
-
-	framesPresent = (endOfStack - sp) / J9_STACKWALK_MIN_FRAME_SLOTS;
 
 	if (walkState->flags & J9_STACKWALK_CACHE_PCS) ++cacheElementSize;
 	if (walkState->flags & J9_STACKWALK_CACHE_CPS) ++cacheElementSize;
 	if (walkState->flags & J9_STACKWALK_CACHE_METHODS) ++cacheElementSize;
 
 	cacheSize = framesPresent * cacheElementSize;
-#ifdef J9VM_INTERP_NATIVE_SUPPORT
-	if (walkState->walkThread->javaVM->jitConfig) {
-		if (!(walkState->flags & J9_STACKWALK_SKIP_INLINES)) {
-			/* computations above assume 1 cacheElement per frame, in reality there may be (maxInlinedMethods + 1) elements per frame */
-			cacheSize *= (walkState->walkThread->javaVM->jitConfig->maxInlineDepth + 1);
-		}
-	}
-#endif
 
 	if ((walkState != walkState->walkThread->stackWalkState) || ((UDATA) (sp - stackStart) < cacheSize)
 #if defined (J9VM_INTERP_VERBOSE) || defined (J9VM_PROF_EVENT_REPORTING)
@@ -664,6 +701,7 @@ static void
 walkMethodFrame(J9StackWalkState * walkState)
 {
 	J9SFMethodFrame * methodFrame = (J9SFMethodFrame *) ((U_8*) walkState->walkSP + (UDATA) walkState->literals);
+	BOOLEAN isJNINative = (J9SF_FRAME_TYPE_JNI_NATIVE_METHOD == (UDATA)walkState->pc);
 
 	walkState->bp = (UDATA *) &(methodFrame->savedA0);
 	walkState->frameFlags = methodFrame->specialFrameFlags;
@@ -697,7 +735,7 @@ walkMethodFrame(J9StackWalkState * walkState)
 #endif
 
 	if ((walkState->flags & J9_STACKWALK_ITERATE_O_SLOTS) && walkState->literals) {
-		if (walkState->frameFlags & J9_SSF_JNI_REFS_REDIRECTED) {
+		if ((walkState->frameFlags & J9_SSF_JNI_REFS_REDIRECTED) || isJNINative) {
 			walkPushedJNIRefs(walkState);
 		} else {
 			walkObjectPushes(walkState);

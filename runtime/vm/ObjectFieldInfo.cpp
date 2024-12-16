@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2015, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2015
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "j9.h"
@@ -45,10 +45,10 @@ ObjectFieldInfo::countInstanceFields(void)
 		const U_32 modifiers = field->modifiers;
 		if (J9_ARE_NO_BITS_SET(modifiers, J9AccStatic) ) {
 			if (modifiers & J9FieldFlagObject) {
-#ifdef J9VM_OPT_VALHALLA_VALUE_TYPES
-				J9UTF8 *fieldSig = J9ROMFIELDSHAPE_SIGNATURE(field);
-				U_8 *fieldSigBytes = J9UTF8_DATA(J9ROMFIELDSHAPE_SIGNATURE(field));
-				if ('Q' == *fieldSigBytes) {
+#if defined(J9VM_OPT_VALHALLA_FLATTENABLE_VALUE_TYPES)
+				if (J9_ARE_ALL_BITS_SET(modifiers, J9FieldFlagIsNullRestricted)) {
+					J9UTF8 *fieldSig = J9ROMFIELDSHAPE_SIGNATURE(field);
+					U_8 *fieldSigBytes = J9UTF8_DATA(J9ROMFIELDSHAPE_SIGNATURE(field));
 					J9Class *fieldClass = findJ9ClassInFlattenedClassCache(_flattenedClassCache, fieldSigBytes + 1, J9UTF8_LENGTH(fieldSig) - 2);
 					U_32 size = (U_32)fieldClass->totalInstanceSize;
 					if (!J9_IS_FIELD_FLATTENED(fieldClass, field)) {
@@ -57,11 +57,10 @@ ObjectFieldInfo::countInstanceFields(void)
 					} else {
 						bool forceDoubleAlignment = false;
 						if (sizeof(U_32) == _referenceSize) {
-							/* Flattened volatile or atomic valueType that is 8 bytes should be put at 8-byte aligned address. Currently flattening is disabled
+							/* Flattened volatile valueType that is 8 bytes should be put at 8-byte aligned address. Currently flattening is disabled
 							 * for such valueType > 8 bytes.
 							 */
-							forceDoubleAlignment = (J9_ARE_ALL_BITS_SET(field->modifiers, J9AccVolatile) || (J9ROMCLASS_IS_ATOMIC(fieldClass->romClass)))
-									&& (sizeof(U_64) == J9CLASS_UNPADDED_INSTANCE_SIZE(fieldClass));
+							forceDoubleAlignment = (J9_ARE_ALL_BITS_SET(field->modifiers, J9AccVolatile) && (sizeof(U_64) == J9CLASS_UNPADDED_INSTANCE_SIZE(fieldClass)));
 						} else {
 							/* copyObjectFields() uses U_64 load/store. Put all nested fields at 8-byte aligned address. */
 							forceDoubleAlignment = true;
@@ -83,7 +82,7 @@ ObjectFieldInfo::countInstanceFields(void)
 						}
 					}
 				} else
-#endif /* J9VM_OPT_VALHALLA_VALUE_TYPES */
+#endif /* J9VM_OPT_VALHALLA_FLATTENABLE_VALUE_TYPES */
 				{
 					_instanceObjectCount += 1;
 					_totalObjectCount += 1;
@@ -153,12 +152,12 @@ ObjectFieldInfo::calculateTotalFieldsSizeAndBackfill()
 		accumulator = ROUND_UP_TO_POWEROF2((UDATA)accumulator, (UDATA)_cacheLineSize) - _objectHeaderSize; /* Rounding takes care of the odd number of 4-byte fields. Remove the header */
 	} else {
 		accumulator = _superclassFieldsSize + (_totalObjectCount * _referenceSize) + (_totalSingleCount * sizeof(U_32)) + (_totalDoubleCount * sizeof(U_64));
-#ifdef J9VM_OPT_VALHALLA_VALUE_TYPES
+#if defined(J9VM_OPT_VALHALLA_FLATTENABLE_VALUE_TYPES)
 		accumulator += _totalFlatFieldDoubleBytes + _totalFlatFieldRefBytes + _totalFlatFieldSingleBytes;
 
 		/* ValueTypes cannot be subtyped and their superClass contains no fields */
 		if (!isValue()) {
-#endif /* J9VM_OPT_VALHALLA_VALUE_TYPES */
+#endif /* J9VM_OPT_VALHALLA_FLATTENABLE_VALUE_TYPES */
 			/* if the superclass is not end aligned but we have doubleword fields, use the space before the first field as the backfill */
 			if (
 					((getSuperclassObjectSize() % OBJECT_SIZE_INCREMENT_IN_BYTES) != 0) && /* superclass is not end-aligned */
@@ -180,7 +179,7 @@ ObjectFieldInfo::calculateTotalFieldsSizeAndBackfill()
 			} else {
 				_subclassBackfillOffset = _superclassBackfillOffset;
 			}
-#ifdef J9VM_OPT_VALHALLA_VALUE_TYPES
+#if defined(J9VM_OPT_VALHALLA_FLATTENABLE_VALUE_TYPES)
 		} else {
 			/* If the first field does not start at zero, this means we added padding to satisfy
 			 * alignment requirements of double slot fields. We will use the J9ClassHasPrePadding flag
@@ -209,7 +208,7 @@ ObjectFieldInfo::calculateTotalFieldsSizeAndBackfill()
 				}
 			}
 		}
-#endif /* J9VM_OPT_VALHALLA_VALUE_TYPES */
+#endif /* J9VM_OPT_VALHALLA_FLATTENABLE_VALUE_TYPES */
 	}
 	return accumulator;
 }

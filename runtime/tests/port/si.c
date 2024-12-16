@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 
@@ -559,8 +559,13 @@ done:
 }
 
 
-/* sysinfo_set_limit and sysinfo_get_limit tests will not work on windows */
+/* sysinfo_set_limit and sysinfo_get_limit tests will not work on Windows */
 #if !(defined(WIN32) || defined(WIN64))
+
+/* sysinfo_set_limit with PORT_RESOURCE_ADDRESS_SPACE doesn't work on macOS 12.
+ * The limit can't be lowered, it results in EINVAL.
+ */
+#if !defined(OSX)
 
 /**
  *
@@ -657,6 +662,8 @@ int j9sysinfo_test_sysinfo_set_limit_ADDRESS_SPACE(J9PortLibrary* portLibrary) {
 
 	return reportTestExit(portLibrary, testName);
 }
+
+#endif /* !defined(OSX) */
 
 /**
  *
@@ -2273,6 +2280,27 @@ j9sysinfo_test_get_l1dcache_line_size(struct J9PortLibrary *portLibrary)
 	return reportTestExit(portLibrary, testName);
 }
 
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+I_32
+j9sysinfo_test_get_process_start_time(struct J9PortLibrary *portLibrary)
+{
+	PORT_ACCESS_FROM_PORT(portLibrary);
+	const char *testName = "j9sysinfo_test_get_process_start_time";
+	UDATA pid = j9sysinfo_get_pid();
+	U_64 processStartTimeInNanoseconds = 0;
+	I_32 rc = j9sysinfo_get_process_start_time(pid, &processStartTimeInNanoseconds);
+	if ((0 != rc) || (0 == processStartTimeInNanoseconds)) {
+		outputErrorMessage(
+			PORTTEST_ERROR_ARGS,
+			"j9sysinfo_get_process_start_time, pid=%zu, processStartTimeInNanoseconds=%llu, rc=%d.\n",
+			pid,
+			processStartTimeInNanoseconds,
+			rc);
+	}
+	return reportTestExit(portLibrary, testName);
+}
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
+
 /*
  * pass in the port library to do sysinfo tests
  */
@@ -2293,10 +2321,10 @@ j9sysinfo_runTests(struct J9PortLibrary *portLibrary, char *argv0)
 	rc |= j9sysinfo_test_sysinfo_env_iterator(portLibrary);
 	rc |= j9sysinfo_test_sysinfo_get_processor_description(portLibrary);
 #if !(defined(WIN32) || defined(WIN64))
-#if !(defined(AIXPPC) || defined(J9ZOS390))
-	/* unable to set RLIMIT_AS on AIX and z/OS */
+#if !(defined(AIXPPC) || defined(J9ZOS390) || defined(OSX))
+	/* unable to set RLIMIT_AS on AIX, z/OS, OSX */
 	rc |= j9sysinfo_test_sysinfo_set_limit_ADDRESS_SPACE(portLibrary);
-#endif /* !(defined(AIXPPC) || defined(J9ZOS390)) */
+#endif /* !(defined(AIXPPC) || defined(J9ZOS390) || defined(OSX)) */
 	rc |= j9sysinfo_test_sysinfo_set_limit_CORE_FILE(portLibrary);
 #endif /* !(defined(WIN32) || defined(WIN64)) */
 
@@ -2343,6 +2371,9 @@ j9sysinfo_runTests(struct J9PortLibrary *portLibrary, char *argv0)
 	/* Not supported on Z & OSX (and Windows, of course).  Enable, when available. */
 	rc |= j9sysinfo_test_get_open_file_count(portLibrary);
 #endif /* defined(LINUX) || defined(AIXPPC) */
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+	rc |= j9sysinfo_test_get_process_start_time(portLibrary);
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
 
 	/* Output results */
 	j9tty_printf(PORTLIB, "\nSysinfo test done%s\n\n", rc == TEST_PASS ? "." : ", failures detected.");

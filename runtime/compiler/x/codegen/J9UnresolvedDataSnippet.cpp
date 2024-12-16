@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "codegen/UnresolvedDataSnippet.hpp"
@@ -109,7 +109,7 @@ J9::X86::UnresolvedDataSnippet::emitSnippetBody()
 
    if (!stackMapInstr)
       {
-      return TR::InstOpCode(TR::InstOpCode::bad).binary(cursor);
+      return TR::InstOpCode(TR::InstOpCode::bad).binary(cursor, OMR::X86::Default);
       }
 
    _glueSymRef = cg()->symRefTab()->findOrCreateRuntimeHelper(getHelper());
@@ -155,7 +155,7 @@ J9::X86::UnresolvedDataSnippet::emitResolveHelperCall(uint8_t *cursor)
    //
    const intptr_t rip = (intptr_t)(cursor+5);
    if ((cg()->needRelocationsForHelpers() && cg()->comp()->target().is64Bit()) ||
-       NEEDS_TRAMPOLINE(glueAddress, rip, cg()))
+       cg()->directCallRequiresTrampoline(glueAddress, reinterpret_cast<intptr_t>(cursor)))
       {
       TR_ASSERT(cg()->comp()->target().is64Bit(), "should not require a trampoline on 32-bit");
       glueAddress = TR::CodeCacheManager::instance()->findHelperTrampoline(_glueSymRef->getReferenceNumber(), (void *)cursor);

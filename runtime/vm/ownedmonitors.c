@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2020 IBM Corp. and others
+ * Copyright IBM Corp. and others 2001
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 #include "j9.h"
 #include "rommeth.h"
@@ -48,6 +48,7 @@ objectIsBeingWaitedOn(J9VMThread *currentThread, J9VMThread *targetThread, j9obj
  * @param[in] targetThread
  * @param[in] info Array where monitor info should be returned
  * @param[in] infoLen Length of the info array in elements, not bytes
+ * @param[in] reportErrors TRUE to allow the stack walker to assert on errors, FALSE to ignore errors
  * @return -1 on error<br>
  * >= 0, number of info elements
  *
@@ -59,7 +60,7 @@ objectIsBeingWaitedOn(J9VMThread *currentThread, J9VMThread *targetThread, j9obj
  */
 IDATA
 getOwnedObjectMonitors(J9VMThread *currentThread, J9VMThread *targetThread,
-		J9ObjectMonitorInfo *info, IDATA infoLen)
+		J9ObjectMonitorInfo *info, IDATA infoLen, BOOLEAN reportErrors)
 {
 	J9StackWalkState walkState;
 	BOOLEAN countOnly = FALSE;
@@ -88,6 +89,9 @@ getOwnedObjectMonitors(J9VMThread *currentThread, J9VMThread *targetThread,
 		| J9_STACKWALK_INCLUDE_NATIVES
 		| J9_STACKWALK_SKIP_INLINES
 		| J9_STACKWALK_ITERATE_FRAMES;
+	if (!reportErrors) {
+		walkState.flags |= J9_STACKWALK_NO_ERROR_REPORT;
+	}
 	walkState.frameWalkFunction = getOwnedObjectMonitorsIterator;
 
 	if (javaVM->walkStackFrames(currentThread, &walkState) != J9_STACKWALK_RC_NONE) {
@@ -124,11 +128,12 @@ getOwnedObjectMonitorsIterator(J9VMThread *currentThread, J9StackWalkState *walk
 	J9JavaVM* javaVM = walkState->walkThread->javaVM;
 #ifdef J9VM_INTERP_NATIVE_SUPPORT
 	if (walkState->jitInfo) {
-		/* The jit walk may increment the stack depth */
+		/* The jit walk may increment/decrement the stack depth */
 		rc = javaVM->jitGetOwnedObjectMonitors(walkState);
 	} else
 #endif
 	{
+		/* The walk function may decrement the stack depth if a hidden frame is skipped */
 		rc = walkFrameMonitorEnterRecords(currentThread, walkState);
 	}
 	
@@ -148,6 +153,13 @@ walkFrameMonitorEnterRecords(J9VMThread *currentThread, J9StackWalkState *walkSt
 	UDATA *frameID;
 	IDATA monitorCount = (IDATA)walkState->userData2;
 	J9VMThread *targetThread = walkState->walkThread;
+
+	/* check if hidden method frame should be skipped */
+	if (J9_ARE_NO_BITS_SET(walkState->javaVM->runtimeFlags, J9_RUNTIME_SHOW_HIDDEN_FRAMES) && J9_IS_HIDDEN_METHOD(walkState->method)) {
+		/* Decrease the stack depth when skipping hidden frame */
+		walkState->userData4 = (void *)(((UDATA)walkState->userData4) - 1);
+		return J9_STACKWALK_KEEP_ITERATING;
+	}
 
 	/*
 	 * Walk the monitor enter records from this frame and

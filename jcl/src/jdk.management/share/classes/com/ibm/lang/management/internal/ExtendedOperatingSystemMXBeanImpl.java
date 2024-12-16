@@ -1,6 +1,6 @@
 /*[INCLUDE-IF Sidecar18-SE]*/
-/*******************************************************************************
- * Copyright (c) 2012, 2020 IBM Corp. and others
+/*
+ * Copyright IBM Corp. and others 2012
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,13 +16,12 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
 package com.ibm.lang.management.internal;
 
-import java.security.AccessController;
 import java.security.PrivilegedAction;
 import java.util.Objects;
 
@@ -91,7 +90,7 @@ public class ExtendedOperatingSystemMXBeanImpl extends OperatingSystemMXBeanImpl
 		}
 
 		/* add configurable model numbers if any */
-		String emuHwProperty = com.ibm.oti.vm.VM.getVMLangAccess().internalGetProperties().getProperty("com.ibm.lang.management.OperatingSystemMXBean.zos.emulatedHardwareModels"); //$NON-NLS-1$
+		String emuHwProperty = VM.internalGetProperties().getProperty("com.ibm.lang.management.OperatingSystemMXBean.zos.emulatedHardwareModels"); //$NON-NLS-1$
 
 		if (null != emuHwProperty) {
 			for (String emuHw : emuHwProperty.split("[;,]")) { //$NON-NLS-1$
@@ -120,7 +119,10 @@ public class ExtendedOperatingSystemMXBeanImpl extends OperatingSystemMXBeanImpl
 				return thread;
 			};
 
-			Thread thread = AccessController.doPrivileged(createThread);
+			/*[IF JAVA_SPEC_VERSION >= 17]*/
+			@SuppressWarnings("removal")
+			/*[ENDIF] JAVA_SPEC_VERSION >= 17 */
+			Thread thread = java.security.AccessController.doPrivileged(createThread);
 			thread.start();
 		}
 	}
@@ -153,6 +155,7 @@ public class ExtendedOperatingSystemMXBeanImpl extends OperatingSystemMXBeanImpl
 		return Math.min(processTimeDelta / (getOnlineProcessorsImpl() * timestampDelta), 1.0);
 	}
 
+	/*[IF JAVA_SPEC_VERSION < 14] - inherit the default method in Java 14+ */
 	/**
 	 * {@inheritDoc}
 	 */
@@ -160,6 +163,7 @@ public class ExtendedOperatingSystemMXBeanImpl extends OperatingSystemMXBeanImpl
 	public final long getFreePhysicalMemorySize() {
 		return this.getFreePhysicalMemorySizeImpl();
 	}
+	/*[ENDIF] JAVA_SPEC_VERSION < 14 */
 
 	/**
 	 * Returns the amount of free physical memory at current instance on the
@@ -176,7 +180,7 @@ public class ExtendedOperatingSystemMXBeanImpl extends OperatingSystemMXBeanImpl
 	 */
 	@Override
 	public final double getCpuLoad() {
-		return this.getSystemCpuLoad();
+		return getSystemCpuLoadImpl();
 	}
 
 	/**
@@ -242,6 +246,12 @@ public class ExtendedOperatingSystemMXBeanImpl extends OperatingSystemMXBeanImpl
 	private native int getOnlineProcessorsImpl();
 
 	/**
+	 * Check if the CpuLoadCompatibility flag is set.
+	 * @return if the CpuLoadCompatibility flag is set
+	 */
+	private static native boolean hasCpuLoadCompatibilityFlag();
+
+	/**
 	 * {@inheritDoc}
 	 */
 	@Override
@@ -250,10 +260,17 @@ public class ExtendedOperatingSystemMXBeanImpl extends OperatingSystemMXBeanImpl
 
 		/* Get the process CPU time and also, the sampling timestamp. */
 		latestTime = System.nanoTime();
-		latestCpuTime = getProcessCpuTimeByNS();
+		/*[IF JAVA_SPEC_VERSION > 8]*/
+		@SuppressWarnings("removal")
+		/*[ENDIF] JAVA_SPEC_VERSION > 8 */
+		long cpuTime = getProcessCpuTime();
+		if (CpuTimePrecisionHolder.precision == CpuTimePrecisionHolder.NO_SCALE_FACTOR) {
+			cpuTime *= CpuTimePrecisionHolder.NS_SCALE_FACTOR;
+		}
+		latestCpuTime = cpuTime;
 
-		/* First call to this method should -1, since we don't have any previous
-		 * CPU times (or timestamp) to compute CPU load against.
+		/* If no previous timestamps is set, the default behaviour is to return -1.
+		 * If the compatibility flag is set, return 0 to match the behaviour of RI.
 		 */
 		if (-1 == oldTime) {
 			/* Save current counters; next invocation onwards, we use these to
@@ -261,7 +278,11 @@ public class ExtendedOperatingSystemMXBeanImpl extends OperatingSystemMXBeanImpl
 			 */
 			oldTime = interimTime = latestTime;
 			oldCpuTime = interimCpuTime = latestCpuTime;
-			return CpuLoadCalculationConstants.ERROR_VALUE;
+			if (hasCpuLoadCompatibilityFlag()) {
+				return 0;
+			} else {
+				return CpuLoadCalculationConstants.ERROR_VALUE;
+			}
 		}
 
 		/* If a sufficiently long interval has elapsed since last sampling, calculate using
@@ -314,14 +335,16 @@ public class ExtendedOperatingSystemMXBeanImpl extends OperatingSystemMXBeanImpl
 		return this.getProcessCpuTimeImpl() * CpuTimePrecisionHolder.precision;
 	}
 
+/*[IF JAVA_SPEC_VERSION < 19]*/
 	/**
-	 * Deprecated. Use getProcessCpuTime()
+	 * {@inheritDoc}
 	 */
-	/*[IF Sidecar19-SE]
+	/*[IF JAVA_SPEC_VERSION > 8]
 	@Deprecated(forRemoval = true, since = "1.8")
-	/*[ELSE]*/
+	@SuppressWarnings("removal")
+	/*[ELSE] JAVA_SPEC_VERSION > 8 */
 	@Deprecated
-	/*[ENDIF]*/
+	/*[ENDIF] JAVA_SPEC_VERSION > 8 */
 	@Override
 	public final long getProcessCpuTimeByNS() {
 		long cpuTimeNS = this.getProcessCpuTime();
@@ -330,6 +353,7 @@ public class ExtendedOperatingSystemMXBeanImpl extends OperatingSystemMXBeanImpl
 		}
 		return cpuTimeNS;
 	}
+/*[ENDIF] JAVA_SPEC_VERSION < 19 */
 
 	/**
 	 * Returns total amount of time the process has been scheduled or
@@ -402,18 +426,21 @@ public class ExtendedOperatingSystemMXBeanImpl extends OperatingSystemMXBeanImpl
 		return this.getProcessVirtualMemorySizeImpl();
 	}
 
+/*[IF JAVA_SPEC_VERSION < 19]*/
 	/**
-	 * Deprecated: use getCommittedVirtualMemorySize()
+	 * {@inheritDoc}
 	 */
-	/*[IF Sidecar19-SE]
+	/*[IF JAVA_SPEC_VERSION > 8]*/
 	@Deprecated(forRemoval = true, since = "1.8")
-	/*[ELSE]*/
+	@SuppressWarnings("removal")
+	/*[ELSE] JAVA_SPEC_VERSION > 8 */
 	@Deprecated
-	/*[ENDIF]*/
+	/*[ENDIF] JAVA_SPEC_VERSION > 8 */
 	@Override
 	public final long getProcessVirtualMemorySize() {
 		return this.getProcessVirtualMemorySizeImpl();
 	}
+/*[ENDIF] JAVA_SPEC_VERSION < 19 */
 
 	/**
 	 * Returns the amount of virtual memory used by the process in bytes,
@@ -425,6 +452,7 @@ public class ExtendedOperatingSystemMXBeanImpl extends OperatingSystemMXBeanImpl
 	 */
 	private native long getProcessVirtualMemorySizeImpl();
 
+	/*[IF JAVA_SPEC_VERSION < 14] - inherit the default method in Java 14+ */
 	/**
 	 * {@inheritDoc}
 	 */
@@ -432,9 +460,11 @@ public class ExtendedOperatingSystemMXBeanImpl extends OperatingSystemMXBeanImpl
 	public final double getSystemCpuLoad() {
 		return this.getSystemCpuLoadImpl();
 	}
+	/*[ENDIF] JAVA_SPEC_VERSION < 14 */
 
 	private native double getSystemCpuLoadImpl();
 
+	/*[IF JAVA_SPEC_VERSION < 14] - inherit the default method in Java 14+ */
 	/**
 	 * {@inheritDoc}
 	 */
@@ -442,19 +472,23 @@ public class ExtendedOperatingSystemMXBeanImpl extends OperatingSystemMXBeanImpl
 	public long getTotalPhysicalMemorySize() {
 		return this.getTotalPhysicalMemoryImpl();
 	}
+	/*[ENDIF] JAVA_SPEC_VERSION < 14 */
 
+/*[IF JAVA_SPEC_VERSION < 19]*/
 	/**
-	 * Deprecated: use getTotalPhysicalMemorySize()
+	 * {@inheritDoc}
 	 */
-	/*[IF Sidecar19-SE]
+	/*[IF JAVA_SPEC_VERSION > 8]*/
 	@Deprecated(forRemoval = true, since = "1.8")
-	/*[ELSE]*/
+	@SuppressWarnings("removal")
+	/*[ELSE] JAVA_SPEC_VERSION > 8 */
 	@Deprecated
-	/*[ENDIF]*/
+	/*[ENDIF] JAVA_SPEC_VERSION > 8 */
 	@Override
 	public final long getTotalPhysicalMemory() {
 		return this.getTotalPhysicalMemoryImpl();
 	}
+/*[ENDIF] JAVA_SPEC_VERSION < 19 */
 
 	/**
 	 * @return the number of bytes used for physical memory
@@ -484,7 +518,7 @@ public class ExtendedOperatingSystemMXBeanImpl extends OperatingSystemMXBeanImpl
 	@Override
 	public final boolean isHardwareEmulated() throws UnsupportedOperationException {
 		if (HwEmulResult.UNKNOWN == isHwEmulated) {
-			String osName = com.ibm.oti.vm.VM.getVMLangAccess().internalGetProperties().getProperty("os.name"); //$NON-NLS-1$
+			String osName = VM.internalGetProperties().getProperty("os.name"); //$NON-NLS-1$
 			String hwModel = getHardwareModel();
 
 			if ((null != osName) && (null != hwModel)) {

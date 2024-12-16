@@ -1,6 +1,6 @@
-/*[INCLUDE-IF Sidecar18-SE]*/
-/*******************************************************************************
- * Copyright (c) 2009, 2019 IBM Corp. and others
+/*[INCLUDE-IF JAVA_SPEC_VERSION >= 8]*/
+/*
+ * Copyright IBM Corp. and others 2009
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,16 +16,18 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
 package openj9.internal.tools.attach.target;
+
+import com.ibm.oti.vm.VM;
 
 import java.io.ByteArrayInputStream;
 import java.io.Closeable;
-import java.io.IOException;
 import java.io.InputStream;
+import java.io.IOException;
 import java.io.OutputStream;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -35,19 +37,22 @@ import java.security.AccessController;
 import java.security.PrivilegedAction;
 import java.util.Objects;
 import java.util.Properties;
-
 import java.util.ServiceLoader;
 
-/*[IF Sidecar19-SE]*/
+/*[IF JAVA_SPEC_VERSION >= 9]*/
 import jdk.internal.vm.VMSupport;
-/*[ELSE] Sidecar19-SE
+/*[ELSE] JAVA_SPEC_VERSION >= 9 */
 import sun.misc.VMSupport;
-/*[ENDIF] Sidecar19-SE */
+/*[ENDIF] JAVA_SPEC_VERSION >= 9 */
 import static openj9.internal.tools.attach.target.IPC.LOCAL_CONNECTOR_ADDRESS;
+
+/*[IF CRIU_SUPPORT]*/
+import openj9.internal.criu.NotCheckpointSafe;
+/*[ENDIF] CRIU_SUPPORT */
 
 /**
  * This class handles established connections initiated by another VM
- * 
+ *
  */
 final class Attachment extends Thread implements Response {
 
@@ -71,18 +76,18 @@ final class Attachment extends Thread implements Response {
 		static final Throwable managementAgentMethodThrowable;
 		static {
 			managementAgentMethodThrowable = AccessController.doPrivileged((PrivilegedAction<Throwable>) () -> {
-				String agentClassName = 
-						/*[IF Sidecar19-SE]*/
+				String agentClassName =
+						/*[IF JAVA_SPEC_VERSION >= 9]*/
 						"jdk.internal.agent.Agent"; //$NON-NLS-1$
-						/*[ELSE] Sidecar19-SE
+						/*[ELSE] JAVA_SPEC_VERSION >= 9
 						"sun.management.Agent"; //$NON-NLS-1$
-						/*[ENDIF] Sidecar19-SE */
+						/*[ENDIF] JAVA_SPEC_VERSION >= 9 */
 				IPC.logMessage("Loading " + agentClassName); //$NON-NLS-1$
 				Throwable mamtTemp = null;
 				try {
 					Class<?> agentClass = null;
 					Class<?> startRemoteArgumentType = null;
-					/*[IF Sidecar19-SE]*/
+					/*[IF JAVA_SPEC_VERSION >= 9]*/
 					String jmaName = "jdk.management.agent"; //$NON-NLS-1$
 					java.lang.Module jmaModule = jdk.internal.module.Modules.loadModule(jmaName);
 					/* this should not happen because loadModule() should throw java.lang.module.FindException */
@@ -94,15 +99,15 @@ final class Attachment extends Thread implements Response {
 					if (null == agentClass) {
 						throw new ClassNotFoundException("Cannot load " + agentClassName); //$NON-NLS-1$
 					}
-					/*[ELSE] Sidecar19-SE */
+					/*[ELSE] JAVA_SPEC_VERSION >= 9 */
 					agentClass = Class.forName(agentClassName);
-					/*[ENDIF] Sidecar19-SE */
+					/*[ENDIF] JAVA_SPEC_VERSION >= 9 */
 
-					/*[IF Sidecar19-SE | Sidecar18-SE-OpenJ9]*/
+					/*[IF (JAVA_SPEC_VERSION >= 9) | Sidecar18-SE-OpenJ9]*/
 					startRemoteArgumentType = String.class;
-					/*[ELSE] Sidecar19-SE | Sidecar18-SE-OpenJ9 */
+					/*[ELSE] (JAVA_SPEC_VERSION >= 9) | Sidecar18-SE-OpenJ9 */
 					startRemoteArgumentType = Properties.class;
-					/*[ENDIF] Sidecar19-SE | Sidecar18-SE-OpenJ9 */
+					/*[ENDIF] (JAVA_SPEC_VERSION >= 9) | Sidecar18-SE-OpenJ9 */
 					startLocalManagementAgentMethod = agentClass.getDeclaredMethod(START_LOCAL_MANAGEMENT_AGENT);
 					startRemoteManagementAgentMethod = agentClass.getDeclaredMethod(START_REMOTE_MANAGEMENT_AGENT, startRemoteArgumentType);
 					startLocalManagementAgentMethod.setAccessible(true);
@@ -118,22 +123,21 @@ final class Attachment extends Thread implements Response {
 	}
 
 	/**
-	 * @param attachHandler
-	 *            main handler object for this VM
-	 * @param rc
-	 *            information to connect to attacher
+	 * @param attachHandler main handler object for this VM
+	 * @param portNumber    port on which to attach
+	 * @param key           Security key to validate transaction
 	 */
-	Attachment(AttachHandler attachHandler, Reply rc) {
-		setName("Attachment " + rc.getPortNumber()); //$NON-NLS-1$
-		portNumber = rc.getPortNumber();
-		this.key = rc.getKey();
+	Attachment(AttachHandler attachHandler, int portNumber, String key) {
+		super("Attachment portNumber: " + portNumber); //$NON-NLS-1$
+		this.portNumber = portNumber;
+		this.key = key;
 		this.handler = attachHandler;
 		setDaemon(true);
 	}
 
 	/**
 	 * Create an attachment with a socket connection to the attacher
-	 * 
+	 *
 	 * @param portNum
 	 *            for socket to connect to attacher
 	 * @return true if successfully connected
@@ -202,6 +206,9 @@ final class Attachment extends Thread implements Response {
 	 *            function when requested by the attacher.
 	 * @return true on error, detach command, or command socket closed
 	 */
+/*[IF CRIU_SUPPORT]*/
+	@NotCheckpointSafe
+/*[ENDIF] CRIU_SUPPORT */
 	boolean doCommand(InputStream cmdStream, OutputStream respStream) {
 		try {
 			byte[] cmdBytes = AttachmentConnection.streamReceiveBytes(cmdStream, true);
@@ -221,8 +228,8 @@ final class Attachment extends Thread implements Response {
 							+ " " + attachError); //$NON-NLS-1$
 				}
 			} else if (cmd.startsWith(Command.GET_SYSTEM_PROPERTIES)) {
-				Properties internalProperties = com.ibm.oti.vm.VM.getVMLangAccess().internalGetProperties();
-				String argumentString = String.join(" ", com.ibm.oti.vm.VM.getVMArgs()); //$NON-NLS-1$
+				Properties internalProperties = VM.internalGetProperties();
+				String argumentString = String.join(" ", VM.getVMArgs()); //$NON-NLS-1$
 				Properties newProperties = (Properties) internalProperties.clone();
 				newProperties.put("sun.jvm.args", argumentString); //$NON-NLS-1$
 				replyWithProperties(newProperties);
@@ -238,7 +245,7 @@ final class Attachment extends Thread implements Response {
 					return false;
 				}
 			} else if (cmd.startsWith(Command.START_MANAGEMENT_AGENT)) {
-				/* 
+				/*
 				 * Check if the Properties argument is embedded with the command.
 				 * If so, it will be separated by a null byte
 				 */
@@ -247,7 +254,7 @@ final class Attachment extends Thread implements Response {
 					++argsStart;
 				}
 				++argsStart; /* skip over the null, if any */
-				
+
 				Properties agentProperties = null;
 				if (argsStart < cmdBytes.length) {
 					agentProperties = IPC.receiveProperties(new ByteArrayInputStream(cmdBytes, argsStart, cmdBytes.length - argsStart), false);
@@ -282,7 +289,7 @@ final class Attachment extends Thread implements Response {
 						+ " unexpected exception or error: " + e.toString()); //$NON-NLS-1$
 			} catch (IOException e1) {
 				IPC.logMessage("IOException sending error response" + e1.toString()); //$NON-NLS-1$
-			}		
+			}
 			return true;
 		}
 		return false;
@@ -295,7 +302,7 @@ final class Attachment extends Thread implements Response {
 	private void replyWithProperties(Properties props) throws IOException {
 		IPC.sendProperties(props, responseStream);
 	}
-	
+
 	/**
 	 * close socket and other cleanup
 	 */
@@ -318,7 +325,7 @@ final class Attachment extends Thread implements Response {
 	/**
 	 * parse and execute a loadAgent command. Set the error string if there is a
 	 * problem
-	 * 
+	 *
 	 * @param cmd
 	 *            command string of the form
 	 *            "ATTACH_LOADAGENT(agentname,options)" or
@@ -358,7 +365,7 @@ final class Attachment extends Thread implements Response {
 	}
 
 	/**
-	 * 
+	 *
 	 * @param agentLibrary
 	 *            name of the agent library
 	 * @param options
@@ -367,11 +374,11 @@ final class Attachment extends Thread implements Response {
 	 *            add prefixes and suffixes to the library name.
 	 * @return null if successful, diagnostic string if error
 	 */
-	String loadAgentLibrary(String agentLibrary, String options,
+	static String loadAgentLibrary(String agentLibrary, String options,
 			boolean decorate) {
 		IPC.logMessage("loadAgentLibrary " + agentLibrary + ':' + options + " decorate=" + decorate); //$NON-NLS-1$ //$NON-NLS-2$
 		ClassLoader loader = java.lang.ClassLoader.getSystemClassLoader();
-		int status = loadAgentLibraryImpl(loader ,agentLibrary,  options, decorate);
+		int status = loadAgentLibraryImpl(true, loader, agentLibrary, options, decorate);
 		if (0 != status) {
 			if (-1 == status) {
 				return Response.EXCEPTION_AGENT_LOAD_EXCEPTION + ' '
@@ -385,16 +392,21 @@ final class Attachment extends Thread implements Response {
 	}
 
 	/**
-	 * 
+	 * @param dummy
+	 *            a dummy arg to ensure that current native method has the
+	 *            ClassLoader instance as its second argument required by
+	 *            jnimisc.cpp:getCurrentClassLoader()
+	 * @param loader
+	 *            the ClassLoader instance
 	 * @param agentLibrary
 	 *            name of the agent library
 	 * @param options
 	 *            arguments to the library's Agent_OnAttach function
 	 * @param decorate
-	 *            add prefixes and suffixes to the library name.
+	 *            add prefixes and suffixes to the library name
 	 * @return 0 if all went well
 	 */
-	private native int loadAgentLibraryImpl(ClassLoader loader,String agentLibrary,
+	private static native int loadAgentLibraryImpl(boolean dummy, ClassLoader loader, String agentLibrary,
 			String options, boolean decorate);
 
 	private int getPortNumber() {
@@ -411,13 +423,13 @@ final class Attachment extends Thread implements Response {
 			IPC.logMessage("startAgent"); //$NON-NLS-1$
 			if (null != MethodRefsHolder.startRemoteManagementAgentMethod) {
 				Object startArgument;
-				/*[IF Sidecar19-SE | Sidecar18-SE-OpenJ9]*/
+				/*[IF (JAVA_SPEC_VERSION >= 9) | Sidecar18-SE-OpenJ9]*/
 				startArgument = agentProperties.entrySet().stream()
 						.map(entry -> entry.getKey() + "=" + entry.getValue()) //$NON-NLS-1$
 						.collect(java.util.stream.Collectors.joining(",")); //$NON-NLS-1$
-				/*[ELSE] Sidecar19-SE | Sidecar18-SE-OpenJ9 */
+				/*[ELSE] (JAVA_SPEC_VERSION >= 9) | Sidecar18-SE-OpenJ9 */
 				startArgument = agentProperties;
-				/*[ENDIF] Sidecar19-SE | Sidecar18-SE-OpenJ9 */
+				/*[ENDIF] (JAVA_SPEC_VERSION >= 9) | Sidecar18-SE-OpenJ9 */
 				MethodRefsHolder.startRemoteManagementAgentMethod.invoke(null, startArgument);
 				return true;
 			}
@@ -457,7 +469,7 @@ final class Attachment extends Thread implements Response {
 	}
 
 	static String saveLocalConnectorAddress() {
-		Properties systemProperties = com.ibm.oti.vm.VM.getVMLangAccess().internalGetProperties();
+		Properties systemProperties = VM.internalGetProperties();
 		String addr;
 		synchronized (systemProperties) {
 			addr = systemProperties.getProperty(LOCAL_CONNECTOR_ADDRESS);

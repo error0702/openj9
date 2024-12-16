@@ -1,6 +1,6 @@
 /*[INCLUDE-IF Sidecar18-SE]*/
-/*******************************************************************************
- * Copyright (c) 2007, 2016 IBM Corp. and others
+/*
+ * Copyright IBM Corp. and others 2007
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,10 +16,10 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
 package com.ibm.jvm.trace;
 
 import java.util.*;
@@ -32,7 +32,7 @@ public interface TraceThread {
 	/**
 	 * @return a TracePoint Iterator that can be used to walk each TracePoint on the
 	 * current TraceThread in chronological order. Note that the Iterator consumes data
-	 * as it walks, and as such each TraceThread can be Iterated over once only. 
+	 * as it walks, and as such each TraceThread can be Iterated over once only.
 	 * Subsequent attempts to Iterate will return an empty Iterator, as will an attempt
 	 * to iterate over an unpopulated TraceThread.
 	 */

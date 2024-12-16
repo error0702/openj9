@@ -1,5 +1,5 @@
 <!--
-Copyright (c) 2017, 2021 IBM Corp. and others
+Copyright IBM Corp. and others 2017
 
 This program and the accompanying materials are made available under
 the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@ Exception [1] and GNU General Public License, version 2 with the
 OpenJDK Assembly Exception [2].
 
 [1] https://www.gnu.org/software/classpath/license.html
-[2] http://openjdk.java.net/legal/assembly-exception.html
+[2] https://openjdk.org/legal/assembly-exception.html
 
-SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
 -->
 
 [Eclipse OpenJ9 Jenkins Builds](https://openj9-jenkins.osuosl.org/)
@@ -74,13 +74,16 @@ This folder contains Jenkins pipeline scripts that are used in the OpenJ9 Jenkin
         - Shortname: win32
     - OSX on x86-64
         - Spec: x86-64_mac
-        - Shortname: osx
+        - Shortname: osx or xmac
     - OSX on x86-64 largeheap/non-compressed references
         - Spec: x86-64_mac_xl
         - Shortname: osxlargeheap or osxxl
+    - OSX on aarch64 (currently largeheap only)
+        - Spec: aarch64_mac
+        - Shortname: amac
     - ALL
         - Launches a subset of 'all' platforms
-        - ppc64le_linux, ppc64le_linux_xl, s390x_linux, s390x_linux_xl, x86-64_linux, x86-64_linux_xl, ppc64_aix, x86-64_windows, x86-32_windows, x86-64_mac
+        - ppc64le_linux, s390x_linux, x86-64_linux, aarch64_linux, ppc64_aix, x86-64_windows, x86-32_windows, x86-64_mac, aarch64_mac
 - Many specs support a suffix of `_cm` or `_uma` (omit the leading underscore for shortnames) to override the default build system.
 - OpenJ9 committers can request builds by commenting in a pull request
     - Format: `Jenkins <build type> <level>.<group>[+<test_flag>] <platform>[,<platform>,...,<platform>] jdk<version>[,jdk<version>,...,jdk<version>]`
@@ -113,11 +116,11 @@ You can request a Pull Request build from the Eclipse OpenJ9 repository - [openj
 
 ##### Dependent Changes
 
-- If you have dependent change(s) in either eclipse/omr, eclipse-openj9/openj9-omr, or ibmruntimes/openj9-openjdk-jdk\*, you can build & test with all needed changes
+- If you have dependent change(s) in either eclipse-omr/omr, eclipse-openj9/openj9-omr, or ibmruntimes/openj9-openjdk-jdk\*, you can build & test with all needed changes
 - Request a build by including the PR ref or branch name in your trigger comment
 - Ex. Dependent change in OMR Pull Request `#123`
     - `Jenkins test sanity xlinux jdk8 depends eclipse/omr#123`
-- Ex. Dependent change in eclipse/omr master branch (useful if a dependent OMR PR is already merged)
+- Ex. Dependent change in eclipse-omr/omr master branch (useful if a dependent OMR PR is already merged)
     - `Jenkins test sanity xlinux jdk8 depends eclipse/omr#master`
 - Ex. Dependent change in OpenJ9-OMR Pull Request `#456`
     - `Jenkins test sanity xlinux jdk8 depends eclipse-openj9/openj9-omr#456`
@@ -144,9 +147,6 @@ You can request a Pull Request build from the Eclipse OpenJ9 repository - [openj
 
 - To trigger a Line Endings Check
     - `Jenkins line endings check`
-
-- To trigger a Copyright Check
-    - `Jenkins copyright check`
 
 - To trigger a SignedOffBy Check (Only applicable to the Extensions repos)
     - `Jenkins signed off by check`
@@ -178,13 +178,6 @@ Other PR jobs
     - Trigger:
         - Automatically builds on every PR
         - Retrigger with `Jenkins line endings check`
-
-- PullRequest-CopyrightCheck-`<repo>`
-    - Description:
-        - Checks the files modified in a pull request have copyright with current year
-    - Trigger:
-        - Automatically builds on every PR
-        - Retrigger with `Jenkins copyright check`
 
 - PullRequest-signedOffByCheck-`<repo>`
     - Description:
@@ -250,7 +243,7 @@ Infrastructure pipelines are available [**here**](https://openj9-jenkins.osuosl.
 - Mirror-OMR-to-OpenJ9-OMR
     - [![Build Status](https://openj9-jenkins.osuosl.org/buildStatus/icon?job=Mirror-OMR-to-OpenJ9-OMR)](https://openj9-jenkins.osuosl.org/job/Mirror-OMR-to-OpenJ9-OMR)
     - Description:
-        - Mirrors [eclipse/omr/master](https://github.com/eclipse/omr/tree/master) to [eclipse-openj9/openj9-omr/master](https://github.com/eclipse-openj9/openj9-omr/tree/master)
+        - Mirrors [eclipse-omr/omr/master](https://github.com/eclipse-omr/omr/tree/master) to [eclipse-openj9/openj9-omr/master](https://github.com/eclipse-openj9/openj9-omr/tree/master)
         - Triggers `Pipeline-OMR-Acceptance` when there is new content
     - Trigger:
         - Build periodically, 15 minutes

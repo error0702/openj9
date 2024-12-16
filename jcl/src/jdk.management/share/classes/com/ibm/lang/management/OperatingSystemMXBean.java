@@ -1,6 +1,6 @@
 /*[INCLUDE-IF Sidecar17]*/
-/*******************************************************************************
- * Copyright (c) 2005, 2021 IBM Corp. and others
+/*
+ * Copyright IBM Corp. and others 2005
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,50 +16,88 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
-
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
 package com.ibm.lang.management;
 
 /**
- * OpenJ9 platform management extension interface for the Operating System on which the Java Virtual Machine is running.
+ * <p>OpenJ9 platform management extension interface for the Operating System on which the Java Virtual Machine is running.</p>
  * <br>
- * <table border="1">
- * <caption><b>Usage example for the {@link com.ibm.lang.management.OperatingSystemMXBean}</b></caption>
- * <tr> <td> <pre>
+ * <b>Usage example for the {@link com.ibm.lang.management.OperatingSystemMXBean}</b>
+ * <pre>
  * {@code
  * ...
  * com.ibm.lang.management.OperatingSystemMXBean osmxbean = null;
  * osmxbean = (com.ibm.lang.management.OperatingSystemMXBean) ManagementFactory.getOperatingSystemMXBean();
  * ...
  * }
- * </pre></td></tr></table>
+ * </pre>
+ * <br>
  *
+ * The following methods depend on certain information that is not available on z/OS;
+ * their return values are listed here:
+ * <table border="1">
+ * <caption><b>Methods not fully supported on z/OS</b></caption>
+ * <tr>
+ * <th style="text-align:left">Method</th>
+ * <th style="text-align:left">Return Value</th>
+ * </tr>
+ * <tr>
+ * <td>{@link #getCommittedVirtualMemorySize()}</td>
+ * <td>{@code -1}</td>
+ * </tr>
+/*[IF JAVA_SPEC_VERSION >= 14]
+ * <tr>
+ * <td>{@link #getCpuLoad()}</td>
+ * <td>{@code -3.0} ({@link com.ibm.lang.management.CpuLoadCalculationConstants#UNSUPPORTED_VALUE CpuLoadCalculationConstants.UNSUPPORTED_VALUE})</td>
+ * </tr>
+ * <tr>
+ * <td>{@link #getFreeMemorySize()}</td>
+ * <td>{@code -1}</td>
+ * </tr>
+/*[ENDIF] JAVA_SPEC_VERSION >= 14
+ * <tr>
+ * <td>{@link #getFreePhysicalMemorySize()}</td>
+ * <td>{@code -1}</td>
+ * </tr>
+ * <tr>
+ * <td>{@link #getProcessPhysicalMemorySize()}</td>
+ * <td>{@code -1}</td>
+ * </tr>
+ * <tr>
+ * <td>{@link #getProcessPrivateMemorySize()}</td>
+ * <td>{@code -1}</td>
+ * </tr>
+ * <tr>
+ * <td>{@link #getSystemCpuLoad()}</td>
+ * <td>{@code -3.0} ({@link com.ibm.lang.management.CpuLoadCalculationConstants#UNSUPPORTED_VALUE CpuLoadCalculationConstants.UNSUPPORTED_VALUE})</td>
+ * </tr>
+ * </table>
+ *
+ * @see CpuLoadCalculationConstants
  * @since 1.5
  */
 public interface OperatingSystemMXBean extends com.sun.management.OperatingSystemMXBean {
 
+/*[IF JAVA_SPEC_VERSION < 19]*/
 	/**
-	 * Returns the total available physical memory on the system in bytes.
-	 *
-	 * @since 1.8
-	 * @return the total available physical memory on the system in bytes.
-	 */
-	public long getTotalPhysicalMemorySize();
-
-	/**
+/*[IF JAVA_SPEC_VERSION >= 14]
+	 * Deprecated: use getTotalMemorySize()
+/*[ELSE] IF JAVA_SPEC_VERSION >= 14
 	 * Deprecated: use getTotalPhysicalMemorySize()
+/*[ENDIF] IF JAVA_SPEC_VERSION >= 14
 	 *
 	 * @return the total available physical memory on the system in bytes.
 	 */
-	/*[IF Sidecar19-SE]
+	/*[IF JAVA_SPEC_VERSION > 8]
 	@Deprecated(forRemoval = true, since = "1.8")
-	/*[ELSE]*/
+	/*[ELSE] JAVA_SPEC_VERSION > 8 */
 	@Deprecated
-	/*[ENDIF]*/
+	/*[ENDIF] JAVA_SPEC_VERSION > 8 */
 	public long getTotalPhysicalMemory();
+/*[ENDIF] JAVA_SPEC_VERSION < 19 */
 
 	/**
 	 * Returns the collective capacity of the virtual processors in
@@ -86,53 +124,17 @@ public interface OperatingSystemMXBean extends com.sun.management.OperatingSyste
 	 */
 	public long getProcessCpuTime();
 
+/*[IF JAVA_SPEC_VERSION < 19]*/
 	/**
 	 * Deprecated. Use getProcessCpuTime()
 	 */
-	/*[IF Sidecar19-SE]
+	/*[IF JAVA_SPEC_VERSION >= 9]
 	@Deprecated(forRemoval = true, since = "1.8")
-	/*[ELSE]*/
+	/*[ELSE] JAVA_SPEC_VERSION >= 9 */
 	@Deprecated
-	/*[ENDIF]*/
+	/*[ENDIF] JAVA_SPEC_VERSION >= 9 */
 	public long getProcessCpuTimeByNS();
-
-	/**
-	 * Returns the recent CPU usage for the whole system. This value is a double in
-	 * the [0.0,1.0] interval. A value of 0.0 means all CPUs were idle in the recent
-	 * period of time observed, while a value of 1.0 means that all CPUs were actively
-	 * running 100% of the time during the recent period of time observed. All values
-	 * between 0.0 and 1.0 are possible. The first call to the method always
-	 * returns {@link com.ibm.lang.management.CpuLoadCalculationConstants}.ERROR_VALUE
-	 * (-1.0), which marks the starting point. If the Java Virtual Machine's recent CPU
-	 * usage is not available, the method returns a negative error code from
-	 * {@link com.ibm.lang.management.CpuLoadCalculationConstants}.
-	 * <p>getSystemCpuLoad might not return the same value that is reported by operating system
-	 * utilities such as Unix {@code top} or Windows task manager.</p>
-	 *
-	 * @return A value between 0 and 1.0, or a negative error code from
-	 *         {@link com.ibm.lang.management.CpuLoadCalculationConstants} in case
-	 *         of an error. On the first call to the API,
-	 *         {@link com.ibm.lang.management.CpuLoadCalculationConstants}.ERROR_VALUE
-	 *         (-1.0) shall be returned.
-	 * <ul>
-	 * <li>Because this information is not available on z/OS, the call returns
-	 * {@link com.ibm.lang.management.CpuLoadCalculationConstants}.UNSUPPORTED_VALUE
-	 * (-3.0).
-	 * </ul>
-	 * @see CpuLoadCalculationConstants
-	 */
-	public double getSystemCpuLoad();
-
-	/**
-	 * Returns the amount of physical memory that is available on the system in bytes.
-	 * Returns -1 if the value is unavailable on this platform or in the case of an error.
-	 * <ul>
-	 * <li>This information is not available on the z/OS platform.
-	 * </ul>
-	 *
-	 * @return amount of physical memory available in bytes.
-	 */
-	public long getFreePhysicalMemorySize();
+/*[ENDIF] JAVA_SPEC_VERSION < 19 */
 
 	/**
 	 * Returns the amount of virtual memory used by the process in bytes.
@@ -145,17 +147,20 @@ public interface OperatingSystemMXBean extends com.sun.management.OperatingSyste
 	 * @since   1.8
 	 * @return amount of virtual memory used by the process in bytes.
 	 */
+	@Override
 	public long getCommittedVirtualMemorySize();
 
+/*[IF JAVA_SPEC_VERSION < 19]*/
 	/**
 	 * Deprecated.  Use getCommittedVirtualMemorySize()
 	 */
-	/*[IF Sidecar19-SE]
+	/*[IF JAVA_SPEC_VERSION >= 9]
 	@Deprecated(forRemoval = true, since = "1.8")
-	/*[ELSE]*/
+	/*[ELSE] JAVA_SPEC_VERSION >= 9 */
 	@Deprecated
-	/*[ENDIF]*/
+	/*[ENDIF] JAVA_SPEC_VERSION >= 9 */
 	public long getProcessVirtualMemorySize();
+/*[ENDIF] JAVA_SPEC_VERSION < 19 */
 
 	/**
 	 * Returns the amount of private memory used by the process in bytes.
@@ -187,6 +192,7 @@ public interface OperatingSystemMXBean extends com.sun.management.OperatingSyste
 	 * @return the total amount of swap space in bytes.
 	 * @since   1.7
 	 */
+	@Override
 	public long getTotalSwapSpaceSize();
 
 	/**
@@ -195,6 +201,7 @@ public interface OperatingSystemMXBean extends com.sun.management.OperatingSyste
 	 * @return the amount of free swap space in bytes.
 	 * @since   1.7
 	 */
+	@Override
 	public long getFreeSwapSpaceSize();
 
 	/**
@@ -219,6 +226,7 @@ public interface OperatingSystemMXBean extends com.sun.management.OperatingSyste
 	 * @see CpuLoadCalculationConstants
 	 * @since   1.7
 	 */
+	@Override
 	public double getProcessCpuLoad();
 
 	/**

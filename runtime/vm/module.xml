@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-Copyright (c) 2001, 2021 IBM Corp. and others
+Copyright IBM Corp. and others 2001
 
 This program and the accompanying materials are made available under
 the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,9 +16,9 @@ Exception [1] and GNU General Public License, version 2 with the
 OpenJDK Assembly Exception [2].
 
 [1] https://www.gnu.org/software/classpath/license.html
-[2] http://openjdk.java.net/legal/assembly-exception.html
+[2] https://openjdk.org/legal/assembly-exception.html
 
-SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
 -->
 <module>
 	<exports group="all">
@@ -67,6 +67,7 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 			<include path="j9gcinclude"/>
 			<include path="$(OMR_DIR)/gc/include" type="relativepath"/>
 			<include path="j9shr_include"/>
+			<include path="port/common" type="rootpath"/>
 			<include path="port/zos390" type="rootpath">
 				<include-if condition="spec.zos_390.*"/>
 			</include>
@@ -102,11 +103,14 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 			<makefilestub data="UMA_OBJECTS:=$(filter-out safeseh$(UMA_DOT_O),$(UMA_OBJECTS))">
 				<exclude-if condition="spec.win_x86.* and not spec.flags.J9VM_ENV_DATA64"/>
 			</makefilestub>
-			<makefilestub data="UMA_OBJECTS:=$(filter-out criuhelpers$(UMA_DOT_O),$(UMA_OBJECTS))">
+			<makefilestub data="UMA_OBJECTS:=$(filter-out CRIUHelpers$(UMA_DOT_O),$(UMA_OBJECTS))">
 				<exclude-if condition="spec.flags.opt_criuSupport"/>
 			</makefilestub>
 			<makefilestub data="UMA_OBJECTS:=$(filter-out MHInterpreterCompressed$(UMA_DOT_O) MHInterpreterFull$(UMA_DOT_O),$(UMA_OBJECTS))">
 				<exclude-if condition="spec.flags.opt_methodHandle"/>
+			</makefilestub>
+			<makefilestub data="UMA_OBJECTS:=$(filter-out ContinuationHelpers$(UMA_DOT_O),$(UMA_OBJECTS))">
+				<exclude-if condition="spec.java19"/>
 			</makefilestub>
 		</makefilestubs>
 		<vpaths>
@@ -117,6 +121,9 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 				<include-if condition="spec.win_x86.* and not spec.flags.J9VM_ENV_DATA64"/>
 			</vpath>
 			<vpath pattern="stackswap.m4" path="wa64" augmentObjects="true" type="relativepath">
+				<include-if condition="spec.win_x86.* and spec.flags.J9VM_ENV_DATA64"/>
+			</vpath>
+			<vpath pattern="UpcallThunkGen.cpp" path="wa64" augmentObjects="true" type="relativepath">
 				<include-if condition="spec.win_x86.* and spec.flags.J9VM_ENV_DATA64"/>
 			</vpath>
 			<vpath pattern="stackswap.m4" path="xi32" augmentObjects="true" type="relativepath">
@@ -130,10 +137,17 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 				<include-if condition="spec.linux_x86.* and spec.flags.J9VM_ENV_DATA64"/>
 				<include-if condition="spec.osx_x86.* and spec.flags.J9VM_ENV_DATA64"/>
 			</vpath>
+			<vpath pattern="UpcallThunkGen.cpp" path="xa64" augmentObjects="true" type="relativepath">
+				<include-if condition="spec.linux_x86.* and spec.flags.J9VM_ENV_DATA64"/>
+				<include-if condition="spec.osx_x86.* and spec.flags.J9VM_ENV_DATA64"/>
+			</vpath>
 			<vpath pattern="unsafeHelper.s" path="xi32" augmentObjects="true" type="relativepath">
 				<include-if condition="spec.linux_x86.* and not spec.flags.J9VM_ENV_DATA64"/>
 			</vpath>
 			<vpath pattern="unsafeHelper.s" path="xl64" augmentObjects="true" type="relativepath">
+				<include-if condition="spec.linux_ppc-64.* and spec.flags.env_littleEndian"/>
+			</vpath>
+			<vpath pattern="UpcallThunkGen.cpp" path="xl64" augmentObjects="true" type="relativepath">
 				<include-if condition="spec.linux_ppc-64.* and spec.flags.env_littleEndian"/>
 			</vpath>
 			<vpath pattern="unsafeHelper.s" path="ap32" augmentObjects="true" type="relativepath">
@@ -142,10 +156,16 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 			<vpath pattern="unsafeHelper.s" path="ap64" augmentObjects="true" type="relativepath">
 				<include-if condition="spec.aix_ppc.* and spec.flags.J9VM_ENV_DATA64"/>
 			</vpath>
+			<vpath pattern="UpcallThunkGen.cpp" path="ap64" augmentObjects="true" type="relativepath">
+				<include-if condition="spec.aix_ppc.* and spec.flags.J9VM_ENV_DATA64"/>
+			</vpath>
 			<vpath pattern="unsafeHelper.s" path="xz31" augmentObjects="true" type="relativepath">
 				<include-if condition="spec.linux_390.* and not spec.flags.J9VM_ENV_DATA64"/>
 			</vpath>
 			<vpath pattern="unsafeHelper.s" path="xz64" augmentObjects="true" type="relativepath">
+				<include-if condition="spec.linux_390.* and spec.flags.J9VM_ENV_DATA64"/>
+			</vpath>
+			<vpath pattern="UpcallThunkGen.cpp" path="xz64" augmentObjects="true" type="relativepath">
 				<include-if condition="spec.linux_390.* and spec.flags.J9VM_ENV_DATA64"/>
 			</vpath>
 			<vpath pattern="unsafeHelper.s" path="xz64" augmentObjects="true" type="relativepath">
@@ -161,6 +181,9 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 				<include-if condition="spec.linux_arm.* and not spec.flags.J9VM_ENV_DATA64"/>
 			</vpath>
 			<vpath pattern="unsafeHelper.m4" path="xr64" augmentObjects="true" type="relativepath">
+				<include-if condition="spec.linux_aarch64.*"/>
+			</vpath>
+			<vpath pattern="UpcallThunkGen.cpp" path="xr64" augmentObjects="true" type="relativepath">
 				<include-if condition="spec.linux_aarch64.*"/>
 			</vpath>
 			<vpath pattern="unsafeHelper.s" path="rv64" augmentObjects="true" type="relativepath">
@@ -189,9 +212,6 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 				<include-if condition="spec.flags.J9VM_OPT_ZIP_SUPPORT"/>
 			</library>
 			<library name="ffi"/>
-			<library name="j9jitbuilder">
-				<include-if condition="spec.flags.J9VM_OPT_PANAMA"/>
-			</library>
 		</libraries>
 	</artifact>
 </module>

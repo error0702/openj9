@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2001
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #ifndef ROMCLASSCREATIONCONTEXT_HPP_
@@ -182,6 +182,7 @@ public:
 	U_8 *classFileBytes() const { return _classFileBytes; }
 	UDATA classFileSize() const { return _classFileSize; }
 	UDATA findClassFlags() const {return _findClassFlags; }
+	void addFindClassFlags(UDATA flag) { _findClassFlags |= flag; }
 	U_8* className() const {return _className; }
 	UDATA classNameLength() const {return _classNameLength; }
 	U_8* hostPackageName() const {return _hostPackageName; }
@@ -232,13 +233,17 @@ public:
 	bool shouldPreserveLocalVariablesInfo() const { return 0 == (_bctFlags & (BCT_StripDebugVars|BCT_StripDebugAttributes)); }
 	bool shouldPreserveSourceFileName() const { return 0 == (_bctFlags & (BCT_StripDebugSource|BCT_StripDebugAttributes)); }
 	bool shouldPreserveSourceDebugExtension() const { return 0 == (_bctFlags & (BCT_StripSourceDebugExtension|BCT_StripDebugAttributes)); }
-	bool isClassUnsafe() const { return J9_FINDCLASS_FLAG_UNSAFE == (_findClassFlags & J9_FINDCLASS_FLAG_UNSAFE); }
-	bool isClassAnon() const { return J9_FINDCLASS_FLAG_ANON == (_findClassFlags & J9_FINDCLASS_FLAG_ANON); }
+	bool isClassUnsafe() const { return J9_ARE_ALL_BITS_SET(_findClassFlags, J9_FINDCLASS_FLAG_UNSAFE); }
+	bool isClassAnon() const { return J9_ARE_ALL_BITS_SET(_findClassFlags, J9_FINDCLASS_FLAG_ANON); }
 	bool alwaysSplitBytecodes() const { return J9_ARE_ANY_BITS_SET(_bctFlags, BCT_AlwaysSplitBytecodes); }
-	bool isClassHidden() const { return J9_FINDCLASS_FLAG_HIDDEN == (_findClassFlags & J9_FINDCLASS_FLAG_HIDDEN);}
-	bool isHiddenClassOptNestmateSet() const { return J9_FINDCLASS_FLAG_CLASS_OPTION_NESTMATE == (_findClassFlags & J9_FINDCLASS_FLAG_CLASS_OPTION_NESTMATE);}
-	bool isHiddenClassOptStrongSet() const { return J9_FINDCLASS_FLAG_CLASS_OPTION_STRONG == (_findClassFlags & J9_FINDCLASS_FLAG_CLASS_OPTION_STRONG);}
+	bool isClassHidden() const { return J9_ARE_ALL_BITS_SET(_findClassFlags, J9_FINDCLASS_FLAG_HIDDEN); }
+	bool isHiddenClassOptNestmateSet() const { return J9_ARE_ALL_BITS_SET(_findClassFlags, J9_FINDCLASS_FLAG_CLASS_OPTION_NESTMATE); }
+	bool isHiddenClassOptStrongSet() const { return J9_ARE_ALL_BITS_SET(_findClassFlags, J9_FINDCLASS_FLAG_CLASS_OPTION_STRONG); }
 	bool isDoNotShareClassFlagSet() const {return J9_ARE_ALL_BITS_SET(_findClassFlags, J9_FINDCLASS_FLAG_DO_NOT_SHARE);}
+	bool isLambdaClass() const { return J9_ARE_ALL_BITS_SET(_findClassFlags, J9_FINDCLASS_FLAG_LAMBDA); }
+#if defined(J9VM_OPT_OPENJDK_METHODHANDLE)
+	bool isLambdaFormClass() const { return J9_ARE_ALL_BITS_SET(_findClassFlags, J9_FINDCLASS_FLAG_LAMBDAFORM); }
+#endif /* defined(J9VM_OPT_OPENJDK_METHODHANDLE) */
 
 	bool isClassUnmodifiable() const {
 		bool unmodifiable = false;
@@ -247,11 +252,6 @@ public:
 				&& (isClassAnon() || isClassHidden())
 			) {
 				unmodifiable = true;
-			} else if (NULL == J9VMJAVALANGOBJECT_OR_NULL(_javaVM)) {
-				/* Object is currently only allowed to be redefined in fast HCR */
-				if (areExtensionsEnabled(_javaVM)) {
-					unmodifiable = true;
-				}
 			}
 		}
 		return unmodifiable;
@@ -303,12 +303,14 @@ public:
 			&& isClassLoaderSharedClassesEnabled()
 			&& (!isClassUnsafe() || isUnsafeClassSharingEnabled())
 			&& (!isClassHidden() || isHiddenClassSharingEnabled())
-			&& !(isSharedClassesBCIEnabled()
-			&& (classFileBytesReplaced() || isCreatingIntermediateROMClass()))
+			&& !(isSharedClassesBCIEnabled() && (classFileBytesReplaced() || isCreatingIntermediateROMClass()))
 			&& (LOAD_LOCATION_PATCH_PATH != loadLocation())
 		) {
+			Trc_BCU_isROMClassShareable_TRUE(_classNameLength, _className);
 			return true;
 		} else {
+			Trc_BCU_isROMClassShareable_FALSE(_classNameLength, _className, isSharedClassesEnabled(), isClassLoaderSharedClassesEnabled(),
+					isSharedClassesEnabled() && isSharedClassesBCIEnabled(), classFileBytesReplaced(), isCreatingIntermediateROMClass(), loadLocation());
 			return false;
 		}
 	}
@@ -402,32 +404,31 @@ public:
 	{
 		if (!isRedefining() && !isRetransforming()) {
 			if (NULL != _className) {
-				U_16 classNameLenToCompare0 = (U_16)_classNameLength;
+				U_16 classNameLenToCompare0 = static_cast<U_16>(_classNameLength);
 				U_16 classNameLenToCompare1 = classNameLength;
 				BOOLEAN misMatch = FALSE;
 				if (isClassHidden()) {
+					/* For hidden classes, className has the ROM address appended, _className does not. */
+					classNameLenToCompare1 = static_cast<U_16>(_classNameLength);
+#if JAVA_SPEC_VERSION < 21
 					if (isROMClassShareable()) {
-						U_8* lambdaClass0 = (U_8*)getLastDollarSignOfLambdaClassName((const char*)_className, _classNameLength);
-						U_8* lambdaClass1 = (U_8*)getLastDollarSignOfLambdaClassName((const char*)className, classNameLength);
-						if ((NULL != lambdaClass0) 
-							&& (NULL != lambdaClass1)
-						) {
-							/**
-							 * Lambda class has class name: HostClassName$$Lambda$<IndexNumber>/0x0000000000000000. 
-							 * Do not need to compare the IndexNumber as it can be different from run to run.
-							 */
-							classNameLenToCompare0 = (U_16)(lambdaClass0 - _className + 1);
-							classNameLenToCompare1 = (U_16)(lambdaClass1 - className + 1);
-						} else if ((NULL == lambdaClass0) && (NULL == lambdaClass1)) {
-							/* for hidden class className has ROM address appended at the end, _className does not have that */
-							classNameLenToCompare1 = (U_16)_classNameLength;
-						} else {
+						/*
+						 * Before JDK21, Lambda class names are in the format:
+						 *	HostClassName$$Lambda$<IndexNumber>/<zeroed out ROM_ADDRESS>
+						 * Do not compare the IndexNumber as it can be different from run to run.
+						 */
+						U_8 *lambdaClass0 = reinterpret_cast<U_8 *>(getLastDollarSignOfLambdaClassName(
+									reinterpret_cast<const char *>(_className), _classNameLength));
+						U_8 *lambdaClass1 = reinterpret_cast<U_8 *>(getLastDollarSignOfLambdaClassName(
+									reinterpret_cast<const char *>(className), classNameLength));
+						if ((NULL != lambdaClass0) && (NULL != lambdaClass1)) {
+							classNameLenToCompare0 = static_cast<U_16>(lambdaClass0 - _className + 1);
+							classNameLenToCompare1 = static_cast<U_16>(lambdaClass1 - className + 1);
+						} else if ((NULL == lambdaClass0) != (NULL == lambdaClass1)) {
 							misMatch = TRUE;
 						}
-					} else {
-						/* for hidden class className has ROM address appended at the end, _className does not have that */
-						classNameLenToCompare1 = (U_16)_classNameLength;
 					}
+#endif /* JAVA_SPEC_VERSION < 21 */
 				}
 				if (misMatch
 				|| !J9UTF8_DATA_EQUALS(_className, classNameLenToCompare0, className, classNameLenToCompare1)
@@ -452,16 +453,30 @@ public:
 					return ClassNameMismatch;
 #undef J9WRONGNAME
 				}
-			} else if (shouldCheckPackageName() /* classname is null */
-					&& (classNameLength >= 5)
-					&& (0 == memcmp(className, "java/", 5))
-					&& !isClassAnon()
-			) {
-				/*
-				 * Non-bootstrap classloaders may not load nto the "java" package.
-				 * if classname is not null, the JCL or JNI has already checked it
-				 */
-				return IllegalPackageName;
+			} else { /* classname is null */
+				/* If a name was not provided with the load data, now is our first chance to check for a duplicate definition */
+				if ((NULL != _javaVM) && (NULL != J9_VM_FUNCTION_VIA_JAVAVM(_javaVM, hashClassTableAt)(_classLoader, className, classNameLength))) {
+					PORT_ACCESS_FROM_PORT(_portLibrary);
+					U_8 *errorUTF = (U_8 *) j9mem_allocate_memory(classNameLength + 1, J9MEM_CATEGORY_CLASSES);
+					if (NULL != errorUTF) {
+						memcpy(errorUTF, className, classNameLength);
+						errorUTF[classNameLength] = '\0';
+					}
+					recordCFRError(errorUTF);
+					return DuplicateName;
+				}
+
+				if (shouldCheckPackageName()
+						&& (classNameLength >= 5)
+						&& (0 == memcmp(className, "java/", 5))
+						&& !isClassAnon()
+				) {
+					/*
+					* Non-bootstrap classloaders may not load nto the "java" package.
+					* if classname is not null, the JCL or JNI has already checked it
+					*/
+					return IllegalPackageName;
+				}
 			}
 
 		}

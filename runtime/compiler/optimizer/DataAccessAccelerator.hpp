@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #ifndef DATAACCESSACCELERATOR_INCL
@@ -214,7 +214,7 @@ class TR_DataAccessAccelerator : public TR::Optimization
 
    private:
 
-   TR::Node* constructAddressNode(TR::Node* callNode, TR::Node* arrayNode, TR::Node* offsetNode);
+   TR::Node* constructAddressNode(TR::Node* callNode, TR::Node* arrayNode, TR::Node* offsetNodee, bool isUnicodeOrExternalDecimalInvolved = false, bool isSrcOrTargetUnicodeDecimal = false);
 
    void createPrecisionDiamond(TR::Compilation* comp,
                                TR::TreeTop* treeTop,
@@ -233,13 +233,12 @@ class TR_DataAccessAccelerator : public TR::Optimization
    bool genComparisionIntrinsic(TR::TreeTop* treeTop, TR::Node* callNode, TR::ILOpCodes opCode);
    bool genShiftLeftIntrinsic(TR::TreeTop* treeTop, TR::Node* callNode);
    bool genShiftRightIntrinsic(TR::TreeTop* treeTop, TR::Node* callNode);
-   bool generateUD2PD(TR::TreeTop* treeTop, TR::Node* callNode, bool isUD2PD);
-   bool generatePD2UD(TR::TreeTop* treeTop, TR::Node* callNode, bool isPD2UD);
+   bool generateUD2PD(TR::TreeTop* treeTop, TR::Node* callNode, bool isSrcUnicodeDecimal);
+   bool generatePD2UD(TR::TreeTop* treeTop, TR::Node* callNode, bool isTargetUnicodeDecimal);
 
    void insertByteArrayNULLCHK(TR::TreeTop* callTreeTop, TR::Node* callNode, TR::Node* byteArrayNode);
    void insertByteArrayBNDCHK(TR::TreeTop* callTreeTop, TR::Node* callNode, TR::Node* byteArrayNode, TR::Node* offsetNode, int32_t index);
 
-   TR::Node* createByteArrayElementAddress(TR::TreeTop* callTreeTop, TR::Node* callNode, TR::Node* byteArrayNode, TR::Node* offsetNode);
 
    bool printInliningStatus(bool status, TR::Node* node, const char* reason = "")
       {

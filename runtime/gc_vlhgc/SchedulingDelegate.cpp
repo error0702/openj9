@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 /**
@@ -364,6 +364,7 @@ MM_SchedulingDelegate::partialGarbageCollectCompleted(MM_EnvironmentVLHGC *env, 
 	Trc_MM_SchedulingDelegate_partialGarbageCollectCompleted_Entry(env->getLanguageVMThread(), reclaimableRegions, defragmentReclaimableRegions);
 	PORT_ACCESS_FROM_ENVIRONMENT(env);
 	MM_CopyForwardStats *copyForwardStats = &static_cast<MM_CycleStateVLHGC*>(env->_cycleState)->_vlhgcIncrementStats._copyForwardStats;
+	MM_CompactVLHGCStats *compactStats = &static_cast<MM_CycleStateVLHGC*>(env->_cycleState)->_vlhgcIncrementStats._compactStats;
 	bool globalSweepHappened = _globalSweepRequired;
 	_globalSweepRequired = false;
 	/* copy out the Eden size of the previous interval (between the last PGC and this one) before we recalculate the next one */
@@ -374,6 +375,7 @@ MM_SchedulingDelegate::partialGarbageCollectCompleted(MM_EnvironmentVLHGC *env, 
 			copyForwardStats->_nonEdenEvacuateRegionCount,
 			copyForwardStats->_edenSurvivorRegionCount,
 			copyForwardStats->_nonEdenSurvivorRegionCount,
+			compactStats->_survivorRegionCount,
 			edenCountBeforeCollect);
 
 	if (env->_cycleState->_shouldRunCopyForward) {
@@ -846,8 +848,24 @@ MM_SchedulingDelegate::measureConsumptionForPartialGC(MM_EnvironmentVLHGC *env, 
 		/* this must be the first PGC after a GMP. Since the GMP affected reclaimable memory, we have no reliable way to measure consumption for this cycle */ 
 		Trc_MM_SchedulingDelegate_measureConsumptionForPartialGC_noPreviousData(env->getLanguageVMThread());
 	} else {
-		/* Use a signed number. The PGC may have negative consumption if it recovered more than an Eden-worth of memory, or if the estimates are a bit off */
-		IDATA regionsConsumed = (IDATA)_previousReclaimableRegions - (IDATA)currentReclaimableRegions;
+		MM_CopyForwardStats *copyForwardStats = &static_cast<MM_CycleStateVLHGC*>(env->_cycleState)->_vlhgcIncrementStats._copyForwardStats;
+		MM_CompactVLHGCStats *compactStats = &static_cast<MM_CycleStateVLHGC*>(env->_cycleState)->_vlhgcIncrementStats._compactStats;
+
+		/* TODO: try to remove _previousReclaimableRegions/currentReclaimableRegions, as it does not seem to be used anymore,
+		 * and it was not quite correct, since it was not accounting for heap resizing changes (while it should)
+		 * and also accounting for sweep reclamation (while it should not)
+		 */
+		/* Consumption is (occupied regions - freed regions) during PGC.
+		 * Occupied regions is the sum of those occupied during both CopyForward and Compact phase.
+		 * Freed regions do not account for eden component since we free them up all, exactly what we consumed since the end of previous GC.
+		 * Freed regions is represented by _nonEdenEvacuateRegionCount regardless if CopyForward or Compact was done.
+		 * Using a signed number. The PGC may have negative consumption if it recovered more than an Eden-worth of memory
+		 */
+		intptr_t regionsConsumed = copyForwardStats->_edenSurvivorRegionCount
+									+ copyForwardStats->_nonEdenSurvivorRegionCount
+									+ compactStats->_survivorRegionCount
+									- copyForwardStats->_nonEdenEvacuateRegionCount;
+
 		const double historicWeight = 0.80; /* arbitrarily give 80% weight to historical result, 20% to newest result */
 		_regionConsumptionRate = (_regionConsumptionRate * historicWeight) + (regionsConsumed * (1.0 - historicWeight));
 		Trc_MM_SchedulingDelegate_measureConsumptionForPartialGC_consumptionRate(env->getLanguageVMThread(), regionsConsumed, _previousReclaimableRegions, currentReclaimableRegions, _regionConsumptionRate);
@@ -860,7 +878,7 @@ MM_SchedulingDelegate::measureConsumptionForPartialGC(MM_EnvironmentVLHGC *env, 
 		Trc_MM_SchedulingDelegate_measureConsumptionForPartialGC_noPreviousData(env->getLanguageVMThread());
 	} else {
 		/* Use a signed number. The PGC may have negative consumption if it recovered more than an Eden-worth of memory, or if the estimates are a bit off */
-		IDATA defragmentRegionsConsumed = (IDATA)_previousDefragmentReclaimableRegions - (IDATA)currentDefragmentReclaimableRegions;
+		intptr_t defragmentRegionsConsumed = (intptr_t)_previousDefragmentReclaimableRegions - (intptr_t)currentDefragmentReclaimableRegions;
 		const double historicWeight = 0.80; /* arbitrarily give 80% weight to historical result, 20% to newest result */
 		_defragmentRegionConsumptionRate = (_defragmentRegionConsumptionRate * historicWeight) + (defragmentRegionsConsumed * (1.0 - historicWeight));
 		Trc_MM_SchedulingDelegate_measureConsumptionForPartialGC_defragmentConsumptionRate(env->getLanguageVMThread(), defragmentRegionsConsumed, _previousDefragmentReclaimableRegions, currentDefragmentReclaimableRegions, _defragmentRegionConsumptionRate);
@@ -1205,7 +1223,6 @@ MM_SchedulingDelegate::copyForwardCompleted(MM_EnvironmentVLHGC *env)
 	uintptr_t bytesScanned = copyForwardStats->_scanBytesTotal;
 	uintptr_t bytesCompacted = copyForwardStats->_externalCompactBytes;
 	uintptr_t regionSize = _regionManager->getRegionSize();
-	double copyForwardRate = calculateAverageCopyForwardRate(env);
 	
 	const double historicWeight = 0.50; /* arbitrarily give 50% weight to historical result, 50% to newest result */
 	_averageCopyForwardBytesCopied = (_averageCopyForwardBytesCopied * historicWeight) + ((double)bytesCopied * (1.0 - historicWeight));
@@ -1217,7 +1234,12 @@ MM_SchedulingDelegate::copyForwardCompleted(MM_EnvironmentVLHGC *env)
 	uintptr_t survivorSetRegionCount = env->_cycleState->_pgcData._survivorSetRegionCount + failedEvacuateRegionCount + compactSetSurvivorRegionCount;
 	
 	_averageSurvivorSetRegionCount = (_averageSurvivorSetRegionCount * historicWeight) + ((double)survivorSetRegionCount * (1.0 - historicWeight));
-	_averageCopyForwardRate = (_averageCopyForwardRate * historicWeight) + (copyForwardRate * (1.0 - historicWeight));
+
+	double copyForwardRate = 0.0;
+	if (bytesCopied > 0) {
+		copyForwardRate = calculateCurrentCopyForwardRate(env);
+		_averageCopyForwardRate = (_averageCopyForwardRate * historicWeight) + (copyForwardRate * (1.0 - historicWeight));
+	}
 
 	Trc_MM_SchedulingDelegate_copyForwardCompleted_efficiency(
 		env->getLanguageVMThread(),
@@ -1237,7 +1259,7 @@ MM_SchedulingDelegate::copyForwardCompleted(MM_EnvironmentVLHGC *env)
 }
 
 double
-MM_SchedulingDelegate::calculateAverageCopyForwardRate(MM_EnvironmentVLHGC *env)
+MM_SchedulingDelegate::calculateCurrentCopyForwardRate(MM_EnvironmentVLHGC *env)
 {
 	PORT_ACCESS_FROM_ENVIRONMENT(env);
 	MM_CopyForwardStats * copyForwardStats = &(static_cast<MM_CycleStateVLHGC*>(env->_cycleState)->_vlhgcIncrementStats._copyForwardStats);
@@ -1336,16 +1358,17 @@ MM_SchedulingDelegate::calculateEdenSize(MM_EnvironmentVLHGC *env)
 	uintptr_t maxEdenRegionCount = _extensions->getHeap()->getHeapRegionManager()->getTableRegionCount();
 	bool edenIsVerySmall = (_edenRegionCount * 64) < maxEdenRegionCount;
 
+	/* Eden will be stealing free regions from the entire heap, without telling the heap to grow.
+	 * Note: the eden sizing logic knows how much free memory is available in the heap, and knows to not grow too much.
+	 * eden size can not be bigger than free region size.
+	 */
+	maxEdenChange = freeRegions - _edenRegionCount;
+
 	if (0 == maxHeapExpansionRegions) {
-		/*
-		 * The heap is fully expanded. Eden will be stealing free regions from the entire heap, without telling the heap to grow.
-		 * Note: When heap is fully expanded, the eden sizing logic knows how much free memory is available in the heap, and knows to not grow too much
-		 */
-		maxEdenChange = freeRegions;
 		_extensions->globalVLHGCStats._heapSizingData.edenRegionChange = 0;
 	} else {
 		/* Eden will inform the total heap resizing logic, that it needs to change total heap size in order to maintain same "tenure" size */
-		maxEdenChange = maxHeapExpansionRegions;
+		maxEdenChange += maxHeapExpansionRegions;
 		intptr_t edenChangeWithSurvivorHeadroom = desiredEdenChangeSize;
 
 		/* Total heap needs to be aware that by changing eden size, the amount of survivor space might also need to change */

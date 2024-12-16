@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "z/codegen/J9S390Snippet.hpp"
@@ -96,7 +96,7 @@ TR::S390HeapAllocSnippet::emitSnippetBody()
    if (comp->getOption(TR_EnableRMODE64))
 #endif
       {
-      if (NEEDS_TRAMPOLINE(destAddr, buffer, cg()))
+      if (cg()->directCallRequiresTrampoline(destAddr, reinterpret_cast<intptr_t>(buffer)))
          {
          uint32_t rEP = (uint32_t) cg()->getEntryPointRegister() - 1;
          // Destination is beyond our reachable jump distance, we'll find the
@@ -119,8 +119,15 @@ TR::S390HeapAllocSnippet::emitSnippetBody()
    *(int32_t *) buffer = (int32_t)((destAddr - (intptr_t)(buffer - 2)) / 2);
    if (comp->compileRelocatableCode() || comp->isOutOfProcessCompilation())
       {
-      cg()->addExternalRelocation(new (cg()->trHeapMemory()) TR::ExternalRelocation(buffer, (uint8_t*) getDestination(), TR_HelperAddress, cg()),
-                                __FILE__, __LINE__, getNode());
+      cg()->addExternalRelocation(
+         TR::ExternalRelocation::create(
+            buffer,
+            (uint8_t*) getDestination(),
+            TR_HelperAddress,
+            cg()),
+         __FILE__,
+         __LINE__,
+         getNode());
       }
 
    buffer += sizeof(int32_t);

@@ -1,6 +1,6 @@
 <?xml version='1.0' encoding='UTF-8'?>
 <!--
-  Copyright (c) 2016, 2021 IBM Corp. and others
+  Copyright IBM Corp. and others 2016
 
   This program and the accompanying materials are made available under
   the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,11 +16,12 @@
   OpenJDK Assembly Exception [2].
 
   [1] https://www.gnu.org/software/classpath/license.html
-  [2] http://openjdk.java.net/legal/assembly-exception.html
+  [2] https://openjdk.org/legal/assembly-exception.html
 
-  SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+  SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
 -->
 <playlist xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../TKG/playlist.xsd">
+	<include>../../variables.mk</include>
 	<test>
 		<testCaseName>testSCCMLTests1</testCaseName>
 		<variations>
@@ -30,7 +31,7 @@
 		<command>cp $(Q)$(TEST_RESROOT)$(D)..$(D)URLHelperTests$(D)URLHelperTests.jar$(Q) .; \
 	true URLHelperTests.jar ;\
 	$(Q)$(TEST_JDK_HOME)$(D)bin$(D)jar$(EXECUTABLE_SUFFIX)$(Q) xf URLHelperTests.jar; \
-	$(JAVA_COMMAND) $(JVM_OPTIONS) \
+	$(JAVA_COMMAND) $(CMDLINETESTER_JVM_OPTIONS) \
 	-DPATHSEP=$(Q)$(D)$(Q) -DCPDL=$(Q)$(P)$(Q) -DRUN_SCRIPT=$(RUN_SCRIPT) -DPROPS_DIR=$(PROPS_DIR) -DSCRIPT_SUFFIX=$(SCRIPT_SUFFIX) -DEXECUTABLE_SUFFIX=$(EXECUTABLE_SUFFIX) \
 	-DJAVA_EXE=$(SQ)$(JAVA_COMMAND) $(JVM_OPTIONS)$(SQ) -DJAVA_HOME=$(SQ)$(TEST_JDK_HOME)$(SQ) -DSCMODE=204 -DJVM_TEST_ROOT=$(Q)$(JVM_TEST_ROOT)$(Q) \
 	-DUTILSJAR=$(Q)$(JVM_TEST_ROOT)$(D)functional$(D)cmdLineTests$(D)utils$(D)utils.jar$(Q) \
@@ -49,7 +50,9 @@
 		<impls>
 			<impl>ibm</impl>
 		</impls>
-		<aot>explicit</aot>
+		<features>
+			<feature>AOT:explicit</feature>
+		</features>
 	</test>
 	<test>
 		<testCaseName>testSCCMLTests1_openj9</testCaseName>
@@ -60,7 +63,7 @@
 		<command>cp $(Q)$(TEST_RESROOT)$(D)..$(D)URLHelperTests$(D)URLHelperTests.jar$(Q) .; \
 	true URLHelperTests.jar ;\
 	$(Q)$(TEST_JDK_HOME)$(D)bin$(D)jar$(EXECUTABLE_SUFFIX)$(Q) xf URLHelperTests.jar; \
-	$(JAVA_COMMAND) $(JVM_OPTIONS) \
+	$(JAVA_COMMAND) $(CMDLINETESTER_JVM_OPTIONS) \
 	-DPATHSEP=$(Q)$(D)$(Q) -DCPDL=$(Q)$(P)$(Q) -DRUN_SCRIPT=$(RUN_SCRIPT) -DPROPS_DIR=$(PROPS_DIR) -DSCRIPT_SUFFIX=$(SCRIPT_SUFFIX) -DEXECUTABLE_SUFFIX=$(EXECUTABLE_SUFFIX) \
 	-DJAVA_EXE=$(SQ)$(JAVA_COMMAND) $(JVM_OPTIONS)$(SQ) -DJAVA_HOME=$(SQ)$(TEST_JDK_HOME)$(SQ) -DSCMODE=204 -DJVM_TEST_ROOT=$(Q)$(JVM_TEST_ROOT)$(Q) \
 	-DUTILSJAR=$(Q)$(JVM_TEST_ROOT)$(D)functional$(D)cmdLineTests$(D)utils$(D)utils.jar$(Q) \
@@ -79,7 +82,9 @@
 		<impls>
 			<impl>openj9</impl>
 		</impls>
-		<aot>explicit</aot>
+		<features>
+			<feature>AOT:explicit</feature>
+		</features>
 	</test>
 	<test>
 		<testCaseName>testSCCMLTests2</testCaseName>
@@ -90,7 +95,7 @@
 		<command>cp $(Q)$(TEST_RESROOT)$(D)..$(D)URLHelperTests$(D)URLHelperTests.jar$(Q) .; \
 	true URLHelperTests.jar ;\
 	$(Q)$(TEST_JDK_HOME)$(D)bin$(D)jar$(EXECUTABLE_SUFFIX)$(Q) xf URLHelperTests.jar; \
-	$(JAVA_COMMAND) $(JVM_OPTIONS) \
+	$(JAVA_COMMAND) $(CMDLINETESTER_JVM_OPTIONS) \
 	-DPATHSEP=$(Q)$(D)$(Q) -DCPDL=$(Q)$(P)$(Q) -DRUN_SCRIPT=$(RUN_SCRIPT) -DPROPS_DIR=$(PROPS_DIR) -DSCRIPT_SUFFIX=$(SCRIPT_SUFFIX) -DEXECUTABLE_SUFFIX=$(EXECUTABLE_SUFFIX) \
 	-DJAVA_EXE=$(SQ)$(JAVA_COMMAND) $(JVM_OPTIONS)$(SQ) -DJAVA_HOME=$(SQ)$(TEST_JDK_HOME)$(SQ) -DSCMODE=204 -DJVM_TEST_ROOT=$(Q)$(JVM_TEST_ROOT)$(Q) \
 	-DUTILSJAR=$(Q)$(JVM_TEST_ROOT)$(D)functional$(D)cmdLineTests$(D)utils$(D)utils.jar$(Q) \
@@ -105,7 +110,9 @@
 		<groups>
 			<group>functional</group>
 		</groups>
-		<aot>explicit</aot>
+		<features>
+			<feature>AOT:explicit</feature>
+		</features>
 		<impls>
 			<impl>openj9</impl>
 			<impl>ibm</impl>
@@ -135,7 +142,7 @@
 	$(CD) $(REPORTDIR); \
 	mv $(Q)$(REPORTDIR_NQ)$(D)datacaching$(D)dataone.contents$(D)dataone.jar$(Q) $(Q)$(REPORTDIR_NQ)$(D)datacaching$(Q); \
 	mv $(Q)$(REPORTDIR_NQ)$(D)datacaching$(D)datatwo.contents$(D)datatwo.jar$(Q) $(Q)$(REPORTDIR_NQ)$(D)datacaching$(Q); \
-	$(JAVA_COMMAND) $(JVM_OPTIONS) \
+	$(JAVA_COMMAND) $(CMDLINETESTER_JVM_OPTIONS) \
 	-DPATHSEP=$(Q)$(D)$(Q) -DCPDL=$(Q)$(P)$(Q) -DRUN_SCRIPT=$(RUN_SCRIPT) -DPROPS_DIR=$(PROPS_DIR) -DSCRIPT_SUFFIX=$(SCRIPT_SUFFIX) -DEXECUTABLE_SUFFIX=$(EXECUTABLE_SUFFIX) \
 	-DJAVA_EXE=$(SQ)$(JAVA_COMMAND) $(JVM_OPTIONS)$(SQ) -DJAVA_HOME=$(SQ)$(TEST_JDK_HOME)$(SQ) -DSCMODE=204 -DJVM_TEST_ROOT=$(Q)$(JVM_TEST_ROOT)$(Q) \
 	-DUTILSJAR=$(Q)$(JVM_TEST_ROOT)$(D)functional$(D)cmdLineTests$(D)utils$(D)utils.jar$(Q) \
@@ -150,7 +157,9 @@
 		<groups>
 			<group>functional</group>
 		</groups>
-		<aot>explicit</aot>
+		<features>
+			<feature>AOT:explicit</feature>
+		</features>
 		<impls>
 			<impl>openj9</impl>
 			<impl>ibm</impl>
@@ -165,7 +174,7 @@
 		<command>cp $(Q)$(TEST_RESROOT)$(D)..$(D)URLHelperTests$(D)URLHelperTests.jar$(Q) .; \
 	true URLHelperTests.jar ;\
 	$(Q)$(TEST_JDK_HOME)$(D)bin$(D)jar$(EXECUTABLE_SUFFIX)$(Q) xf URLHelperTests.jar; \
-	$(JAVA_COMMAND) $(JVM_OPTIONS) \
+	$(JAVA_COMMAND) $(CMDLINETESTER_JVM_OPTIONS) \
 	-DPATHSEP=$(Q)$(D)$(Q) -DCPDL=$(Q)$(P)$(Q) -DRUN_SCRIPT=$(RUN_SCRIPT) -DPROPS_DIR=$(PROPS_DIR) -DSCRIPT_SUFFIX=$(SCRIPT_SUFFIX) -DEXECUTABLE_SUFFIX=$(EXECUTABLE_SUFFIX) \
 	-DJAVA_EXE=$(SQ)$(JAVA_COMMAND) $(JVM_OPTIONS)$(SQ) -DJAVA_HOME=$(SQ)$(TEST_JDK_HOME)$(SQ) -DSCMODE=204 -DJVM_TEST_ROOT=$(Q)$(JVM_TEST_ROOT)$(Q) \
 	-DJDMPVIEW_EXE=$(Q)$(TEST_JDK_HOME)$(D)bin$(D)jdmpview$(EXECUTABLE_SUFFIX)$(Q) \
@@ -181,7 +190,9 @@
 		<groups>
 			<group>functional</group>
 		</groups>
-		<aot>explicit</aot>
+		<features>
+			<feature>AOT:explicit</feature>
+		</features>
 		<impls>
 			<impl>openj9</impl>
 			<impl>ibm</impl>
@@ -196,11 +207,11 @@
 		<command>cp $(Q)$(TEST_RESROOT)$(D)..$(D)URLHelperTests$(D)URLHelperTests.jar$(Q) .; \
 	true URLHelperTests.jar ;\
 	$(Q)$(TEST_JDK_HOME)$(D)bin$(D)jar$(EXECUTABLE_SUFFIX)$(Q) xf URLHelperTests.jar; \
-	$(JAVA_COMMAND) $(JVM_OPTIONS) \
+	$(JAVA_COMMAND) $(CMDLINETESTER_JVM_OPTIONS) \
 	-DPATHSEP=$(Q)$(D)$(Q) -DCPDL=$(Q)$(P)$(Q) -DRUN_SCRIPT=$(RUN_SCRIPT) -DPROPS_DIR=$(PROPS_DIR) -DSCRIPT_SUFFIX=$(SCRIPT_SUFFIX) -DEXECUTABLE_SUFFIX=$(EXECUTABLE_SUFFIX) \
 	-DJAVA_EXE=$(SQ)$(JAVA_COMMAND) $(JVM_OPTIONS)$(SQ) -DJAVA_HOME=$(SQ)$(TEST_JDK_HOME)$(SQ) -DSCMODE=204 -DJVM_TEST_ROOT=$(Q)$(JVM_TEST_ROOT)$(Q) \
 	-DJDMPVIEW_EXE=$(Q)$(TEST_JDK_HOME)$(D)bin$(D)jdmpview$(EXECUTABLE_SUFFIX)$(Q) \
-	-DUTILSJAR=$(Q)$(JVM_TEST_ROOT)$(D)functional$(D)cmdLineTests$(D)utils$(D)utils.jar$(Q) \
+	-DUTILSDIR=$(Q)$(JVM_TEST_ROOT)$(D)functional$(D)cmdLineTests$(D)utils$(Q) \
 	-jar $(CMDLINETESTER_JAR) \
 	-config $(Q)$(TEST_RESROOT)$(D)ShareClassesCMLTests-5.xml$(Q) -xids all,$(PLATFORM),$(VARIATION),$(JDK_VERSION),$(JCL_VERSION) -plats all,$(PLATFORM),$(VARIATION) -xlist $(Q)$(TEST_RESROOT)$(D)exclude.xml$(Q) \
 	-nonZeroExitWhenError \
@@ -212,7 +223,9 @@
 		<groups>
 			<group>functional</group>
 		</groups>
-		<aot>explicit</aot>
+		<features>
+			<feature>AOT:explicit</feature>
+		</features>
 		<impls>
 			<impl>openj9</impl>
 			<impl>ibm</impl>
@@ -224,7 +237,7 @@
 			<variation>Mode110</variation>
 			<variation>Mode610</variation>
 		</variations>
-		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) \
+		<command>$(JAVA_COMMAND) $(CMDLINETESTER_JVM_OPTIONS) \
 	-DPATHSEP=$(Q)$(D)$(Q) -DCPDL=$(Q)$(P)$(Q) -DRUN_SCRIPT=$(RUN_SCRIPT) -DPROPS_DIR=$(PROPS_DIR) -DSCRIPT_SUFFIX=$(SCRIPT_SUFFIX) -DEXECUTABLE_SUFFIX=$(EXECUTABLE_SUFFIX) \
 	-DJAVA_EXE=$(SQ)$(JAVA_COMMAND) $(JVM_OPTIONS)$(SQ) -DJAVA_HOME=$(SQ)$(TEST_JDK_HOME)$(SQ) -DSCMODE=204 -DJVM_TEST_ROOT=$(Q)$(JVM_TEST_ROOT)$(Q) \
 	-DJDMPVIEW_EXE=$(Q)$(TEST_JDK_HOME)$(D)bin$(D)jdmpview$(EXECUTABLE_SUFFIX)$(Q) \
@@ -240,7 +253,9 @@
 		<groups>
 			<group>functional</group>
 		</groups>
-		<aot>explicit</aot>
+		<features>
+			<feature>AOT:explicit</feature>
+		</features>
 		<impls>
 			<impl>openj9</impl>
 			<impl>ibm</impl>
@@ -252,7 +267,7 @@
 			<variation>Mode110</variation>
 			<variation>Mode610</variation>
 		</variations>
-		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) \
+		<command>$(JAVA_COMMAND) $(CMDLINETESTER_JVM_OPTIONS) \
 	-DPATHSEP=$(Q)$(D)$(Q) -DCPDL=$(Q)$(P)$(Q) -DRUN_SCRIPT=$(RUN_SCRIPT) -DPROPS_DIR=$(PROPS_DIR) -DSCRIPT_SUFFIX=$(SCRIPT_SUFFIX) -DEXECUTABLE_SUFFIX=$(EXECUTABLE_SUFFIX) \
 	-DJAVA_EXE=$(SQ)$(JAVA_COMMAND) $(JVM_OPTIONS)$(SQ) -DJAVA_HOME=$(SQ)$(TEST_JDK_HOME)$(SQ) -DSCMODE=204 -DJVM_TEST_ROOT=$(Q)$(JVM_TEST_ROOT)$(Q) \
 	-jar $(CMDLINETESTER_JAR) \
@@ -267,7 +282,9 @@
 		<groups>
 			<group>functional</group>
 		</groups>
-		<aot>explicit</aot>
+		<features>
+			<feature>AOT:explicit</feature>
+		</features>
 		<impls>
 			<impl>openj9</impl>
 			<impl>ibm</impl>
@@ -282,7 +299,7 @@
 		<command>cp $(Q)$(TEST_RESROOT)$(D)..$(D)..$(D)..$(D)cmdline_options_testresources$(D)cmdlinetestresources.jar$(Q) .; \
 	true URLHelperTests.jar ;\
 	$(Q)$(TEST_JDK_HOME)$(D)bin$(D)jar$(EXECUTABLE_SUFFIX)$(Q) xf cmdlinetestresources.jar; \
-	$(JAVA_COMMAND) $(JVM_OPTIONS) \
+	$(JAVA_COMMAND) $(CMDLINETESTER_JVM_OPTIONS) \
 	-DPATHSEP=$(Q)$(D)$(Q) -DCPDL=$(Q)$(P)$(Q) -DRUN_SCRIPT=$(RUN_SCRIPT) -DPROPS_DIR=$(PROPS_DIR) -DSCRIPT_SUFFIX=$(SCRIPT_SUFFIX) -DEXECUTABLE_SUFFIX=$(EXECUTABLE_SUFFIX) \
 	-DJAVA_EXE=$(SQ)$(JAVA_COMMAND) $(JVM_OPTIONS)$(SQ) -DJAVA_HOME=$(SQ)$(TEST_JDK_HOME)$(SQ) -DSCMODE=204 -DJVM_TEST_ROOT=$(Q)$(JVM_TEST_ROOT)$(Q) \
 	-DJDMPVIEW_EXE=$(Q)$(TEST_JDK_HOME)$(D)bin$(D)jdmpview$(EXECUTABLE_SUFFIX)$(Q) \
@@ -298,7 +315,9 @@
 		<groups>
 			<group>functional</group>
 		</groups>
-		<aot>explicit</aot>
+		<features>
+			<feature>AOT:explicit</feature>
+		</features>
 		<impls>
 			<impl>openj9</impl>
 			<impl>ibm</impl>
@@ -310,7 +329,7 @@
 			<variation>Mode110</variation>
 			<variation>Mode610</variation>
 		</variations>
-		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) \
+		<command>$(JAVA_COMMAND) $(CMDLINETESTER_JVM_OPTIONS) \
 	-DPATHSEP=$(Q)$(D)$(Q) -DCPDL=$(Q)$(P)$(Q) -DRUN_SCRIPT=$(RUN_SCRIPT) -DPROPS_DIR=$(PROPS_DIR) -DSCRIPT_SUFFIX=$(SCRIPT_SUFFIX) -DEXECUTABLE_SUFFIX=$(EXECUTABLE_SUFFIX) \
 	-DJAVA_EXE=$(SQ)$(JAVA_COMMAND) $(JVM_OPTIONS)$(SQ) -DJAVA_HOME=$(SQ)$(TEST_JDK_HOME)$(SQ) -DSCMODE=204 -DJVM_TEST_ROOT=$(Q)$(JVM_TEST_ROOT)$(Q) \
 	-jar $(CMDLINETESTER_JAR) \
@@ -325,7 +344,9 @@
 		<groups>
 			<group>functional</group>
 		</groups>
-		<aot>explicit</aot>
+		<features>
+			<feature>AOT:explicit</feature>
+		</features>
 		<impls>
 			<impl>openj9</impl>
 			<impl>ibm</impl>
@@ -340,7 +361,7 @@
 		<command>cp $(Q)$(JVM_TEST_ROOT)$(D)functional$(D)cmdLineTests$(D)utils$(D)utils.jar$(Q) .; \
 	true utils.jar ;\
 	$(Q)$(TEST_JDK_HOME)$(D)bin$(D)jar$(EXECUTABLE_SUFFIX)$(Q) xf utils.jar; \
-	$(JAVA_COMMAND) $(JVM_OPTIONS) \
+	$(JAVA_COMMAND) $(CMDLINETESTER_JVM_OPTIONS) \
 	-DPATHSEP=$(Q)$(D)$(Q) -DCPDL=$(Q)$(P)$(Q) -DRUN_SCRIPT=$(RUN_SCRIPT) -DPROPS_DIR=$(PROPS_DIR) -DSCRIPT_SUFFIX=$(SCRIPT_SUFFIX) -DEXECUTABLE_SUFFIX=$(EXECUTABLE_SUFFIX) \
 	-DJAVA_EXE=$(SQ)$(JAVA_COMMAND) $(JVM_OPTIONS)$(SQ) -DJAVA_HOME=$(SQ)$(TEST_JDK_HOME)$(SQ) -DSCMODE=204 -DJVM_TEST_ROOT=$(Q)$(JVM_TEST_ROOT)$(Q) \
 	-DUTILSJAR=$(Q)$(JVM_TEST_ROOT)$(D)functional$(D)cmdLineTests$(D)utils$(D)utils.jar$(Q) \
@@ -358,7 +379,9 @@
 		<versions>
 			<version>9+</version>
 		</versions>
-		<aot>explicit</aot>
+		<features>
+			<feature>AOT:explicit</feature>
+		</features>
 		<impls>
 			<impl>openj9</impl>
 			<impl>ibm</impl>
@@ -372,7 +395,7 @@
 		</variations>
 		<command>$(MKTREE) $(REPORTDIR); \
 	$(CD) $(REPORTDIR); \
-	$(JAVA_COMMAND) $(JVM_OPTIONS) \
+	$(JAVA_COMMAND) $(CMDLINETESTER_JVM_OPTIONS) \
 	-DPATHSEP=$(Q)$(D)$(Q) -DCPDL=$(Q)$(P)$(Q) -DRUN_SCRIPT=$(RUN_SCRIPT) -DPROPS_DIR=$(PROPS_DIR) -DSCRIPT_SUFFIX=$(SCRIPT_SUFFIX) -DEXECUTABLE_SUFFIX=$(EXECUTABLE_SUFFIX) \
 	-DJAVA_EXE=$(SQ)$(JAVA_COMMAND) $(JVM_OPTIONS)$(SQ) -DJAVA_HOME=$(SQ)$(TEST_JDK_HOME)$(SQ) -DSCMODE=204 -DJVM_TEST_ROOT=$(Q)$(JVM_TEST_ROOT)$(Q) \
 	-DUTILSJAR=$(Q)$(JVM_TEST_ROOT)$(D)functional$(D)cmdLineTests$(D)utils$(D)utils.jar$(Q) \
@@ -393,7 +416,9 @@
 		<impls>
 			<impl>openj9</impl>
 		</impls>
-		<aot>explicit</aot>
+		<features>
+			<feature>AOT:explicit</feature>
+		</features>
 	</test>
 	<test>
 		<testCaseName>ShareClassesCML</testCaseName>
@@ -403,7 +428,7 @@
 		</variations>
 		<command>$(MKTREE) $(REPORTDIR); \
 	$(CD) $(REPORTDIR); \
-	$(JAVA_COMMAND) $(JVM_OPTIONS) \
+	$(JAVA_COMMAND) $(CMDLINETESTER_JVM_OPTIONS) \
 	-DPATHSEP=$(Q)$(D)$(Q) -DCPDL=$(Q)$(P)$(Q) -DRUN_SCRIPT=$(RUN_SCRIPT) -DPROPS_DIR=$(PROPS_DIR) -DSCRIPT_SUFFIX=$(SCRIPT_SUFFIX) -DEXECUTABLE_SUFFIX=$(EXECUTABLE_SUFFIX) \
 	-DJAVA_EXE=$(SQ)$(JAVA_COMMAND) $(JVM_OPTIONS)$(SQ) -DJAVA_HOME=$(SQ)$(TEST_JDK_HOME)$(SQ) -DSCMODE=204 -DJVM_TEST_ROOT=$(Q)$(JVM_TEST_ROOT)$(Q) \
 	-DUTILSJAR=$(Q)$(JVM_TEST_ROOT)$(D)functional$(D)cmdLineTests$(D)utils$(D)utils.jar$(Q) \
@@ -425,6 +450,8 @@
 			<impl>openj9</impl>
 			<impl>ibm</impl>
 		</impls>
-		<aot>explicit</aot>
+		<features>
+			<feature>AOT:explicit</feature>
+		</features>
 	</test>
 </playlist>

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2019, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2019
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,12 +15,13 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "aarch64/runtime/arm64asmdefs.inc"
+#include "j9cfg.h"
 #include "jilconsts.inc"
 
 	.file "Recompilation.s"
@@ -163,16 +164,18 @@ L_commonPatchPoint:
 	beq	L_directCallPatching
 	LOAD_FUNC_PTR(x0, const_arm64IndirectCallPatching_unwrapper)
 L_directCallPatching:
-	str	x5, [J9SP, #-8]!			// push:	new startPC
-	str	x8, [J9SP, #-8]!			// 		call site
-	str	x3, [J9SP, #-8]!			// 		method
+	mov	x2, J9SP
+	str	x2, [J9SP, #-8]!			// push: 	location of saved registers
+	str	x5, [J9SP, #-8]!			// 			new startPC
+	str	x8, [J9SP, #-8]!			// 			call site
+	str	x3, [J9SP, #-8]!			// 			method
 	mov	x1, J9SP				// addr of the first arg for patchCallPoint
 	mov	x2, J9SP				// where to put the return value
 	ldurh	w10, [x5, #J9TR_InterpreterEntryOffset]	// fetch interpreter entry prologue size
 	add	x10, x5, w10, UXTH			// x10 = new jitEntry, preserved in jitCallCFunction
 	bl	FUNC_LABEL(jitCallCFunction)
 	add	x30, x8, #4				// point to return address; x8 was decremented above to point to call site
-	add	J9SP, J9SP, #24				// pop args to jitCallCFunction off stack
+	add	J9SP, J9SP, #32				// pop args to jitCallCFunction off stack
 	ldp	x0, x1, [J9SP], #16			// restore registers
 	ldp	x2, x3, [J9SP], #16
 	ldp	x4, x5, [J9SP], #16

@@ -1,6 +1,6 @@
 
 /*******************************************************************************
- * Copyright (c) 1991, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,9 +16,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 
@@ -46,17 +46,6 @@ class MM_VLHGCAccessBarrier : public MM_ObjectAccessBarrier
 private:
 	void postObjectStoreImpl(J9VMThread *vmThread, J9Object *dstObject, J9Object *srcObject);
 	void postBatchObjectStoreImpl(J9VMThread *vmThread, J9Object *dstObject);
-	void copyArrayCritical(J9VMThread *vmThread, GC_ArrayObjectModel *indexableObjectModel,
-				J9InternalVMFunctions *functions, void **data,
-				J9IndexableObject *arrayObject, jboolean *isCopy);
-	void copyBackArrayCritical(J9VMThread *vmThread, GC_ArrayObjectModel *indexableObjectModel,
-				J9InternalVMFunctions *functions, void *elems,
-				J9IndexableObject **arrayObject, jint mode);
-	void copyStringCritical(J9VMThread *vmThread, GC_ArrayObjectModel *indexableObjectModel,
-				J9InternalVMFunctions *functions, jchar **data, J9JavaVM *javaVM,
-				J9IndexableObject *valueObject, J9Object *stringObject,
-				jboolean *isCopy, bool isCompressed);
-	void freeStringCritical(J9VMThread *vmThread, J9InternalVMFunctions *functions, const jchar* elems);
 
 protected:
 	virtual bool initialize(MM_EnvironmentBase *env);
@@ -82,8 +71,12 @@ public:
 	virtual bool preWeakRootSlotRead(J9VMThread *vmThread, j9object_t *srcAddress);
 	virtual bool preWeakRootSlotRead(J9JavaVM *vm, j9object_t *srcAddress);
 
+	virtual void postUnmountContinuation(J9VMThread *vmThread, j9object_t contObject);
+
 	virtual I_32 backwardReferenceArrayCopyIndex(J9VMThread *vmThread, J9IndexableObject *srcObject, J9IndexableObject *destObject, I_32 srcIndex, I_32 destIndex, I_32 lengthInSlots);
 	virtual I_32 forwardReferenceArrayCopyIndex(J9VMThread *vmThread, J9IndexableObject *srcObject, J9IndexableObject *destObject, I_32 srcIndex, I_32 destIndex, I_32 lengthInSlots);
+
+	virtual IDATA indexableDataDisplacement(J9VMThread *vmThread, J9IndexableObject *src, J9IndexableObject *dst);
 
 	virtual void* jniGetPrimitiveArrayCritical(J9VMThread* vmThread, jarray array, jboolean *isCopy);
 	virtual void jniReleasePrimitiveArrayCritical(J9VMThread* vmThread, jarray array, void * elems, jint mode);

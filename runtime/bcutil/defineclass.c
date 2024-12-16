@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include <stdlib.h>
@@ -155,10 +155,13 @@ internalDefineClass(
 		 */
 		if ((NULL != hostClass) && (J2SE_VERSION(vm) >= J2SE_V11)) {
 			J9ROMClass *hostROMClass = hostClass->romClass;
-			/* This error-check should only be done for anonymous classes. */
-			Trc_BCU_Assert_True(isAnonFlagSet || isHiddenFlagSet);
 			/* From Java 9 and onwards, set IllegalArgumentException when host class and anonymous class have different packages. */
-			if (!hasSamePackageName(romClass, hostROMClass)) {
+			if (!hasSamePackageName(romClass, hostROMClass)
+#if JAVA_SPEC_VERSION >= 22
+			/* The below error only applies if the host class is not an interface. */
+			&& !J9ROMCLASS_IS_INTERFACE(hostROMClass)
+#endif /* JAVA_SPEC_VERSION >= 22 */
+			) {
 				omrthread_monitor_exit(vm->classTableMutex);
 				setIllegalArgumentExceptionHostClassAnonClassHaveDifferentPackages(vmThread, romClass, hostROMClass);
 				freeAnonROMClass(vm, romClass);
@@ -542,16 +545,17 @@ internalLoadROMClass(J9VMThread * vmThread, J9LoadROMClassData *loadData, J9Tran
 	if (J9_ARE_ANY_BITS_SET(vm->extendedRuntimeFlags2, J9_EXTENDED_RUNTIME2_ENABLE_PREVIEW)) {
 		translationFlags |= BCT_EnablePreview;
 	}
-
-	if (J9_ARE_ALL_BITS_SET(vm->extendedRuntimeFlags2, J9_EXTENDED_RUNTIME2_ENABLE_VALHALLA)) {
-		translationFlags |= BCT_ValueTypesEnabled;
+#if (JAVA_SPEC_VERSION == 8) && defined(J9ZOS390) && defined(J9VM_ENV_DATA64)
+	/* This code duplication is intentional, it works around a JDK8 z/OS 64bit (non-compressedrefs) compiler issue, RTC 147197. */
+	if (J9_ARE_ANY_BITS_SET(vm->extendedRuntimeFlags2, J9_EXTENDED_RUNTIME2_ENABLE_PREVIEW)) {
+		translationFlags |= BCT_EnablePreview;
 	}
-
+#endif
 	/* Determine allowed class file version */
 #ifdef J9VM_OPT_SIDECAR
 	{
-		/* majorVer is introduced to workaround JDK8 zOS 64bit compiler issue. */
-		U_32 majorVer = BCT_JavaMajorVersionShifted(JAVA_SPEC_VERSION);
+		/* Using local variable majorVer avoids a z/OS 64-bit compiler issue. */
+		U_32 majorVer = BCT_JavaMaxMajorVersionShifted;
 		translationFlags |= majorVer;
 	}
 #endif
@@ -773,7 +777,14 @@ callDynamicLoader(J9VMThread *vmThread, J9LoadROMClassData *loadData, U_8 * inte
 			}
 		}
 
-		if (J9_ARE_ANY_BITS_SET(vm->extendedRuntimeFlags, J9_EXTENDED_RUNTIME_RECREATE_CLASSFILE_ONLOAD)) {
+		/* Skip RecreateClassFileOnload if there is a non-NULL J9ClassPatchMap on the localBuffer.
+		 * j9bcutil_transformROMClass provides no guarantee to preserve the previous constant pool
+		 * and thus the size of the constant pool could change. This causes downstream errors when
+		 * attempting to patch the constant pool with the unchanged patchMap.
+		 */
+		if (J9_ARE_ANY_BITS_SET(vm->extendedRuntimeFlags, J9_EXTENDED_RUNTIME_RECREATE_CLASSFILE_ONLOAD)
+			&& ((NULL == localBuffer) || (NULL == localBuffer->patchMap))
+		) {
 			U_8 * classFileBytes = NULL;
 			U_32 classFileBytesCount = 0;
 			U_8 * prevClassData = loadData->classData;
@@ -884,6 +895,10 @@ createROMClassFromClassFile(J9VMThread *currentThread, J9LoadROMClassData *loadD
 			break;
 		}
 
+		case BCT_ERR_DUPLICATE_NAME:
+			/* This case is handled below */
+			break;
+
 		/*
 		 * Error messages are contents of vm->dynamicLoadBuffers->classFileError if anything is assigned
 		 * otherwise just the classname.
@@ -927,7 +942,15 @@ createROMClassFromClassFile(J9VMThread *currentThread, J9LoadROMClassData *loadD
 			J9_VM_FUNCTION(currentThread, setCurrentException)(currentThread, exceptionNumber, NULL);
 		} else {
 			PORT_ACCESS_FROM_JAVAVM(vm);
-			J9_VM_FUNCTION(currentThread, setCurrentExceptionUTF)(currentThread, exceptionNumber, (const char*)errorUTF);
+			if (BCT_ERR_DUPLICATE_NAME == result) {
+				size_t nameLength = 0;
+				if (NULL != errorUTF ){
+					nameLength = strlen((const char*)errorUTF);
+				}
+				J9_VM_FUNCTION(currentThread, setCurrentExceptionNLSWithArgs)(currentThread, J9NLS_JCL_DUPLICATE_CLASS_DEFINITION, J9VMCONSTANTPOOL_JAVALANGLINKAGEERROR, (const char*)errorUTF, nameLength);
+			} else {
+				J9_VM_FUNCTION(currentThread, setCurrentExceptionUTF)(currentThread, exceptionNumber, (const char*)errorUTF);
+			}
 			j9mem_free_memory(errorUTF);
 		}
 	}

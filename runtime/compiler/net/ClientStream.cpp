@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2018
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,13 +15,12 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "ClientStream.hpp"
-#include "control/CompilationRuntime.hpp"
 #include "control/Options.hpp"
 #include "env/VerboseLog.hpp"
 #include "net/LoadSSLLibs.hpp"
@@ -51,10 +50,12 @@ const int ClientStream::INCOMPATIBILITY_COUNT_LIMIT = 1; // This needs to be sma
 
 // Create SSL context, load certs and keys. Only needs to be done once.
 // This is called during startup from rossa.cpp
-int ClientStream::static_init(TR::PersistentInfo *info)
+int ClientStream::static_init(TR::CompilationInfo *compInfo)
    {
    if (!CommunicationStream::useSSL())
       return 0;
+
+   TR_ASSERT_FATAL(_sslCtx == NULL, "SSL context already initialized");
 
    CommunicationStream::initSSL();
 
@@ -73,7 +74,6 @@ int ClientStream::static_init(TR::PersistentInfo *info)
       return -1;
       }
 
-   TR::CompilationInfo *compInfo = TR::CompilationInfo::get();
    auto &sslKeys = compInfo->getJITServerSslKeys();
    auto &sslCerts = compInfo->getJITServerSslCerts();
    auto &sslRootCerts = compInfo->getJITServerSslRootCerts();
@@ -122,13 +122,23 @@ int ClientStream::static_init(TR::PersistentInfo *info)
    _sslCtx = ctx;
 
    if (TR::Options::getVerboseOption(TR_VerboseJITServer))
-      TR_VerboseLog::writeLineLocked(TR_Vlog_JITServer, "Successfully initialized SSL context (%s) \n", (*OOpenSSL_version)(0));
+      TR_VerboseLog::writeLineLocked(TR_Vlog_JITServer, "Successfully initialized SSL context (%s)", (*OOpenSSL_version)(0));
    return 0;
+   }
+
+void ClientStream::freeSSLContext()
+   {
+   if (_sslCtx)
+      {
+      (*OSSL_CTX_free)(_sslCtx);
+      _sslCtx = NULL;
+      }
    }
 
 SSL_CTX *ClientStream::_sslCtx = NULL;
 
-int openConnection(const std::string &address, uint32_t port, uint32_t timeoutMs)
+static int
+openConnection(const std::string &address, uint32_t port, uint32_t timeoutMs)
    {
    // TODO consider support for IPv6
    struct addrinfo hints;
@@ -146,13 +156,11 @@ int openConnection(const std::string &address, uint32_t port, uint32_t timeoutMs
    struct addrinfo *addrList = NULL;
    int res = getaddrinfo(address.c_str(), portName, &hints, &addrList);
    if (res != 0)
-      {
-      // Can use gai_strerror(res) to show error code
-      throw StreamFailure("Cannot resolve server name");
-      }
+      throw StreamFailure("Cannot resolve server name: " + std::string(gai_strerror(res)));
+
    struct addrinfo *pAddr;
    int sockfd = -1;
-   for (pAddr = addrList; pAddr; pAddr = pAddr->ai_next) 
+   for (pAddr = addrList; pAddr; pAddr = pAddr->ai_next)
       {
       sockfd = socket(pAddr->ai_family, pAddr->ai_socktype, pAddr->ai_protocol);
       if (sockfd >= 0)
@@ -161,58 +169,67 @@ int openConnection(const std::string &address, uint32_t port, uint32_t timeoutMs
       }
    if (sockfd < 0)
       {
+      int err = errno;
       freeaddrinfo(addrList);
-      throw StreamFailure("Cannot create socket for JITServer");
+      throw StreamFailure("Cannot create socket: " + std::string(strerror(err)));
       }
-   
+
    int flag = 1;
-   if (setsockopt(sockfd, SOL_SOCKET, SO_KEEPALIVE, (void*)&flag, sizeof(flag)) < 0)
+   if (setsockopt(sockfd, SOL_SOCKET, SO_KEEPALIVE, &flag, sizeof(flag)) < 0)
       {
+      int err = errno;
       freeaddrinfo(addrList);
       close(sockfd);
-      throw StreamFailure("Cannot set option SO_KEEPALIVE on socket");
+      throw StreamFailure("Cannot set option SO_KEEPALIVE on socket: " + std::string(strerror(err)));
       }
 
-   struct linger lingerVal = {1, 2}; // linger 2 seconds
-   if (setsockopt(sockfd, SOL_SOCKET, SO_LINGER, (void *)&lingerVal, sizeof(lingerVal)) < 0)
+   struct linger lingerVal = { 1, 2 }; // linger 2 seconds
+   if (setsockopt(sockfd, SOL_SOCKET, SO_LINGER, &lingerVal, sizeof(lingerVal)) < 0)
       {
+      int err = errno;
       freeaddrinfo(addrList);
       close(sockfd);
-      throw StreamFailure("Cannot set option SO_LINGER on socket");
+      throw StreamFailure("Cannot set option SO_LINGER on socket: " + std::string(strerror(err)));
       }
 
-   struct timeval timeout = {(timeoutMs / 1000), ((timeoutMs % 1000) * 1000)};
-   if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (void *)&timeout, sizeof(timeout)) < 0)
+   struct timeval timeout = { timeoutMs / 1000 , (timeoutMs % 1000) * 1000 };
+   if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0)
       {
+      int err = errno;
       freeaddrinfo(addrList);
       close(sockfd);
-      throw StreamFailure("Cannot set option SO_RCVTIMEO on socket");
+      throw StreamFailure("Cannot set option SO_RCVTIMEO on socket: " + std::string(strerror(err)));
       }
-
-   if (setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, (void *)&timeout, sizeof(timeout)) < 0)
+   if (setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) < 0)
       {
+      int err = errno;
       freeaddrinfo(addrList);
       close(sockfd);
-      throw StreamFailure("Cannot set option SO_SNDTIMEO on socket");
+      throw StreamFailure("Cannot set option SO_SNDTIMEO on socket: " + std::string(strerror(err)));
       }
 
    if (setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag)) < 0)
       {
+      int err = errno;
       freeaddrinfo(addrList);
       close(sockfd);
-      throw StreamFailure("Cannot set option TCP_NODELAY on socket");
+      throw StreamFailure("Cannot set option TCP_NODELAY on socket: " + std::string(strerror(err)));
       }
+
    if (connect(sockfd, pAddr->ai_addr, pAddr->ai_addrlen) < 0)
       {
+      int err = errno;
       freeaddrinfo(addrList);
       close(sockfd);
-      throw StreamFailure("Connect failed");
+      throw StreamFailure("Connect failed: " + std::string(strerror(err)));
       }
+
    freeaddrinfo(addrList);
    return sockfd;
    }
 
-BIO *openSSLConnection(SSL_CTX *ctx, int connfd)
+static BIO *
+openSSLConnection(SSL_CTX *ctx, int connfd)
    {
    if (!ctx)
       return NULL;
@@ -225,7 +242,7 @@ BIO *openSSLConnection(SSL_CTX *ctx, int connfd)
       }
 
    SSL *ssl = NULL;
-   if ((*OBIO_ctrl)(bio, BIO_C_GET_SSL, false, (char *) &ssl) != 1) // BIO_get_ssl(bio, &ssl)
+   if ((*OBIO_ctrl)(bio, BIO_C_GET_SSL, false, (char *)&ssl) != 1) // BIO_get_ssl(bio, &ssl)
       {
       (*OERR_print_errors_fp)(stderr);
       (*OBIO_free_all)(bio);
@@ -246,7 +263,7 @@ BIO *openSSLConnection(SSL_CTX *ctx, int connfd)
       throw JITServer::StreamFailure("Failed to SSL_connect");
       }
 
-   X509* cert = (*OSSL_get_peer_certificate)(ssl);
+   X509 *cert = (*OSSL_get_peer_certificate)(ssl);
    if (!cert)
       {
       (*OERR_print_errors_fp)(stderr);
@@ -258,12 +275,13 @@ BIO *openSSLConnection(SSL_CTX *ctx, int connfd)
    if (X509_V_OK != (*OSSL_get_verify_result)(ssl))
       {
       (*OERR_print_errors_fp)(stderr);
+      (*OBIO_free_all)(bio);
       throw JITServer::StreamFailure("Server certificate verification failed");
       }
 
    if (TR::Options::getVerboseOption(TR_VerboseJITServer))
-      TR_VerboseLog::writeLineLocked(TR_Vlog_JITServer, "SSL connection on socket 0x%x, Version: %s, Cipher: %s\n",
-                                                      connfd, (*OSSL_get_version)(ssl), (*OSSL_get_cipher)(ssl));
+      TR_VerboseLog::writeLineLocked(TR_Vlog_JITServer, "SSL connection on socket 0x%x, Version: %s, Cipher: %s",
+                                     connfd, (*OSSL_get_version)(ssl), (*OSSL_get_cipher)(ssl));
    return bio;
    }
 

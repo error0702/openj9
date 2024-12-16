@@ -1,6 +1,6 @@
 
 /*******************************************************************************
- * Copyright (c) 1991, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,9 +16,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 
@@ -40,6 +40,9 @@
 #include "RememberedSetSATB.hpp"
 #endif /* OMR_GC_REALTIME */
 
+class MM_MarkingScheme;
+class MM_Scavenger;
+
 /**
  * Access barrier for Modron collector.
  */
@@ -49,8 +52,9 @@ class MM_StandardAccessBarrier : public MM_ObjectAccessBarrier
 private:
 #if defined(J9VM_GC_GENERATIONAL)
 	MM_GenerationalAccessBarrierComponent _generationalAccessBarrierComponent;	/**< Generational Component of Access Barrier */
+	MM_Scavenger *_scavenger;	/**< caching MM_GCExtensions::scavenger */
 #endif /* J9VM_GC_GENERATIONAL */
-	MM_MarkingScheme *_markingScheme;
+	MM_MarkingScheme *_markingScheme;	/**< caching MM_MarkingScheme instance */
 
 	void postObjectStoreImpl(J9VMThread *vmThread, J9Object *dstObject, J9Object *srcObject);
 	void postBatchObjectStoreImpl(J9VMThread *vmThread, J9Object *dstObject);
@@ -70,6 +74,9 @@ public:
 
 	MM_StandardAccessBarrier(MM_EnvironmentBase *env, MM_MarkingScheme *markingScheme) :
 		MM_ObjectAccessBarrier(env)
+#if defined(J9VM_GC_GENERATIONAL)
+		, _scavenger(_extensions->scavenger)
+#endif /* J9VM_GC_GENERATIONAL */
 		, _markingScheme(markingScheme)
 	{
 		_typeId = __FUNCTION__;
@@ -87,6 +94,9 @@ public:
 	virtual bool postBatchObjectStore(J9VMThread *vmThread, J9Object *destObject, bool isVolatile=false);
 	virtual bool postBatchObjectStore(J9VMThread *vmThread, J9Class *destClass, bool isVolatile=false);
 	virtual void recentlyAllocatedObject(J9VMThread *vmThread, J9Object *object); 
+
+	virtual void preMountContinuation(J9VMThread *vmThread, j9object_t contObject);
+	virtual void postUnmountContinuation(J9VMThread *vmThread, j9object_t contObject);
 
 	virtual void* jniGetPrimitiveArrayCritical(J9VMThread* vmThread, jarray array, jboolean *isCopy);
 	virtual void jniReleasePrimitiveArrayCritical(J9VMThread* vmThread, jarray array, void * elems, jint mode);

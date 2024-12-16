@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #ifndef J9_CLASSENV_INCL
@@ -38,6 +38,7 @@ namespace J9 { typedef J9::ClassEnv ClassEnvConnector; }
 #include "env/jittypes.h"
 #include "env/OMRClassEnv.hpp"
 #include "infra/Annotations.hpp"
+#include "il/DataTypes.hpp"
 #include "j9.h"
 
 namespace TR { class SymbolReference; }
@@ -85,15 +86,16 @@ public:
 
    bool isStringClass(TR_OpaqueClassBlock *clazz);
 
-   bool isStringClass(uintptr_t objectPointer);
-
    bool classHasIllegalStaticFinalFieldModification(TR_OpaqueClassBlock * clazzPointer);
+   void setClassHasIllegalStaticFinalFieldModification(
+      TR_OpaqueClassBlock *clazz, TR::Compilation *comp);
    bool isAbstractClass(TR::Compilation *comp, TR_OpaqueClassBlock *clazzPointer);
    bool isInterfaceClass(TR::Compilation *comp, TR_OpaqueClassBlock *clazzPointer);
    bool isConcreteClass(TR::Compilation *comp, TR_OpaqueClassBlock * clazzPointer);
    bool isValueTypeClass(TR_OpaqueClassBlock *);
    bool isValueTypeClassFlattened(TR_OpaqueClassBlock *clazz);
    bool isValueBasedOrValueTypeClass(TR_OpaqueClassBlock *);
+   bool isArrayNullRestricted(TR::Compilation *comp, TR_OpaqueClassBlock *arrayClass);
 
    /** \brief
     *    Returns the size of the flattened array element
@@ -110,10 +112,10 @@ public:
    int32_t flattenedArrayElementSize(TR::Compilation *comp, TR_OpaqueClassBlock *arrayClass);
 
    /** \brief
-    *	    Checks whether a class implements `IdentityObject`/`IdentityInterface`
+    *    Checks whether a class implements `IdentityObject`/`IdentityInterface`
     *
     *  \param clazz
-    *     The class that is to be checked
+    *    The class that is to be checked
     *
     *  \return
     *    `true` if the class implements `IdentityObject`/`IdentityInterface`;
@@ -122,13 +124,29 @@ public:
     */
    bool classHasIdentity(TR_OpaqueClassBlock *clazz);
 
+   /** \brief
+    *    Checks whether a class supports direct memory comparison if its fields meet
+    *    the criteria that NO field is of
+    *    - type double (D) or float (F)
+    *    - nullable-class/interface type
+    *    - null-restricted class type that are not both flattened and recursively
+    *      compatible for direct memory comparison
+    *
+    *  \param clazz
+    *    The class that is to be checked
+    *
+    *  \return
+    *    `true` if the class supports direct memory comparison. `false` otherwise.
+    */
+   bool classSupportsDirectMemoryComparison(TR_OpaqueClassBlock *clazz);
+
    /**
     * \brief
     *    Checks whether instances of the specified class can be trivially initialized by
     *    "zeroing" their fields.
-    *    In the case of OpenJ9, this tests whether any field is of a value type that has not been
-    *    "flattened" (that is, had the value type's fields inlined into this class).  Such a value
-    *    type field must be initialized with the default value of the type.
+    *    In the case of OpenJ9, this tests whether any field is of null-restricted type that
+    *    has not been "flattened" (that is, had the value type's fields inlined into this class).
+    *    Such a value type field must be initialized with the default value of the type.
     *
     * \param clazz
     *    The class that is to be checked
@@ -139,36 +157,34 @@ public:
     *    been inlined)
     */
    bool isZeroInitializable(TR_OpaqueClassBlock *clazz);
-   bool isEnumClass(TR::Compilation *comp, TR_OpaqueClassBlock *clazzPointer, TR_ResolvedMethod *method);
    bool isPrimitiveClass(TR::Compilation *comp, TR_OpaqueClassBlock *clazz);
    bool isAnonymousClass(TR::Compilation *comp, TR_OpaqueClassBlock *clazz);
    bool isPrimitiveArray(TR::Compilation *comp, TR_OpaqueClassBlock *);
+   TR::DataTypes primitiveArrayComponentType(TR::Compilation *comp, TR_OpaqueClassBlock *);
    bool isReferenceArray(TR::Compilation *comp, TR_OpaqueClassBlock *);
    bool isClassArray(TR::Compilation *comp, TR_OpaqueClassBlock *);
    bool isClassFinal(TR::Compilation *comp, TR_OpaqueClassBlock *);
    bool hasFinalizer(TR::Compilation *comp, TR_OpaqueClassBlock *classPointer);
    bool isClassInitialized(TR::Compilation *comp, TR_OpaqueClassBlock *);
+   /**
+    *  \brief
+    *    Checks whether a class is visible to another class
+    *
+    *  \param sourceClass
+    *    The source class that is to be checked
+    *
+    *  \param destClass
+    *    The destination class that is to be checked
+    *
+    *  \return
+    *    `true` if `destClass` is visible to `sourceClass`. `false` otherwise.
+    */
+   bool isClassVisible(TR::Compilation *comp, TR_OpaqueClassBlock *sourceClass, TR_OpaqueClassBlock *destClass);
    bool hasFinalFieldsInClass(TR::Compilation *comp, TR_OpaqueClassBlock *classPointer);
    bool sameClassLoaders(TR::Compilation *comp, TR_OpaqueClassBlock *, TR_OpaqueClassBlock *);
    bool isString(TR::Compilation *comp, TR_OpaqueClassBlock *clazz);
-   bool isString(TR::Compilation *comp, uintptr_t objectPointer);
    bool jitStaticsAreSame(TR::Compilation *comp, TR_ResolvedMethod * method1, int32_t cpIndex1, TR_ResolvedMethod * method2, int32_t cpIndex2);
    bool jitFieldsAreSame(TR::Compilation *comp, TR_ResolvedMethod * method1, int32_t cpIndex1, TR_ResolvedMethod * method2, int32_t cpIndex2, int32_t isStatic);
-   /*
-    * \brief
-    *    Tells whether a class reference entry in the constant pool represents a value type class.
-    *
-    * \param cpContextClass
-    *    The class whose constant pool contains the class reference entry being looked at. In another words,
-    *    it's the class of the method referring to the class reference entry.
-    *
-    * \param cpIndex
-    *    The constant pool index of the class reference entry.
-    *
-    * \note
-    *    The class reference entry doesn't need to be resolved because the information is encoded in class name string
-    */
-   bool isClassRefValueType(TR::Compilation *comp, TR_OpaqueClassBlock *cpContextClass, int32_t cpIndex);
 
    /** \brief
     *	    Populates a TypeLayout object.
@@ -235,7 +251,9 @@ public:
     *
     * @param clazz The RAM class pointer to read from
     * @param offset An offset into the virtual function table (VFT) of clazz
-    * @return The entry point of the method at the given offset
+    * @return The method at the given offset, or (depending on offset) its
+    * entry point, or 0 if offset is out of bounds or the result is otherwise
+    * unavailable.
     */
    intptr_t getVFTEntry(TR::Compilation *comp, TR_OpaqueClassBlock* clazz, int32_t offset);
    uint8_t *getROMClassRefName(TR::Compilation *comp, TR_OpaqueClassBlock *clazz, uint32_t cpIndex, int &classRefLen);
@@ -249,6 +267,17 @@ public:
     * 2 concrete classses and false otherwise.
     */
    bool containsZeroOrOneConcreteClass(TR::Compilation *comp, List<TR_PersistentClassInfo>* subClasses);
+
+   /** \brief
+    *     Returns the reference to the address of the default value instance for a value class.
+    *
+    *  \param clazz
+    *     The class that the default value instance belongs to. Must be an initialized value class.
+    *
+    *  \return
+    *     The reference to the address of the default value instance.
+    */
+   j9object_t *getDefaultValueSlotAddress(TR::Compilation *comp, TR_OpaqueClassBlock *clazz);
    };
 
 }

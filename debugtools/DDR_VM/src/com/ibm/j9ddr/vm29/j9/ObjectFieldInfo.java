@@ -1,5 +1,5 @@
-/*******************************************************************************
- * Copyright (c) 2015, 2021 IBM Corp. and others
+/*
+ * Copyright IBM Corp. and others 2015
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,12 +15,13 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
 package com.ibm.j9ddr.vm29.j9;
 
+import static com.ibm.j9ddr.vm29.structure.J9FieldFlags.J9FieldFlagIsNullRestricted;
 import static com.ibm.j9ddr.vm29.structure.J9FieldFlags.J9FieldFlagObject;
 import static com.ibm.j9ddr.vm29.structure.J9FieldFlags.J9FieldSizeDouble;
 import static com.ibm.j9ddr.vm29.structure.J9JavaAccessFlags.J9AccStatic;
@@ -393,7 +394,9 @@ public class ObjectFieldInfo {
 			UDATA modifiers = f.modifiers();
 			if (!modifiers.anyBitsIn(J9AccStatic) ) {
 				if (modifiers.anyBitsIn(J9FieldFlagObject)) {
-					if (valueTypeHelper.isFlattenableFieldSignature(J9ROMFieldShapeHelper.getSignature(f))) {
+					if (valueTypeHelper.isFlattenableFieldSignature(J9ROMFieldShapeHelper.getSignature(f))
+						|| modifiers.anyBitsIn(J9FieldFlagIsNullRestricted)
+					) {
 						int size = 0;
 						J9ClassPointer fieldClass = valueTypeHelper.findJ9ClassInFlattenedClassCacheWithFieldName(containerClazz, J9ROMFieldShapeHelper.getName(f));
 						if (!valueTypeHelper.isJ9FieldIsFlattened(fieldClass, f)) {
@@ -407,8 +410,7 @@ public class ObjectFieldInfo {
 								if (valueTypeHelper.classRequires4BytePrePadding(fieldClass)) {
 									instanceSize = instanceSize.sub(U32.SIZEOF);
 								}
-								forceDoubleAlignment = (modifiers.allBitsIn(J9JavaAccessFlags.J9AccVolatile) || valueTypeHelper.isRomClassAtomic(fieldClass.romClass()))
-										&& instanceSize.eq(doubleSize);
+								forceDoubleAlignment = (modifiers.allBitsIn(J9JavaAccessFlags.J9AccVolatile) && instanceSize.eq(doubleSize));
 							} else {
 								forceDoubleAlignment = true;
 							}

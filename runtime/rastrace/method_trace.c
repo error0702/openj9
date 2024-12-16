@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #include "rommeth.h"
@@ -311,22 +311,30 @@ traceMethodExitX(J9VMThread *thr, J9Method *method, UDATA isCompiled, void* exce
 
 }
 
-static void
-hookRAMClassLoad(J9HookInterface** hook, UDATA eventNum, void* eventData, void* userData)
+BOOLEAN
+setRAMClassExtendedMethodFlagsHelper(J9VMThread *thr, J9Class *clazz, const char **nlsMsgFormat)
 {
-	J9VMInternalClassLoadEvent* event = (J9VMInternalClassLoadEvent *)eventData;
-	J9VMThread* thr = event->currentThread;
 	J9JavaVM *vm = thr->javaVM;
-	J9Class* clazz = event->clazz;
-	J9ROMClass* romClass = clazz->romClass;
-	U_32 i;
+	J9Method *method = clazz->ramMethods;
+	U_32 i = 0;
+	U_32 romMethodCount = clazz->romClass->romMethodCount;
 
-	J9Method * method = clazz->ramMethods;
-	for (i = 0; i < romClass->romMethodCount; i++) {
+	for (i = 0; i < romMethodCount; i++) {
 		U_8 *mtFlag = fetchMethodExtendedFlagsPointer(method);
-		setExtendedMethodFlags(vm, mtFlag, (checkMethod(thr, method) | rasSetTriggerTrace(thr, method) ) );
+		setExtendedMethodFlags(vm, mtFlag, (checkMethod(thr, method) | rasSetTriggerTrace(thr, method)));
 		method++;
 	}
+
+	/* a return value is required to match classIterationRestoreHookFunc definition */
+	return TRUE;
+}
+
+static void
+hookRAMClassLoad(J9HookInterface **hook, UDATA eventNum, void *eventData, void *userData)
+{
+	J9VMInternalClassLoadEvent *event = (J9VMInternalClassLoadEvent *)eventData;
+
+	setRAMClassExtendedMethodFlagsHelper(event->currentThread, event->clazz, NULL);
 }
 
 /* External entry point for method trace, exposed via J9UtServerInterface. */
@@ -388,8 +396,8 @@ enableMethodTraceHooks(J9JavaVM *vm)
 {
 	J9HookInterface** hook = vm->internalVMFunctions->getVMHookInterface(vm);
 
-	/* Called from J9VMDLLMain, single threaded at startup so no
-	 * need to protect with vm->runtimeFlagsMutex
+	/* Called from J9VMDLLMain at startup, or CRIU restore,
+	 * single threaded so no need to protect with vm->runtimeFlagsMutex.
 	 */
 	vm->extendedRuntimeFlags |= J9_EXTENDED_RUNTIME_METHOD_TRACE_ENABLED;
 
@@ -466,13 +474,44 @@ traceMethodArgObject(J9VMThread *thr, UDATA* arg0EA, char* cursor, UDATA length)
 	if (object == NULL) {
 		j9str_printf(PORTLIB, cursor, length, "null");
 	} else {
-		J9Class* clazz = J9OBJECT_CLAZZ(thr, object);
-		J9ROMClass * romClass = clazz->romClass;
-		J9UTF8* className = J9ROMCLASS_CLASSNAME(romClass);
+		J9Class *clazz = J9OBJECT_CLAZZ(thr, object);
+		J9JavaVM *vm = thr->javaVM;
 
-		/* TODO: handle arrays */
+		if (clazz == J9VMJAVALANGSTRING_OR_NULL(vm)) {
+			/* string argument */
+#define DEFAULT_STRING_LENGTH 32
+			char utf8Buffer[128];
+			UDATA utf8Length = 0;
 
-		j9str_printf(PORTLIB, cursor, length, "%.*s@%p", (U_32)J9UTF8_LENGTH(className), J9UTF8_DATA(className), object);
+			char *utf8String = vm->internalVMFunctions->copyStringToUTF8WithMemAlloc(
+					thr,
+					object,
+					0,
+					"",
+					0,
+					utf8Buffer,
+					sizeof(utf8Buffer),
+					&utf8Length);
+
+			if (NULL == utf8String) {
+				j9str_printf(PORTLIB, cursor, length, "(String)<Memory allocation error>");
+			} else if (utf8Length > DEFAULT_STRING_LENGTH) {
+				j9str_printf(PORTLIB, cursor, length, "(String)\"%.*s\"...", (U_32)DEFAULT_STRING_LENGTH, utf8String);
+			} else {
+				j9str_printf(PORTLIB, cursor, length, "(String)\"%.*s\"", (U_32)utf8Length, utf8String);
+			}
+
+			if (utf8Buffer != utf8String) {
+				j9mem_free_memory(utf8String);
+			}
+#undef DEFAULT_STRING_LENGTH
+		} else {
+			/* TODO: handle arrays */
+
+			J9ROMClass *romClass = clazz->romClass;
+			J9UTF8 *className = J9ROMCLASS_CLASSNAME(romClass);
+			j9str_printf(PORTLIB, cursor, length, "%.*s@%p", (U_32)J9UTF8_LENGTH(className), J9UTF8_DATA(className), object);
+		}
 	}
 }
 
@@ -492,7 +531,7 @@ traceMethodArguments(J9VMThread* thr, J9UTF8* signature, UDATA* arg0EA, char* bu
 			while (*sigChar == '[') {
 				sigChar++;
 			}
-			if (*sigChar == 'L' ) {
+			if (IS_CLASS_SIGNATURE(*sigChar)) {
 				while (*sigChar != ';') {
 					sigChar++;
 				}

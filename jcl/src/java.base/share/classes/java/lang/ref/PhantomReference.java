@@ -1,8 +1,6 @@
-/*[INCLUDE-IF Sidecar16]*/
-package java.lang.ref;
-
-/*******************************************************************************
- * Copyright (c) 1998, 2010 IBM Corp. and others
+/*[INCLUDE-IF JAVA_SPEC_VERSION >= 8]*/
+/*
+ * Copyright IBM Corp. and others 1998
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -18,29 +16,34 @@ package java.lang.ref;
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
- 
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
+package java.lang.ref;
+
 /**
- * PhantomReference objects are used to detect referents which 
+ * PhantomReference objects are used to detect referents which
  * are no longer visible and are eligible to have their storage
  * reclaimed.
  *
  * @author		OTI
  * @version		initial
  * @since		JDK1.2
- */	
-public class PhantomReference<T> extends java.lang.ref.Reference<T> {
+ */
+public
+/*[IF JAVA_SPEC_VERSION >= 19]*/
+non-sealed
+/*[ENDIF] JAVA_SPEC_VERSION >= 19 */
+class PhantomReference<T> extends Reference<T> {
 
 /**
- * Return the referent of the reference object.  Phantom reference 
+ * Return the referent of the reference object.  Phantom reference
  * objects referents are inaccessible, and so null is returned.
  *
  * @return		Object
  *					Returns null.
- */	
+ */
 public T get() {
 	return null;
 }
@@ -52,7 +55,7 @@ public T get() {
  *					referent to track.
  * @param		q
  *					queue to register to the reference object with.
- */	
+ */
 public PhantomReference(T r, ReferenceQueue<? super T> q) {
 	initReference(r, q);
 }

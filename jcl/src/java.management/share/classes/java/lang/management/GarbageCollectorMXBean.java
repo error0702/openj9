@@ -1,6 +1,6 @@
-/*[INCLUDE-IF Sidecar17]*/
-/*******************************************************************************
- * Copyright (c) 2005, 2018 IBM Corp. and others
+/*[INCLUDE-IF JAVA_SPEC_VERSION >= 8]*/
+/*
+ * Copyright IBM Corp. and others 2005
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,10 +16,10 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
+ */
 package java.lang.management;
 
 /**
@@ -43,7 +43,7 @@ package java.lang.management;
  * string &quot;java.lang:type=GarbageCollector,name= <i>unique collector's name
  * </i>&quot; for the value of the second parameter.</li>
  * </ol>
- *  
+ *
  * @since 1.5
  */
 public interface GarbageCollectorMXBean extends MemoryManagerMXBean {
@@ -51,7 +51,7 @@ public interface GarbageCollectorMXBean extends MemoryManagerMXBean {
 	/**
 	 * Returns in a long the number of garbage collections carried out by the
 	 * associated collector.
-	 * 
+	 *
 	 * @return the total number of garbage collections that have been carried
 	 *         out by the associated garbage collector.
 	 */
@@ -60,7 +60,7 @@ public interface GarbageCollectorMXBean extends MemoryManagerMXBean {
 	/**
 	 * For the associated garbage collector, returns the total amount of time in
 	 * milliseconds that it has spent carrying out garbage collection.
-	 * 
+	 *
 	 * @return the number of milliseconds that have been spent in performing
 	 *         garbage collection. This is a cumulative figure.
 	 */

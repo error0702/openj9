@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #if !defined(VMHELPERS_HPP_)
@@ -40,7 +40,9 @@
 #include "j9vmconstantpool.h"
 #include "j9modifiers_api.h"
 #include "j9cp.h"
+#include "vm_api.h"
 #include "ute.h"
+#include "AtomicSupport.hpp"
 #include "ObjectAllocationAPI.hpp"
 
 typedef enum {
@@ -74,11 +76,17 @@ typedef enum {
 	J9_BCLOOP_SEND_TARGET_INL_CLASS_IS_ARRAY,
 	J9_BCLOOP_SEND_TARGET_INL_CLASS_IS_PRIMITIVE,
 #if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
-	J9_BCLOOP_SEND_TARGET_INL_CLASS_IS_PRIMITIVE_CLASS,
+	J9_BCLOOP_SEND_TARGET_INL_CLASS_IS_VALUE,
+	J9_BCLOOP_SEND_TARGET_INL_CLASS_IS_IDENTITY,
+	J9_BCLOOP_SEND_TARGET_INL_INTERNALS_POSITIVE_ONLY_HASHCODES,
+	J9_BCLOOP_SEND_TARGET_INL_CLASS_GET_CLASS_FILEVERSION,
 #endif /* J9VM_OPT_VALHALLA_VALUE_TYPES */
 	J9_BCLOOP_SEND_TARGET_INL_CLASS_GET_MODIFIERS_IMPL,
 	J9_BCLOOP_SEND_TARGET_INL_CLASS_GET_COMPONENT_TYPE,
 	J9_BCLOOP_SEND_TARGET_INL_THREAD_CURRENT_THREAD,
+#if JAVA_SPEC_VERSION >= 19
+	J9_BCLOOP_SEND_TARGET_INL_THREAD_SET_CURRENT_THREAD,
+#endif /* JAVA_SPEC_VERSION >= 19 */
 	J9_BCLOOP_SEND_TARGET_INL_STRING_INTERN,
 	J9_BCLOOP_SEND_TARGET_INL_SYSTEM_ARRAYCOPY,
 	J9_BCLOOP_SEND_TARGET_INL_SYSTEM_CURRENT_TIME_MILLIS,
@@ -150,13 +158,17 @@ typedef enum {
 	J9_BCLOOP_SEND_TARGET_INL_UNSAFE_COMPAREANDSWAPLONG,
 	J9_BCLOOP_SEND_TARGET_INL_UNSAFE_COMPAREANDSWAPINT,
 #if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
-	J9_BCLOOP_SEND_TARGET_INL_UNSAFE_GETVALUE,
-	J9_BCLOOP_SEND_TARGET_INL_UNSAFE_PUTVALUE,
 	J9_BCLOOP_SEND_TARGET_INL_UNSAFE_UNINITIALIZEDDEFAULTVALUE,
 	J9_BCLOOP_SEND_TARGET_INL_UNSAFE_VALUEHEADERSIZE,
-	J9_BCLOOP_SEND_TARGET_INL_UNSAFE_ISFLATTENEDARRAY,
-	J9_BCLOOP_SEND_TARGET_INL_UNSAFE_ISFLATTENED,
+	J9_BCLOOP_SEND_TARGET_INL_UNSAFE_GETOBJECTSIZE,
 #endif /* J9VM_OPT_VALHALLA_VALUE_TYPES */
+#if defined(J9VM_OPT_VALHALLA_FLATTENABLE_VALUE_TYPES)
+	J9_BCLOOP_SEND_TARGET_INL_UNSAFE_GETVALUE,
+	J9_BCLOOP_SEND_TARGET_INL_UNSAFE_PUTVALUE,
+	J9_BCLOOP_SEND_TARGET_INL_UNSAFE_ISFLATARRAY,
+	J9_BCLOOP_SEND_TARGET_INL_UNSAFE_ISFLATFIELD,
+	J9_BCLOOP_SEND_TARGET_INL_UNSAFE_ISFIELDATOFFSETFLATTENED,
+#endif /* J9VM_OPT_VALHALLA_FLATTENABLE_VALUE_TYPES */
 	J9_BCLOOP_SEND_TARGET_INL_INTERNALS_GET_INTERFACES,
 	J9_BCLOOP_SEND_TARGET_INL_ARRAY_NEW_ARRAY_IMPL,
 	J9_BCLOOP_SEND_TARGET_INL_CLASSLOADER_FIND_LOADED_CLASS_IMPL,
@@ -193,11 +205,19 @@ typedef enum {
 	J9_BCLOOP_SEND_TARGET_METHODHANDLE_LINKTOSTATICSPECIAL,
 	J9_BCLOOP_SEND_TARGET_METHODHANDLE_LINKTOVIRTUAL,
 	J9_BCLOOP_SEND_TARGET_METHODHANDLE_LINKTOINTERFACE,
+#if JAVA_SPEC_VERSION >= 22
+	J9_BCLOOP_SEND_TARGET_METHODHANDLE_LINKTONATIVE,
+#endif /* JAVA_SPEC_VERSION >= 22 */
 	J9_BCLOOP_SEND_TARGET_MEMBERNAME_DEFAULT_CONFLICT,
 #endif /* defined(J9VM_OPT_OPENJDK_METHODHANDLE) */
 #if JAVA_SPEC_VERSION >= 16
-	J9_BCLOOP_SEND_TARGET_INL_PROGRAMMABLEINVOKER_INVOKENATIVE,
+	J9_BCLOOP_SEND_TARGET_INL_INTERNALDOWNCALLHANDLER_INVOKENATIVE,
 #endif /* JAVA_SPEC_VERSION >= 16 */
+#if JAVA_SPEC_VERSION >= 19
+	J9_BCLOOP_SEND_TARGET_ENTER_CONTINUATION,
+	J9_BCLOOP_SEND_TARGET_YIELD_CONTINUATION,
+	J9_BCLOOP_SEND_TARGET_ISPINNED_CONTINUATION,
+#endif /* JAVA_SPEC_VERSION >= 19 */
 } VM_SendTarget;
 
 typedef enum {
@@ -245,6 +265,13 @@ typedef enum {
 #define J9_BCLOOP_ENCODE_SEND_TARGET(num) ((void *)(num))
 #define J9_VH_ENCODE_ACCESS_MODE(num) ((void *)((num << 1) + 1))
 #define J9_VH_DECODE_ACCESS_MODE(mra) ((UDATA)(mra) >> 1)
+
+#if JAVA_SPEC_VERSION >= 16
+#if defined(J9VM_ARCH_AARCH64)
+#define ROUNDING_GRANULARITY	8
+#define ROUNDED_FOOTER_OFFSET(number)	(((number) + (ROUNDING_GRANULARITY - 1) + sizeof(J9MemTag)) & ~(uintptr_t)(ROUNDING_GRANULARITY - 1))
+#endif /* J9VM_ARCH_AARCH64 */
+#endif /* JAVA_SPEC_VERSION >= 16 */
 
 class VM_VMHelpers
 {
@@ -498,6 +525,11 @@ public:
 			if (classFlags & J9AccClassOwnableSynchronizer) {
 				currentThread->javaVM->memoryManagerFunctions->ownableSynchronizerObjectCreated(currentThread, object);
 			}
+#if JAVA_SPEC_VERSION >= 19
+			if (classFlags & J9AccClassContinuation) {
+				currentThread->javaVM->memoryManagerFunctions->continuationObjectCreated(currentThread, object);
+			}
+#endif /* JAVA_SPEC_VERSION >= 19 */
 		}
 	}
 
@@ -616,13 +648,22 @@ cacheCastable:
 							/* check the [[O -> [[O case.  Don't allow [[I -> [[O */
 							if (instanceArity == castArity) {
 								J9Class *instanceClassLeafComponent = ((J9ArrayClass*)instanceClass)->leafComponentType;
-								if (J9CLASS_IS_MIXED(instanceClassLeafComponent)) {
-									/* we know arities are the same, so skip directly to the terminal case */
-									instanceClass = instanceClassLeafComponent;
-									castClass = castClassLeafComponent;
-									didRetry = true;
-									goto retry;
+#if defined(J9VM_OPT_VALHALLA_FLATTENABLE_VALUE_TYPES)
+								if (J9_IS_J9ARRAYCLASS_NULL_RESTRICTED(instanceClass)
+									|| !J9_IS_J9ARRAYCLASS_NULL_RESTRICTED(castClass)
+								) {
+#endif /* defined(J9VM_OPT_VALHALLA_FLATTENABLE_VALUE_TYPES) */
+									if (J9CLASS_IS_MIXED(instanceClassLeafComponent)) {
+										/* we know arities are the same, so skip directly to the terminal case */
+										instanceClass = instanceClassLeafComponent;
+										castClass = castClassLeafComponent;
+										didRetry = true;
+										goto retry;
+									}
+#if defined(J9VM_OPT_VALHALLA_FLATTENABLE_VALUE_TYPES)
 								}
+								/* else fail since a nullable array class cannot be cast to a null-restricted class */
+#endif /* defined(J9VM_OPT_VALHALLA_FLATTENABLE_VALUE_TYPES) */
 							}
 							/* else the arity of the instance wasn't high enough, so we fail */
 						}
@@ -768,7 +809,7 @@ done:
 	static VMINLINE bool
 	immediateAsyncPending(J9VMThread *currentThread)
 	{
-		return (0 != (currentThread->publicFlags & J9_PUBLIC_FLAGS_POP_FRAMES_INTERRUPT));
+		return J9_ARE_ANY_BITS_SET(currentThread->publicFlags, J9_PUBLIC_FLAGS_POP_FRAMES_INTERRUPT);
 	}
 
 	/**
@@ -825,11 +866,11 @@ done:
 	{
 		j9object_t instance = NULL;
 
-#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+#if defined(J9VM_OPT_VALHALLA_FLATTENABLE_VALUE_TYPES)
 		if (J9_IS_J9CLASS_FLATTENED(arrayClass)) {
 			instance = objectAllocate->inlineAllocateIndexableValueTypeObject(currentThread, arrayClass, size, initializeSlots, memoryBarrier, sizeCheck);
 		} else if (J9_ARE_NO_BITS_SET(arrayClass->classFlags, J9ClassContainsUnflattenedFlattenables))
-#endif /* J9VM_OPT_VALHALLA_VALUE_TYPES */
+#endif /* J9VM_OPT_VALHALLA_FLATTENABLE_VALUE_TYPES */
 		{
 			instance = objectAllocate->inlineAllocateIndexableObject(currentThread, arrayClass, size, initializeSlots, memoryBarrier, sizeCheck);
 		}
@@ -929,7 +970,8 @@ done:
 		if ((unicode >= 0x01) && (unicode <= 0x7F)) {
 			utfChars[0] = (U_8)unicode;
 		} else {
-			utfChars[0] = (U_8)(((unicode >>6 ) & 0x1F) | 0xC0);
+			/* use 0x3 since we are using I_8, so only 2 bits matter here */
+			utfChars[0] = (U_8)(((unicode >> 6) & 0x3) | 0xC0);
 			utfChars[1] = (U_8)((unicode & 0x3F) | 0x80);
 			length = 2;
 		}
@@ -1312,13 +1354,19 @@ done:
 			J9SFJNINativeMethodFrame *nativeMethodFrame = (J9SFJNINativeMethodFrame*)((UDATA)currentThread->sp + (UDATA)currentThread->literals);
 			J9Method *method = nativeMethodFrame->method;
 			if (J9_ARE_ANY_BITS_SET((UDATA)method->constantPool, J9_STARTPC_NATIVE_REQUIRES_SWITCHING)) {
-				/* zero the state and switch java offload mode OFF */
-				currentThread->javaOffloadState = 0;
-				/* check if the class requires lazy switching (for JDBC) or normal switching */
+				/* check if the class requires lazy switching (for JDBC), allow subtasks, or normal switching */
 				J9Class *methodClass = J9_CLASS_FROM_METHOD(method);
 				if (J9_ARE_ANY_BITS_SET(J9CLASS_FLAGS(methodClass), J9AccClassHasJDBCNatives)) {
+					/* zero the state and switch java offload mode OFF */
+					currentThread->javaOffloadState = 0;
 					vm->javaOffloadSwitchJDBCWithMethodFunc(currentThread, method);
+				} else if (J9_ARE_ANY_BITS_SET(J9CLASS_EXTENDED_FLAGS(methodClass), J9ClassHasOffloadAllowSubtasksNatives)) {
+					currentThread->javaOffloadState |= J9_JNI_OFFLOAD_WITH_SUBTASKS_FLAG;
+					/* allow created subtasks to offload */
+					vm->javaOffloadSwitchOnAllowSubtasksWithMethodFunc(currentThread, method);
 				} else {
+					/* zero the state and switch java offload mode OFF */
+					currentThread->javaOffloadState = 0;
 					vm->javaOffloadSwitchOffWithMethodFunc(currentThread, method);
 				}
 			}
@@ -1341,15 +1389,16 @@ done:
 		J9VMEntryLocalStorage *els = currentThread->entryLocalStorage;
 		/* check if java offload mode is enabled */
 		if (NULL != vm->javaOffloadSwitchOnWithMethodFunc) {
-			/* check if we need to change state */
-			if (0 == currentThread->javaOffloadState) {
-				if (0 != els->savedJavaOffloadState) {
-					/* if yes, call the offload switch ON and restore our state from ELS */
-					J9SFJNINativeMethodFrame *nativeMethodFrame = (J9SFJNINativeMethodFrame*)((UDATA)currentThread->sp + (UDATA)currentThread->literals);
-					J9Method *method = nativeMethodFrame->method;
-					vm->javaOffloadSwitchOnWithMethodFunc(currentThread, method);
-					currentThread->javaOffloadState = els->savedJavaOffloadState;
-				}
+			/* check if we need to switch on */
+			bool switchOn = (0 == currentThread->javaOffloadState) && (0 != els->savedJavaOffloadState);
+			bool allowingSubtasks = J9_ARE_ANY_BITS_SET(currentThread->javaOffloadState, J9_JNI_OFFLOAD_WITH_SUBTASKS_FLAG);
+			bool oldStateAllowsSubtasks = J9_ARE_ANY_BITS_SET(els->savedJavaOffloadState, J9_JNI_OFFLOAD_WITH_SUBTASKS_FLAG);
+			bool disableAllowSubtasks = allowingSubtasks && !oldStateAllowsSubtasks;
+			if (switchOn || disableAllowSubtasks) {
+				J9SFJNINativeMethodFrame *nativeMethodFrame = (J9SFJNINativeMethodFrame *)((UDATA)currentThread->sp + (UDATA)currentThread->literals);
+				/* enable offload, or keep offload enabled but turn off allowing created subtasks to offload */
+				vm->javaOffloadSwitchOnWithMethodFunc(currentThread, nativeMethodFrame->method, disableAllowSubtasks ? TRUE : FALSE);
+				currentThread->javaOffloadState = els->savedJavaOffloadState;
 			}
 		}
 #endif /* J9VM_OPT_JAVA_OFFLOAD_SUPPORT */
@@ -1367,8 +1416,24 @@ done:
 	{
 		J9VMThread *targetThread = J9VMJAVALANGTHREAD_THREADREF(currentThread, threadObject);
 		bool result = false;
+#if JAVA_SPEC_VERSION >= 19
+		/* Check if the mounted thread is suspended. */
+		bool isSuspended = false;
+		if (NULL != targetThread) {
+			isSuspended = isThreadSuspended(currentThread, targetThread->threadObject);
+		}
+#endif /* JAVA_SPEC_VERSION >= 19 */
 		/* If the thread is alive, ask the OS thread.  Otherwise, answer false. */
-		if (J9VMJAVALANGTHREAD_STARTED(currentThread, threadObject) && (NULL != targetThread)) {
+		if ((NULL != targetThread)
+		&& J9VMJAVALANGTHREAD_STARTED(currentThread, threadObject)
+#if JAVA_SPEC_VERSION >= 19
+		/* Thread.deadInterrupt is Thread.interrupted in OJDK's Thread implementation.
+		 * In JDK19+, OJDK's Thread implementation is used. If the mounted thread is
+		 * suspended, use Thread.interrupted to derive if the thread is interrupted.
+		 */
+		&& (!isSuspended)
+#endif /* JAVA_SPEC_VERSION >= 19 */
+		) {
 			if (omrthread_interrupted(targetThread->osThread)) {
 				result = true;
 			}
@@ -1537,15 +1602,7 @@ exit:
 			}
 			break;
 		case J9NtcBoolean:
-		{
-			U_32 returnValue = (U_32)*returnStorage;
-			U_8 * returnAddress = (U_8 *)&returnValue;
-#ifdef J9VM_ENV_LITTLE_ENDIAN
-			*returnStorage = (UDATA)(0 != returnAddress[0]);
-#else
-			*returnStorage = (UDATA)(0 != returnAddress[3]);
-#endif /*J9VM_ENV_LITTLE_ENDIAN */
-		}
+			*returnStorage = ((UDATA)(U_8)(0 != *returnStorage));
 			break;
 		case J9NtcByte:
 			*returnStorage = (UDATA)(IDATA)(I_8)*returnStorage;
@@ -1573,14 +1630,17 @@ exit:
 		}
 	}
 
+#if JAVA_SPEC_VERSION >= 16
 	/**
-	 * @brief Converts the type of the return value to the return type intended for JEP389/419 FFI downcall/upcall
+	 * @brief Converts the type of the return value to the return type intended for JEP389/419 FFI downcall
+	 *
 	 * @param currentThread[in] The pointer to the current J9VMThread
 	 * @param returnType[in] The type of the return value
+	 * @param returnTypeSize[in] The size of the return value
 	 * @param returnStorage[in] The pointer to the return value
 	 */
 	static VMINLINE void
-	convertFFIReturnValue(J9VMThread* currentThread, U_8 returnType, UDATA* returnStorage)
+	convertFFIReturnValue(J9VMThread* currentThread, U_8 returnType, UDATA returnTypeSize, UDATA* returnStorage)
 	{
 		switch (returnType) {
 		case J9NtcVoid:
@@ -1601,6 +1661,26 @@ exit:
 		case J9NtcFloat:
 			currentThread->returnValue = (UDATA)*(U_32*)returnStorage;
 			break;
+		case J9NtcStruct:
+		{
+#if defined(J9VM_ARCH_AARCH64)
+			/* Restore the preset padding bytes (0xDD J9MEMTAG_PADDING_BYTE) of the allocated memory
+			 * for the returned struct on arrch64 as ffi_call intentionally sets zero to the rest of
+			 * byte slots except the return value of the allocated memory for the purposed of alignment,
+			 * which undoubtedly undermines the integrity check when releasing the returned memory
+			 * segment via Unsafe.
+			 */
+			U_8 *padding = (U_8 *)returnStorage + returnTypeSize;
+			UDATA paddingSize = ROUNDED_FOOTER_OFFSET(returnTypeSize) - sizeof(J9MemTag) - returnTypeSize;
+			for (UDATA byteIndex = 0; byteIndex < paddingSize; byteIndex++) {
+				padding[byteIndex] = J9MEMTAG_PADDING_BYTE;
+			}
+#endif /* J9VM_ARCH_AARCH64 */
+			/* returnStorage is not the address of _currentThread->returnValue any more
+			 * given it stores the address of allocated struct memory.
+			 */
+			currentThread->returnValue = (UDATA)returnStorage;
+		}
 		case J9NtcLong:
 			/* Fall through is intentional */
 		case J9NtcDouble:
@@ -1609,6 +1689,7 @@ exit:
 			break;
 		}
 	}
+#endif /* JAVA_SPEC_VERSION >= 16 */
 
 	/**
 	 * @brief Notify JIT upon the first modification of a final field, a stack frame should be build before calling this method to make the stack walkable
@@ -1714,9 +1795,10 @@ exit:
 	objectArrayStoreAllowed(J9VMThread const *currentThread, j9object_t array, j9object_t storeValue)
 	{
 		bool rc = true;
+		J9ArrayClass *arrayClass = (J9ArrayClass *)J9OBJECT_CLAZZ(currentThread, array);
 		if (NULL != storeValue) {
 			J9Class *valueClass = J9OBJECT_CLAZZ(currentThread, storeValue);
-			J9Class *componentType = ((J9ArrayClass*)J9OBJECT_CLAZZ(currentThread, array))->componentType;
+			J9Class *componentType = arrayClass->componentType;
 			/* quick check -- is this a store of a C into a C[]? */
 			if (valueClass != componentType) {
 				/* quick check -- is this a store of a C into a java.lang.Object[]? */
@@ -1724,6 +1806,10 @@ exit:
 					rc = inlineCheckCast(valueClass, componentType);
 				}
 			}
+#if defined(J9VM_OPT_VALHALLA_FLATTENABLE_VALUE_TYPES)
+		} else if (J9_IS_J9ARRAYCLASS_NULL_RESTRICTED(arrayClass)) {
+			rc = FALSE;
+#endif /* if defined(J9VM_OPT_VALHALLA_FLATTENABLE_VALUE_TYPES) */
 		}
 		return rc;
 	}
@@ -1910,7 +1996,6 @@ exit:
 		currentThread->arg0EA = sp - 1;
 		currentThread->pc = (U_8 *)J9SF_FRAME_TYPE_JIT_RESOLVE;
 		currentThread->literals = NULL;
-		currentThread->jitStackFrameFlags = 0;
 		return oldPC;
 	}
 
@@ -1950,6 +2035,246 @@ exit:
 		return classNameObject;
 	}
 
+	/**
+	 * Determine if thread is capable of running java code.
+	 *
+	 * @param[in] vmThread the J9VMThread to query
+	 * @return true if the thread can run java code, false if not
+	 */
+	static VMINLINE bool
+	threadCanRunJavaCode(J9VMThread *vmThread)
+	{
+		/*
+		 * Can't use J9THREAD_CATEGORY_APPLICATION_THREAD | J9THREAD_CATEGORY_RESOURCE_MONITOR_THREAD
+		 * to find all threads that can run java code because some system threads like the common
+		 * cleaner thread and attach API thread are not tagged with these categories, they are only tagged
+		 * as system threads.
+		 *
+		 * To get around this a negative test is used. The approach is to find all j9vmthreads that can't run java code
+		 * (ie. GC and JIT threads) and exclude those.
+		 */
+		UDATA const nonJavaThreads = (J9THREAD_CATEGORY_SYSTEM_GC_THREAD | J9THREAD_CATEGORY_SYSTEM_JIT_THREAD) & ~J9THREAD_CATEGORY_SYSTEM_THREAD;
+		return J9_ARE_NO_BITS_SET(omrthread_get_category(vmThread->osThread), nonJavaThreads);
+	}
+
+	/**
+	 * Interrupt the target Thread.
+	 *
+	 * Current thread must have VM access.
+	 *
+	 * @param[in] currentThread the current J9VMThread
+	 * @param[in] targetObject the target Thread object
+	 *
+	 */
+	static VMINLINE void
+	threadInterruptImpl(J9VMThread *currentThread, j9object_t targetObject)
+	{
+		J9VMThread *targetThread = J9VMJAVALANGTHREAD_THREADREF(currentThread, targetObject);
+		J9JavaVM *vm = currentThread->javaVM;
+#if JAVA_SPEC_VERSION >= 19
+		/* Check if the mounted thread is suspended. */
+		bool isSuspended = false;
+		if (NULL != targetThread) {
+			isSuspended = isThreadSuspended(currentThread, targetThread->threadObject);
+		}
+#endif /* JAVA_SPEC_VERSION >= 19 */
+		if ((NULL != targetThread)
+		&& J9VMJAVALANGTHREAD_STARTED(currentThread, targetObject)
+#if JAVA_SPEC_VERSION >= 19
+		/* Thread.deadInterrupt is Thread.interrupted in OJDK's Thread implementation.
+		 * In JDK19+, OJDK's Thread implementation is used. If the mounted thread is
+		 * suspended, only set Thread.interrupted to TRUE and do not wake/interrupt
+		 * the thread.
+		 */
+		&& (!isSuspended)
+#endif /* JAVA_SPEC_VERSION >= 19 */
+		) {
+			void (*sidecarInterruptFunction)(J9VMThread*) = vm->sidecarInterruptFunction;
+			if (NULL != sidecarInterruptFunction) {
+				sidecarInterruptFunction(targetThread);
+			}
+			omrthread_interrupt(targetThread->osThread);
+		}
+#if JAVA_SPEC_VERSION > 11
+		else {
+			J9VMJAVALANGTHREAD_SET_DEADINTERRUPT(currentThread, targetObject, JNI_TRUE);
+		}
+#endif /* JAVA_SPEC_VERSION > 11 */
+	}
+
+	static VMINLINE UDATA
+	setVMState(J9VMThread *currentThread, UDATA newState)
+	{
+		UDATA oldState = currentThread->omrVMThread->vmState;
+		currentThread->omrVMThread->vmState = newState;
+		return oldState;
+	}
+
+#if JAVA_SPEC_VERSION >= 20
+	static VMINLINE void
+	virtualThreadHideFrames(J9VMThread *currentThread, jboolean hide)
+	{
+		if (hide) {
+			currentThread->privateFlags |= J9_PRIVATE_FLAGS_VIRTUAL_THREAD_HIDDEN_FRAMES;
+		} else {
+			currentThread->privateFlags &= ~(UDATA)J9_PRIVATE_FLAGS_VIRTUAL_THREAD_HIDDEN_FRAMES;
+		}
+	}
+
+	/**
+	 * Check if thread is in the suspended state.
+	 *
+	 * Current thread must have VM access.
+	 *
+	 * @param[in] currentThread the current J9VMThread
+	 * @param[in] thread the target Thread object
+	 * @return true if thread is suspended, false otherwise
+	 */
+	static VMINLINE bool
+	isThreadSuspended(J9VMThread *currentThread, j9object_t thread)
+	{
+		U_64 internalSuspendState = J9OBJECT_U64_LOAD(currentThread, thread, currentThread->javaVM->internalSuspendStateOffset);
+		return J9_ARE_ANY_BITS_SET(internalSuspendState, J9_VIRTUALTHREAD_INTERNAL_STATE_SUSPENDED);
+	}
+
+	/**
+	 * Get the linked carrier J9VMThread from vthread object.
+	 *
+	 * Current thread must have VM access.
+	 *
+	 * @param[in] currentThread the current J9VMThread
+	 * @param[in] thread the target vthread object
+	 * @return J9VMThread of the linked carrier thread, or NULL
+	 */
+	static VMINLINE J9VMThread *
+	getCarrierVMThread(J9VMThread *currentThread, j9object_t thread)
+	{
+		U_64 internalSuspendState = J9OBJECT_U64_LOAD(currentThread, thread, currentThread->javaVM->internalSuspendStateOffset);
+		return (J9VMThread *)(internalSuspendState & J9_VIRTUALTHREAD_INTERNAL_STATE_CARRIERID_MASK);
+	}
+#endif /* JAVA_SPEC_VERSION >= 20 */
+
+	/**
+	 * Get a static field object within a defining class.
+	 *
+	 * Current thread must have VM access.
+	 *
+	 * @param[in] currentThread the current J9VMThread
+	 * @param[in] definingClassName the defining class name
+	 * @param[in] fieldName the field name
+	 * @param[in] signature the field signature
+	 *
+	 * @return the field object if successs, otherwise NULL
+	 */
+	static VMINLINE j9object_t
+	getStaticFieldObject(J9VMThread *currentThread, const char *definingClassName, const char *fieldName, const char *signature)
+	{
+		J9JavaVM *vm = currentThread->javaVM;
+		j9object_t fieldObject = NULL;
+		J9InternalVMFunctions const *vmFuncs = vm->internalVMFunctions;
+		J9Class *definingClass = vmFuncs->peekClassHashTable(currentThread, vm->systemClassLoader, (U_8 *)definingClassName, strlen(definingClassName));
+		void *fieldAddress = vmFuncs->staticFieldAddress(currentThread, definingClass, (U_8*)fieldName, strlen(fieldName), (U_8*)signature, strlen(signature), NULL, NULL, 0, NULL);
+		if (NULL != fieldAddress) {
+			MM_ObjectAccessBarrierAPI objectAccessBarrier = MM_ObjectAccessBarrierAPI(currentThread);
+			fieldObject = objectAccessBarrier.inlineStaticReadObject(currentThread, definingClass, (j9object_t*)fieldAddress, FALSE);
+		}
+		return fieldObject;
+	}
+
+	/**
+	 * Find the offset of an instance field.
+	 *
+	 * @param[in] currentThread the current J9VMThread
+	 * @param[in] instanceType the instance class
+	 * @param[in] fieldName the field name
+	 * @param[in] fieldSig the field signature
+	 *
+	 * @return the offset
+	 */
+	static VMINLINE IDATA
+	findinstanceFieldOffset(J9VMThread *currentThread, J9Class *instanceType, const char *fieldName, const char *fieldSig)
+	{
+		J9JavaVM *vm = currentThread->javaVM;
+
+		IDATA offset = (UDATA)vm->internalVMFunctions->instanceFieldOffset(
+			currentThread, instanceType,
+			(U_8 *)fieldName, strlen(fieldName),
+			(U_8 *)fieldSig, strlen(fieldSig),
+			NULL, NULL, 0);
+
+		if (-1 != offset) {
+			offset += J9VMTHREAD_OBJECT_HEADER_SIZE(currentThread);
+		}
+
+		return offset;
+	}
+
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+	/**
+	 * Reset java.util.concurrent.ForkJoinPool.parallelism with a value supplied.
+	 *
+	 * Current thread must have VM access.
+	 *
+	 * @param[in] currentThread the current J9VMThread
+	 * @param[in] instanceObject a java.util.concurrent.ForkJoinPool instance object
+	 * @param[in] value the I_32 value to be set into the parallelism field
+	 *
+	 * @return true if the value has been set into the field within the instance object, false if not
+	 */
+	static VMINLINE bool
+	resetJUCForkJoinPoolParallelism(J9VMThread *currentThread, j9object_t instanceObject, I_32 value)
+	{
+		bool result = false;
+		J9JavaVM *vm = currentThread->javaVM;
+		IDATA fieldOffset = vm->checkpointState.jucForkJoinPoolParallelismOffset;
+
+		if (0 == fieldOffset) {
+#define JUC_FORKJOINPOOL "java/util/concurrent/ForkJoinPool"
+			J9Class *definingClass = vm->internalVMFunctions->peekClassHashTable(currentThread, vm->systemClassLoader, (U_8 *)JUC_FORKJOINPOOL, LITERAL_STRLEN(JUC_FORKJOINPOOL));
+#undef JUC_FORKJOINPOOL
+			if (NULL != definingClass) {
+				fieldOffset = findinstanceFieldOffset(currentThread, definingClass, "parallelism", "I");
+			} else {
+				fieldOffset = -1;
+			}
+		}
+		if (-1 != fieldOffset) {
+			MM_ObjectAccessBarrierAPI objectAccessBarrier = MM_ObjectAccessBarrierAPI(currentThread);
+			objectAccessBarrier.inlineMixedObjectStoreI32(currentThread, instanceObject, fieldOffset, value, false);
+			vm->checkpointState.jucForkJoinPoolParallelismOffset = fieldOffset;
+			result = true;
+		}
+		return result;
+	}
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
+
+	/**
+	 * Query and reset the current thread's interpreter re-entry flag.
+	 *
+	 * @param[in] currentThread the current J9VMThread
+	 *
+	 * @return true if re-entry requested, false if not
+	 */
+	static VMINLINE bool
+	interpreterReentryRequested(J9VMThread *currentThread)
+	{
+		bool rc = J9_ARE_ANY_BITS_SET(currentThread->privateFlags2, J9_PRIVATE_FLAGS2_REENTER_INTERPRETER);
+		currentThread->privateFlags2 &= ~(UDATA)J9_PRIVATE_FLAGS2_REENTER_INTERPRETER;
+		return rc;
+	}
+
+	/**
+	 * Request interpreter re-entry on a J9VMThread. The target thread must either be
+	 * the current thread or not have VM access (e.g. halted by exclusive VM access).
+	 *
+	 * @param[in] targetThread the target J9VMThread
+	 */
+	static VMINLINE void
+	requestInterpreterReentry(J9VMThread *targetThread)
+	{
+		targetThread->privateFlags2 |= J9_PRIVATE_FLAGS2_REENTER_INTERPRETER;
+		indicateAsyncMessagePending(targetThread);
+	}
 };
 
 #endif /* VMHELPERS_HPP_ */

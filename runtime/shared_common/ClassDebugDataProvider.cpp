@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2001
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 /**
@@ -65,7 +65,7 @@ ClassDebugDataProvider::initialize()
 }
 
 bool 
-ClassDebugDataProvider::Init(J9VMThread* currentThread, J9SharedCacheHeader * ca, AbstractMemoryPermission * permSetter, UDATA verboseFlags, U_64 * runtimeFlags, bool startupForStats)
+ClassDebugDataProvider::Init(J9VMThread* currentThread, J9SharedCacheHeader * ca, AbstractMemoryPermission * permSetter, UDATA verboseFlags, U_64 * runtimeFlags, UDATA osPageSize, bool startupForStats)
 {
 	bool retval = true;
 	Trc_SHR_ClassDebugData_Init_Entry(currentThread, ca);
@@ -76,6 +76,7 @@ ClassDebugDataProvider::Init(J9VMThread* currentThread, J9SharedCacheHeader * ca
 	_storedLineNumberTableBytes = 0;
 	_storedLocalVariableTableBytes = 0;
 	_runtimeFlags = runtimeFlags;
+	_osPageSize = osPageSize;
 	
 	/*Note:
 	 * No need to fire asserts because cache will be marked as corrupt.
@@ -273,7 +274,7 @@ ClassDebugDataProvider::allocateClassDebugData(J9VMThread* currentThread, U_16 c
 			goto done;
 		} else {
 			if (NULL != permSetter) {
-				UDATA pageSize = this->_theca->osPageSize;
+				UDATA pageSize = _osPageSize;
 
 				/* Mark the page as read-write where data is to be written */
 				permSetter->changePartialPageProtection(currentThread, pieces->lineNumberTable, false);
@@ -306,7 +307,7 @@ ClassDebugDataProvider::allocateClassDebugData(J9VMThread* currentThread, U_16 c
 			goto done;
 		} else {
 			if (NULL != permSetter) {
-				UDATA pageSize = this->_theca->osPageSize;
+				UDATA pageSize = _osPageSize;
 
 				/* Mark the page as read-write where data is to be written */
 				permSetter->changePartialPageProtection(currentThread, (void *)((UDATA)pieces->localVariableTable + sizes->localVariableTableSize), false);
@@ -658,7 +659,7 @@ ClassDebugDataProvider::setPermission(J9VMThread* currentThread, AbstractMemoryP
 			void * lvtProtectHigh,
 			bool readOnly)
 {
-	UDATA pageSize = this->_theca->osPageSize;
+	UDATA pageSize = _osPageSize;
 	PORT_ACCESS_FROM_JAVAVM(currentThread->javaVM);
 
 	Trc_SHR_ClassDebugData_setPermission_Enter(currentThread, permSetter,

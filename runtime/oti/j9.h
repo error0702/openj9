@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,9 +15,9 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
- * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
 #ifndef J9_H
@@ -28,12 +28,6 @@
 
 #include "j9cfg.h"
 #include "j9comp.h"
-#if defined(J9ZOS390)
-/* This is the contents of the old zvarmaps.h - delete this once the builder symbols are gone */
-#pragma variable( native2JITExitBCTable, NORENT )
-#pragma variable( returnFromJ2IBytecodes, NORENT )
-#endif /* J9ZOS390 */
-
 #include "j9port.h"
 #include "j9argscan.h"
 #include "omrthread.h"
@@ -62,6 +56,9 @@
 #include "j9thread.h"
 #include "j2sever.h"
 #include "j9relationship.h"
+
+/* Function used to map object fields during clone */
+typedef j9object_t (*MM_objectMapFunction)(struct J9VMThread *currentThread, j9object_t obj, void *objectMapData);
 
 typedef struct J9JNIRedirectionBlock {
 	struct J9JNIRedirectionBlock* next;
@@ -290,7 +287,7 @@ static const struct { \
 #define internalExitVMToJNI internalReleaseVMAccess
 #endif /* !J9VM_INTERP_ATOMIC_FREE_JNI */
 
-#define J9_IS_J9MODULE_UNNAMED(vm, module) ((NULL == module) || (module == vm->unamedModuleForSystemLoader))
+#define J9_IS_J9MODULE_UNNAMED(vm, module) ((NULL == module) || (module == vm->unnamedModuleForSystemLoader))
 
 #define J9_IS_J9MODULE_OPEN(module) (TRUE == module->isOpen)
 
@@ -326,31 +323,69 @@ static const struct { \
 #define J9_CLASS_DISALLOWS_LOCKING_FLAGS (J9ClassIsValueType | J9ClassIsValueBased)
 #define J9_CLASS_ALLOWS_LOCKING(clazz) J9_ARE_NO_BITS_SET((clazz)->classFlags, J9_CLASS_DISALLOWS_LOCKING_FLAGS)
 #define J9_IS_J9CLASS_VALUEBASED(clazz) J9_ARE_ALL_BITS_SET((clazz)->classFlags, J9ClassIsValueBased)
+/* Identity classes are not value types or interfaces. */
+#define J9_IS_J9CLASS_IDENTITY(clazz) J9_ARE_ALL_BITS_SET((clazz)->classFlags, J9ClassHasIdentity)
 #ifdef J9VM_OPT_VALHALLA_VALUE_TYPES
-#define J9CLASS_UNPADDED_INSTANCE_SIZE(clazz) J9_VALUETYPE_FLATTENED_SIZE(clazz)
 #define J9_IS_J9CLASS_VALUETYPE(clazz) J9_ARE_ALL_BITS_SET((clazz)->classFlags, J9ClassIsValueType)
-#define J9_IS_J9CLASS_FLATTENED(clazz) J9_ARE_ALL_BITS_SET((clazz)->classFlags, J9ClassIsFlattened)
-/**
- * Disable flattening of volatile field that is > 8 bytes for now, as the current implementation of copyObjectFields() will tear this field.
- * Flattening of atomic valueType that is > 8 bytes is also disabled. J9ClassIsFlattened is not set on such valueTypes.
- */
-#define J9_IS_FIELD_FLATTENED(fieldClazz, romFieldShape) \
-	(J9_IS_J9CLASS_FLATTENED(fieldClazz) && \
-	(J9_ARE_NO_BITS_SET((romFieldShape)->modifiers, J9AccVolatile) || (J9CLASS_UNPADDED_INSTANCE_SIZE(fieldClazz) <= sizeof(U_64))))
-#define J9_VALUETYPE_FLATTENED_SIZE(clazz) (J9CLASS_HAS_4BYTE_PREPADDING((clazz)) ? ((clazz)->totalInstanceSize - sizeof(U_32)) : (clazz)->totalInstanceSize)
-#define IS_REF_OR_VAL_SIGNATURE(firstChar) ('L' == (firstChar) || 'Q' == (firstChar))
-#define IS_QTYPE(firstChar) ('Q' == (firstChar))
 #else /* J9VM_OPT_VALHALLA_VALUE_TYPES */
-#define J9CLASS_UNPADDED_INSTANCE_SIZE(clazz) ((clazz)->totalInstanceSize)
 #define J9_IS_J9CLASS_VALUETYPE(clazz) FALSE
-#define J9_IS_J9CLASS_FLATTENED(clazz) FALSE
-#define J9_IS_FIELD_FLATTENED(fieldClazz, romFieldShape) FALSE
-#define J9_VALUETYPE_FLATTENED_SIZE(clazz)((UDATA) 0) /* It is not possible for this macro to be used since we always check J9_IS_J9CLASS_FLATTENED before ever using it. */
-#define IS_REF_OR_VAL_SIGNATURE(firstChar) ('L' == (firstChar))
-#define IS_QTYPE(firstChar) FALSE
 #endif /* J9VM_OPT_VALHALLA_VALUE_TYPES */
 
-#define J9_IS_STRING_DESCRIPTOR(str, strLen) (((strLen) > 2) && (IS_REF_OR_VAL_SIGNATURE(*(str))) && (';' == *((str) + (strLen) - 1)))
+#if defined(J9VM_OPT_VALHALLA_FLATTENABLE_VALUE_TYPES)
+#define J9CLASS_UNPADDED_INSTANCE_SIZE(clazz) J9_VALUETYPE_FLATTENED_SIZE(clazz)
+#define J9_IS_J9CLASS_ALLOW_DEFAULT_VALUE(clazz) J9_ARE_ALL_BITS_SET((clazz)->classFlags, J9ClassAllowsInitialDefaultValue)
+#define J9_IS_J9CLASS_PRIMITIVE_VALUETYPE(clazz) J9_ARE_ALL_BITS_SET((clazz)->classFlags, J9ClassIsPrimitiveValueType)
+/**
+ * This macro can only be used to determine vm flattening for a J9ArrayClass.
+ * For non-array classes use J9_IS_FIELD_FLATTENED.
+ */
+#define J9_IS_J9CLASS_FLATTENED(clazz) J9_ARE_ALL_BITS_SET((clazz)->classFlags, J9ClassIsFlattened)
+
+#define J9ROMFIELD_IS_NULL_RESTRICTED(romField)	J9_ARE_ALL_BITS_SET((romField)->modifiers, J9FieldFlagIsNullRestricted)
+/**
+ * Disable flattening of volatile field that is > 8 bytes for now, as the current implementation of copyObjectFields() will tear this field.
+ */
+#define J9_IS_FIELD_FLATTENED(fieldClazz, romFieldShape) \
+		(J9ROMFIELD_IS_NULL_RESTRICTED(romFieldShape) && \
+		J9_IS_J9CLASS_FLATTENED(fieldClazz) && \
+		(J9_ARE_NO_BITS_SET((romFieldShape)->modifiers, J9AccVolatile) || (J9CLASS_UNPADDED_INSTANCE_SIZE(fieldClazz) <= sizeof(U_64))))
+#define J9_VALUETYPE_FLATTENED_SIZE(clazz) (J9CLASS_HAS_4BYTE_PREPADDING((clazz)) ? ((clazz)->totalInstanceSize - sizeof(U_32)) : (clazz)->totalInstanceSize)
+#define J9_IS_J9ARRAYCLASS_NULL_RESTRICTED(clazz) J9_ARE_ALL_BITS_SET((clazz)->classFlags, J9ClassArrayIsNullRestricted)
+#define J9CLASS_GET_NULLRESTRICTED_ARRAY(clazz) (J9_IS_J9CLASS_VALUETYPE(clazz) ? (clazz)->nullRestrictedArrayClass : NULL)
+#define J9ROMFIELD_IS_STRICT(romClassOrClassfile, fieldModifiers) (J9_IS_CLASSFILE_OR_ROMCLASS_VALUETYPE_VERSION(romClassOrClassfile) && J9_ARE_ALL_BITS_SET(fieldModifiers, J9AccStrict))
+#else /* defined(J9VM_OPT_VALHALLA_FLATTENABLE_VALUE_TYPES) */
+#define J9CLASS_UNPADDED_INSTANCE_SIZE(clazz) ((clazz)->totalInstanceSize)
+#define J9_IS_J9CLASS_ALLOW_DEFAULT_VALUE(clazz) FALSE
+#define J9_IS_J9CLASS_PRIMITIVE_VALUETYPE(clazz) FALSE
+#define J9_IS_J9CLASS_FLATTENED(clazz) FALSE
+#define J9ROMFIELD_IS_NULL_RESTRICTED(romField) FALSE
+#define J9_IS_FIELD_FLATTENED(fieldClazz, romFieldShape) FALSE
+#define J9_VALUETYPE_FLATTENED_SIZE(clazz)((UDATA) 0) /* It is not possible for this macro to be used since we always check J9_IS_J9CLASS_FLATTENED before ever using it. */
+#define J9_IS_J9ARRAYCLASS_NULL_RESTRICTED(clazz) FALSE
+#define J9CLASS_GET_NULLRESTRICTED_ARRAY(clazz) NULL
+#define J9ROMFIELD_IS_STRICT(romClassOrClassfile, fieldModifiers) FALSE
+#endif /* defined(J9VM_OPT_VALHALLA_FLATTENABLE_VALUE_TYPES) */
+#define IS_CLASS_SIGNATURE(firstChar) ('L' == (firstChar))
+
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+#define J9_IS_CRIU_OR_CRAC_CHECKPOINT_ENABLED(vm) (J9_ARE_ANY_BITS_SET(vm->checkpointState.flags, J9VM_CRAC_IS_CHECKPOINT_ENABLED | J9VM_CRIU_IS_CHECKPOINT_ENABLED))
+#define J9_IS_SINGLE_THREAD_MODE(vm) (J9_ARE_ALL_BITS_SET((vm)->extendedRuntimeFlags2, J9_EXTENDED_RUNTIME2_CRIU_SINGLE_THREAD_MODE))
+#define J9_THROW_BLOCKING_EXCEPTION_IN_SINGLE_THREAD_MODE(vm) (J9_ARE_ALL_BITS_SET((vm)->extendedRuntimeFlags2, J9_EXTENDED_RUNTIME2_CRIU_SINGLE_THROW_BLOCKING_EXCEPTIONS))
+#define J9_IS_CRIU_RESTORED(vm) (0 != vm->checkpointState.checkpointRestoreTimeDelta)
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
+
+#define J9_IS_HIDDEN_METHOD(method) \
+	((NULL != (method)) && (J9ROMCLASS_IS_ANON_OR_HIDDEN(J9_CLASS_FROM_METHOD((method))->romClass) || J9_ARE_ANY_BITS_SET(J9_ROM_METHOD_FROM_RAM_METHOD((method))->modifiers, J9AccMethodFrameIteratorSkip)))
+
+#if JAVA_SPEC_VERSION >= 19
+#define IS_JAVA_LANG_VIRTUALTHREAD(vmThread, object) \
+	isSameOrSuperClassOf(J9VMJAVALANGBASEVIRTUALTHREAD_OR_NULL((vmThread)->javaVM), J9OBJECT_CLAZZ(vmThread, object))
+#endif /* JAVA_SPEC_VERSION >= 19 */
+
+#define IS_JAVA_LANG_THREAD(vmThread, object) \
+	isSameOrSuperClassOf(J9VMJAVALANGTHREAD_OR_NULL((vmThread)->javaVM), J9OBJECT_CLAZZ(vmThread, object))
+
+#define J9VM_VIRTUALTHREAD_ROOT_NODE_STATE ((I_32)0xBAADF00D)
 
 #if defined(OPENJ9_BUILD)
 #define J9_SHARED_CACHE_DEFAULT_BOOT_SHARING(vm) TRUE
@@ -370,6 +405,8 @@ typedef struct {
 	char data[LITERAL_STRLEN(J9_UNMODIFIABLE_CLASS_ANNOTATION)];
 } J9_UNMODIFIABLE_CLASS_ANNOTATION_DATA;
 
+#define J9_EVENT_IS_HOOKED_OR_RESERVED(interface, event) (J9_EVENT_IS_HOOKED(interface, event) || J9_EVENT_IS_RESERVED(interface, event))
+
 #if defined(J9VM_ZOS_3164_INTEROPERABILITY)
 #define J9_IS_31BIT_INTEROP_TARGET(handle) J9_ARE_ALL_BITS_SET((UDATA)(handle), OMRPORT_SL_ZOS_31BIT_TARGET_HIGHTAG)
 #endif /* defined(J9VM_ZOS_3164_INTEROPERABILITY) */
@@ -388,5 +425,18 @@ static_assert((LITERAL_STRLEN(J9_UNMODIFIABLE_CLASS_ANNOTATION) < (size_t)'/'), 
 #endif /* !TYPESTUBS_H */
 #endif /* __cplusplus */
 #endif /* 0 */
+
+#define J9VM_NUM_OF_ENTRIES_IN_CLASS_JNIID_TABLE(romclass) ((romclass)->romMethodCount + (romclass)->romFieldCount)
+
+#define J9VM_SHOULD_CLEAR_JNIIDS_FOR_ASGCT(vm, classLoader) (J9_ARE_NO_BITS_SET((vm)->extendedRuntimeFlags2, J9_EXTENDED_RUNTIME2_NEVER_KEEP_JNI_IDS) \
+		&& ((classLoader)->asyncGetCallTraceUsed || J9_ARE_ANY_BITS_SET((vm)->extendedRuntimeFlags2, J9_EXTENDED_RUNTIME2_ALWAYS_KEEP_JNI_IDS)))
+
+#define DIR_LIB_STR "lib"
+
+#if defined(J9VM_OPT_JFR)
+
+#define DEFAULT_JFR_FILE_NAME "defaultJ9recording.jfr"
+
+#endif /* defined(J9VM_OPT_JFR) */
 
 #endif /* J9_H */
